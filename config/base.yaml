@@ -1,0 +1,17 @@
+# Golden AI - Configuração Base
+# Caminhos e configurações gerais do sistema
+
+root: C:\GoldenAI
+projects_dir: C:\GoldenAI\projetos
+backups_dir: C:\GoldenAI\backups
+logs_dir: C:\GoldenAI\logs
+experiments_dir: C:\GoldenAI\experiments
+sandbox_dir: C:\GoldenAI\sandbox
+data_dir: C:\GoldenAI\data
+
+# Funcionalidades
+media_enabled: true
+internet_enabled: true
+pdf_editing_enabled: true
+code_analysis_enabled: true
+file_browser_enabled: true

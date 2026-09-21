@@ -1,0 +1,649 @@
+[
+ {
+  "model": "nemotron-3.5-lightning_free",
+  "results": [
+   {
+    "id": "R01",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R02",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R03",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R04",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R05",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R06",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R07",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R08",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R09",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R10",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R11",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R12",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R13",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R14",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R15",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R16A",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R16B",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R16C",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R17",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R18",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R19",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R20",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R21",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R22",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R23",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R24",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     },
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R25",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R26",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R27",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R28",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R29",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   },
+   {
+    "id": "R30",
+    "pass": false,
+    "kind": "error",
+    "latency": 0.0,
+    "consistent": true,
+    "detail": "HTTP Error 429: Too Many Requests",
+    "reps": [
+     {
+      "ok": false,
+      "kind": "error",
+      "latency": 0.0,
+      "detail": "HTTP Error 429: Too Many Requests",
+      "raw_head": ""
+     }
+    ]
+   }
+  ]
+ }
+]

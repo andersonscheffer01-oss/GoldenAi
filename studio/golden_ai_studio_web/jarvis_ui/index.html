@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="src/fonts.css">
+<link rel="stylesheet" href="src/styles.css">
+<title>J.A.R.V.I.S. — Interface de Comando</title>
+</head>
+<body>
+
+<div id="app" data-theme="arc" data-state="idle">
+
+  <canvas id="hudCanvas"></canvas>
+  <div id="gridFloor" aria-hidden="true"></div>
+  <div id="scanlines" aria-hidden="true"></div>
+  <div id="vignette" aria-hidden="true"></div>
+  <div id="cornerTL" class="corner"></div>
+  <div id="cornerTR" class="corner"></div>
+  <div id="cornerBL" class="corner"></div>
+  <div id="cornerBR" class="corner"></div>
+
+  <!-- ===================== BARRA SUPERIOR ===================== -->
+  <header id="topBar">
+    <div class="brand">
+      <div class="logoWrap">
+        <svg viewBox="0 0 100 100" id="logo" aria-hidden="true">
+          <circle cx="50" cy="50" r="46" class="lg-ring"/>
+          <circle cx="50" cy="50" r="37" class="lg-ring lg-ring2"/>
+          <circle cx="50" cy="50" r="17" class="lg-core"/>
+          <path d="M50 33 L65 59 L35 59 Z" class="lg-tri"/>
+        </svg>
+      </div>
+      <div class="brandText">
+        <span id="sysName">J.A.R.V.I.S.</span>
+        <span id="sysSub">Sistema de Operações Pessoais</span>
+      </div>
+    </div>
+
+    <div class="topStats">
+      <div class="stat"><label>HORA LOCAL</label><span id="clockEl">--:--:--</span></div>
+      <div class="stat hideSm"><label>DATA</label><span id="dateEl">---</span></div>
+      <div class="stat hideSm"><label>SESSÃO</label><span id="uptimeEl">00:00</span></div>
+    </div>
+
+    <div class="topActions">
+      <button id="statusPill" class="pill" title="Estado da conexão com o backend">
+        <i class="dot"></i><span id="statusText">DEMO</span>
+      </button>
+      <button id="voiceToggleBtn" class="iconBtn" title="Ativar voz (V)">
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+      <button id="themeBtn" class="iconBtn" title="Trocar interface (T)">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="18" cy="18" r="2.4"/></svg>
+      </button>
+      <button id="settingsBtn" class="iconBtn" title="Configurações">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1"/></svg>
+      </button>
+      <button id="fullscreenBtn" class="iconBtn" title="Tela cheia">
+        <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===================== PAINEL ESQUERDO ===================== -->
+  <aside id="leftPanel" class="panel">
+    <div class="panelHead"><span>MÓDULOS</span><i class="tick"></i></div>
+    <div id="moduleList" class="moduleList"></div>
+    <div class="panelHead mt"><span>ACESSO RÁPIDO</span><i class="tick"></i></div>
+    <div id="quickActions" class="quickActions"></div>
+    <div class="panelHead mt"><span>ENTRADA DE VOZ</span><i class="tick"></i></div>
+    <div id="voiceCard" class="voiceCard">
+      <div class="vcLvl"><i id="vcBar"></i></div>
+      <div class="vcRow"><span>ESTADO</span><b id="vcState">PARADO</b></div>
+      <div class="vcRow"><span>PALAVRA-CHAVE</span><b id="vcWake">jarvis</b></div>
+      <div class="vcLast"><span>ÚLTIMA FRASE</span><p id="vcLast">—</p></div>
+    </div>
+  </aside>
+
+  <!-- ===================== PALCO CENTRAL ===================== -->
+  <main id="stage">
+    <div id="orbWrap">
+      <div id="orbHalo"></div>
+      <div id="stateLabel">
+        <span id="stateText">EM ESPERA</span>
+        <small id="stateHint">Diga "Jarvis" ou use o microfone</small>
+      </div>
+    </div>
+
+    <section id="conversation" aria-live="polite"></section>
+
+    <div id="thinkingBar" hidden>
+      <span class="tl"></span><span class="tl"></span><span class="tl"></span>
+      <span id="thinkingText">processando</span>
+    </div>
+  </main>
+
+  <!-- ===================== PAINEL DIREITO ===================== -->
+  <aside id="rightPanel" class="panel">
+    <div class="panelHead"><span>TELEMETRIA</span><i class="tick"></i></div>
+    <div id="telemetry" class="telemetry"></div>
+    <div class="panelHead mt"><span>LOG DE ATIVIDADE</span><i class="tick"></i></div>
+    <div id="activityLog" class="activityLog"></div>
+  </aside>
+
+  <!-- ===================== BARRA INFERIOR ===================== -->
+  <footer id="bottomBar">
+    <div id="quickChips"></div>
+    <form id="inputRow" autocomplete="off">
+      <button type="button" id="micBtn" class="roundBtn" title="Falar (espaço)">
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+      <input id="cmdInput" placeholder="Fale ou digite um comando, senhor..." autocomplete="off" spellcheck="false">
+      <button type="submit" id="sendBtn" class="roundBtn send" title="Enviar">
+        <svg viewBox="0 0 24 24"><path d="M4 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+    </form>
+  </footer>
+
+  <!-- ============ GOLDEN JARVIS — painel padrão (tema "golden") ============ -->
+  <!-- Os painéis em volta do orbe central seguem a interface de referência:
+       à esquerda o menu de seções; à direita SISTEMA ONLINE, AGENTES ATIVOS,
+       MEMÓRIA DO SISTEMA, PESQUISA E INTERNET e PROJETOS RECENTES; embaixo
+       TAREFAS EM ANDAMENTO, COMANDO MANUAL e AÇÕES RÁPIDAS. -->
+  <div id="golden" aria-hidden="true">
+
+    <header id="gTop">
+      <div class="gBrand">
+        <div class="gLogo">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <circle class="gl-o" cx="50" cy="50" r="45"/>
+            <circle class="gl-i" cx="50" cy="50" r="29"/>
+            <path class="gl-c" d="M50 24 L72 66 L28 66 Z"/>
+          </svg>
+        </div>
+        <div class="gBrandText">
+          <b id="gName">GOLDEN JARVIS</b>
+          <span id="gSub">INTELIGÊNCIA PARA UM MUNDO MAIOR</span>
+        </div>
+      </div>
+
+      <nav id="gNav" role="tablist">
+        <button class="gTab on" data-view="conversa">CONVERSA</button>
+        <button class="gTab" data-view="controle">CONTROLE</button>
+        <button class="gTab" data-view="projetos">PROJETOS</button>
+        <button class="gTab" data-view="analise">ANÁLISE</button>
+        <button class="gTab" data-view="automacao">AUTOMAÇÃO</button>
+      </nav>
+
+      <div class="gTagline" id="gTagline">MAIS QUE IA. UM PARCEIRO DE EVOLUÇÃO.</div>
+    </header>
+
+    <aside id="gLeft" class="gCol">
+      <nav id="gSide" class="gCard gSideNav" aria-label="Seções do painel"></nav>
+
+      <section class="gCard">
+        <h4><span>SISTEMA</span><i class="gSrc" id="gSrc">DISPOSITIVO</i></h4>
+        <div id="gGauges" class="gGauges"></div>
+      </section>
+
+      <section class="gCard gClockCard">
+        <b id="gTime">--:--</b>
+        <span id="gDay">—</span>
+        <canvas id="gGlobe" width="240" height="150" aria-hidden="true"></canvas>
+        <p>IDEIAS EXECUTAM REALIDADES.<br>DISCIPLINA HOJE. LIBERDADE SEMPRE.</p>
+        <i class="gVerTag" id="gVerL">GOLDEN JARVIS v1.0.0</i>
+      </section>
+    </aside>
+
+    <section id="gCenter">
+      <div class="gWords" id="gWordsL"></div>
+      <div class="gWords gWordsR" id="gWordsR"></div>
+      <div id="gPill" data-on="0"><i></i><span id="gPillText">EM ESPERA</span></div>
+      <div id="gCaption">Transformando ideias em realidade.</div>
+      <canvas id="gWave" height="64" aria-hidden="true"></canvas>
+    </section>
+
+    <aside id="gRight" class="gCol">
+      <button id="gShadow" class="gToggle" data-on="0" title="Modo sombra: esconde a interface e silencia a voz">
+        <span>MODO SOMBRA</span><i></i>
+      </button>
+
+      <section class="gCard gOnline">
+        <h4><span>SISTEMA ONLINE</span><i class="gSysDot" id="gSysDot"></i></h4>
+        <div class="gOnLine"><b id="gConn">LOCAL</b></div>
+        <span id="gConnSub">Todos os sistemas operacionais</span>
+      </section>
+
+      <section class="gCard">
+        <h4><span>AGENTES ATIVOS</span><i class="gCount" id="gAgentCount">0/0</i></h4>
+        <div id="gAgents" class="gAgents"></div>
+      </section>
+
+      <section class="gCard">
+        <h4><span>MEMÓRIA DO SISTEMA</span><i class="gCount" id="gMemVal">—</i></h4>
+        <div class="gBar gMemBar"><i id="gMemFill"></i></div>
+        <p class="gNote" id="gMemNote">Sincronizando leituras…</p>
+      </section>
+
+      <section class="gCard">
+        <h4><span>PESQUISA E INTERNET</span><i class="gSrc" id="gNetStat">—</i></h4>
+        <canvas id="gNetWave" height="38" aria-hidden="true"></canvas>
+        <canvas id="gNetGlobe" width="120" height="64" aria-hidden="true"></canvas>
+        <div id="gNetRows" class="gNetRows"></div>
+        <form id="gNetForm" class="gNetForm" autocomplete="off">
+          <input id="gNetInput" placeholder="Pesquisar na internet...">
+          <button class="gMini" type="submit">IR</button>
+        </form>
+      </section>
+
+      <section class="gCard">
+        <h4><span>PROJETOS RECENTES</span><button class="gMini" id="gRecentAll" type="button">VER TODOS</button></h4>
+        <div id="gRecent" class="gRecent"></div>
+      </section>
+
+      <section class="gCard">
+        <h4><span>MISSÃO ATUAL</span><i class="gLive"></i></h4>
+        <p id="gTask" class="gTask">Aguardando instruções</p>
+        <label class="gSubLabel" for="gObjective">OBJETIVO</label>
+        <p id="gObjective" class="gTask gObj" title="Clique para editar o objetivo">—</p>
+      </section>
+    </aside>
+
+    <section id="gViews">
+      <div class="gView on" data-view="conversa">
+        <div class="gBand">
+          <section class="gCard gTaskPanel">
+            <h4><span>TAREFAS EM ANDAMENTO</span><i class="gCount" id="gTaskCount">0</i></h4>
+            <div id="gTasks" class="gTasks"></div>
+          </section>
+
+          <div class="gBandMid">
+            <section class="gCard gChatCard">
+              <h4><span>CONVERSA ATUAL</span><button id="gClearBtn" class="gMini" type="button">LIMPAR HISTÓRICO</button></h4>
+              <div id="gChatSlot" class="gChatSlot"></div>
+            </section>
+
+            <section class="gCard gCmdCard">
+              <h4><span>COMANDO MANUAL</span><i class="gSrc" id="gCmdMode">AUTO</i></h4>
+              <div id="gInputSlot" class="gInputSlot"></div>
+              <div class="gCmdBar">
+                <button id="gAttachBtn" class="gMini" type="button" title="Anexar um arquivo ao próximo comando">+ ANEXAR</button>
+                <span id="gAttachChip" class="gChip" hidden></span>
+                <label class="gSel" title="Quem responde este comando">AGENTE
+                  <select id="gAgentSel">
+                    <option value="auto">Automático</option>
+                    <option value="local">Núcleo local</option>
+                    <option value="backend">Backend (PC)</option>
+                    <option value="ia">IA generativa</option>
+                  </select>
+                </label>
+                <button id="gAdvBtn" class="gMini" type="button" data-on="0" title="Envia o comando cru ao backend, sem atalhos locais">MODO AVANÇADO</button>
+                <input type="file" id="gFile" hidden>
+              </div>
+            </section>
+          </div>
+
+          <section class="gCard gQuickPanel">
+            <h4><span>AÇÕES RÁPIDAS</span></h4>
+            <div id="gQuick" class="gQuick"></div>
+          </section>
+        </div>
+
+        <div id="gPills" class="gPills"></div>
+      </div>
+
+      <div class="gView" data-view="pesquisa" hidden>
+        <div class="gViewGrid">
+          <section class="gCard">
+            <h4><span>PESQUISA NA INTERNET</span><i class="gSrc" id="gSearchSrc">WEB</i></h4>
+            <form id="gSearchForm" class="gSearchForm" autocomplete="off">
+              <input id="gSearchInput" placeholder="O que você quer descobrir?">
+              <button class="gBtn" type="submit">BUSCAR</button>
+            </form>
+            <div id="gSearchSteps" class="gSteps"></div>
+            <p class="gHint">Fontes reais consultadas na hora: <b>notícias</b> (Bing News), <b>enciclopédia</b> (Wikipédia), <b>resposta direta</b> (DuckDuckGo) e <b>comunidade técnica</b> (Hacker News). Nada aqui é simulado — se uma fonte não responder, ela aparece no passo a passo.</p>
+            <div id="gSearchResults" class="gResults"></div>
+          </section>
+          <section class="gCard">
+            <h4><span>LEITURA DO NÚCLEO</span><i class="gSrc" id="gSumSrc">IA</i></h4>
+            <div id="gSearchSummary" class="gSum"></div>
+            <button id="gSumBtn" class="gBtn" type="button" hidden>RESUMIR RESULTADOS COM IA</button>
+            <h4 class="gH4b"><span>HISTÓRICO</span><button id="gHistClear" class="gMini" type="button">LIMPAR</button></h4>
+            <div id="gSearchHist" class="gHist"></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="gView" data-view="projetos" hidden>
+        <div class="gViewGrid">
+          <section class="gCard">
+            <h4><span>PROJETOS E TAREFAS</span><i class="gCount" id="gProjCount">0</i></h4>
+            <div id="gProjects" class="gList"></div>
+          </section>
+          <section class="gCard">
+            <h4><span>NOVA ANOTAÇÃO</span></h4>
+            <form id="gProjectForm" autocomplete="off">
+              <input id="gProjectInput" placeholder="Descreva o projeto ou a tarefa...">
+              <button type="submit" class="gBtn">ADICIONAR</button>
+            </form>
+            <p class="gHint">Cada item vira uma anotação persistente no seu navegador e pode ser consultado por voz: «minhas notas». Clique em uma tarefa para marcá-la como concluída.</p>
+            <button id="gProjectsClear" class="gMini danger" type="button">LIMPAR TUDO</button>
+          </section>
+        </div>
+      </div>
+
+      <div class="gView" data-view="analise" hidden>
+        <div class="gViewGrid">
+          <section class="gCard"><h4><span>TELEMETRIA</span></h4><div id="gTelemetrySlot" class="gSlot"></div></section>
+          <section class="gCard">
+            <h4><span>DIAGNÓSTICO</span></h4>
+            <div id="gDiag" class="gList"></div>
+            <button id="gReportBtn" class="gBtn" type="button">GERAR RELATÓRIO COMPLETO</button>
+          </section>
+          <section class="gCard gSpan2">
+            <h4><span>MERCADO</span><i class="gSrc" id="gMktAt">SEM DADOS</i></h4>
+            <div id="gMarket" class="gMarket"></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="gView" data-view="automacao" hidden>
+        <div class="gViewGrid">
+          <section class="gCard"><h4><span>AÇÕES RÁPIDAS</span></h4><div id="gQuickSlot" class="gSlot"></div></section>
+          <section class="gCard"><h4><span>LOG DE ATIVIDADE</span></h4><div id="gLogSlot" class="gSlot"></div></section>
+        </div>
+      </div>
+
+      <div class="gView" data-view="controle" hidden>
+        <div class="gViewGrid">
+          <section class="gCard">
+            <h4><span>CONTROLE DO SISTEMA</span><i class="gSrc" id="gCtrlConn">LOCAL</i></h4>
+            <div id="gControls" class="gControls"></div>
+          </section>
+          <section class="gCard"><h4><span>MÓDULOS</span></h4><div id="gModulesSlot" class="gSlot"></div></section>
+          <section class="gCard gSpan2">
+            <h4><span>NÚCLEO DE IA</span><i class="gSrc" id="gFlowState">EM ESPERA</i></h4>
+            <div id="gModels" class="gModels"></div>
+            <canvas id="gFlow" height="46" aria-hidden="true"></canvas>
+            <div class="gFlowSteps"><span>Voz</span><span>Análise</span><span>Resposta</span></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="gView" data-view="memoria" hidden>
+        <div class="gViewGrid">
+          <section class="gCard">
+            <h4><span>MEMÓRIA PERSISTENTE</span><i class="gCount" id="gMemCount">0</i></h4>
+            <div id="gMemStats" class="gStats"></div>
+            <div class="gCmdBar">
+              <button id="gMemExport" class="gBtn sm" type="button">EXPORTAR JSON</button>
+              <button id="gMemClear" class="gMini danger" type="button">LIMPAR MEMÓRIA</button>
+            </div>
+            <p class="gHint">Tudo fica salvo apenas neste navegador (localStorage). O arquivo exportado leva anotações, buscas, preferências e objetivo — o token do backend fica de fora.</p>
+          </section>
+          <section class="gCard">
+            <h4><span>ANOTAÇÕES SALVAS</span></h4>
+            <div id="gMemNotes" class="gList"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <footer id="gFoot">
+      <span>PESSOAS • INTELIGÊNCIA • AÇÃO • UM MUNDO MELHOR</span>
+      <span id="gVer">GOLDEN JARVIS v1.0.0</span>
+    </footer>
+  </div>
+
+  <div id="toastCtn"></div>
+
+  <!-- ===================== BOOT ===================== -->
+  <div id="bootOverlay">
+    <div class="bootInner">
+      <div class="bootLogo">
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46"/><circle cx="50" cy="50" r="37"/><path d="M50 33 L65 59 L35 59 Z"/></svg>
+      </div>
+      <div id="bootTitle">J.A.R.V.I.S.</div>
+      <div id="bootLines"></div>
+      <button id="bootSkipBtn">PULAR >></button>
+    </div>
+  </div>
+
+  <!-- ===================== CONFIGURAÇÕES ===================== -->
+  <div id="settingsModal" hidden>
+    <div class="modalCard">
+      <div class="modalHead">
+        <span>CONFIGURAÇÕES DO SISTEMA</span>
+        <button id="closeSettingsBtn" class="iconBtn">✕</button>
+      </div>
+      <div class="modalBody">
+
+        <div class="fieldSection">
+          <h4>INTERFACE</h4>
+          <div id="themeGrid" class="themeGrid"></div>
+        </div>
+
+        <div class="fieldSection">
+          <h4>VOZ</h4>
+          <label class="switchRow"><input type="checkbox" id="speakToggle" checked><span>Falar respostas em voz alta</span></label>
+          <label class="switchRow"><input type="checkbox" id="wakeToggle"><span>Escuta contínua pela palavra-chave</span></label>
+          <div class="row2">
+            <label class="field"><span>Voz</span><select id="voiceSelect"></select></label>
+            <label class="field"><span>Palavra-chave</span><input id="wakeInput" value="jarvis"></label>
+          </div>
+          <div class="row2">
+            <label class="field"><span>Velocidade <b id="rateVal">1.02</b></span><input type="range" id="rateRange" min="0.6" max="1.6" step="0.02" value="1.02"></label>
+            <label class="field"><span>Tom <b id="pitchVal">0.82</b></span><input type="range" id="pitchRange" min="0.4" max="1.6" step="0.02" value="0.82"></label>
+          </div>
+          <button id="testVoiceBtn" class="btn">TESTAR VOZ</button>
+        </div>
+
+        <div class="fieldSection">
+          <h4>BACKEND (PC / CELULAR)</h4>
+          <p class="hint">A interface envia os comandos para este endereço. Rode o servidor
+            <code>src/backend/jarvis_server.py</code> no seu computador e aponte aqui o IP da máquina
+            (ex: <code>http://192.168.0.10:8765</code>) — assim o celular também comanda o PC.</p>
+          <div class="row2">
+            <label class="field"><span>URL do backend</span><input id="backendInput" placeholder="http://localhost:8765"></label>
+            <label class="field"><span>Token (opcional)</span><input id="tokenInput" placeholder="chave secreta"></label>
+          </div>
+          <div class="row2">
+            <label class="switchRow"><input type="checkbox" id="autoConnectToggle" checked><span>Conectar automaticamente</span></label>
+            <button id="testBackendBtn" class="btn">TESTAR CONEXÃO</button>
+          </div>
+          <div id="backendResult" class="backendResult"></div>
+        </div>
+
+        <div class="fieldSection">
+          <h4>CAPACIDADES NATIVAS DESTA INTERFACE</h4>
+          <div id="capList" class="capList"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ordem obrigatória: configuração → adaptador → aplicação -->
+<script src="src/jarvis-config.js"></script>
+<script src="src/jarvis-standalone.js"></script>
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

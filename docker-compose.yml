@@ -1,0 +1,40 @@
+# Golden AI - Docker Compose
+# Deploy completo com Ollama + Golden AI
+
+services:
+  # Ollama (modelos de IA locais)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: golden-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Golden AI
+  golden-ai:
+    build: .
+    container_name: golden-ai
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      - ./projetos:/app/projetos
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

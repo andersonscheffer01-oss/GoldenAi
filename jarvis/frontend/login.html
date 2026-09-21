@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101418">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <title>Entrar - Golden Jarvis</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png">
+  <link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <div class="login-logo">GJ</div>
+    <h1>Golden Jarvis</h1>
+    <p>Seu assistente pessoal seguro, preparado para crescer por etapas.</p>
+    <form id="loginForm" class="login-form">
+      <label>Email
+        <input id="email" type="email" autocomplete="email" required>
+      </label>
+      <label>Senha
+        <input id="senha" type="password" autocomplete="current-password" required>
+      </label>
+      <button id="loginButton" type="submit">Entrar</button>
+      <div id="loginError" class="error-text"></div>
+    </form>
+    <div class="install-note">Para instalar no iPhone: abra no Safari, toque em Compartilhar e escolha Adicionar a Tela de Inicio.</div>
+  </main>
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/auth.js"></script>
+  <script>
+    JarvisAuth.redirectIfLogged();
+    document.getElementById('loginForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = document.getElementById('loginButton');
+      const error = document.getElementById('loginError');
+      button.disabled = true;
+      button.textContent = 'Entrando...';
+      error.textContent = '';
+      try {
+        await JarvisAuth.login(document.getElementById('email').value, document.getElementById('senha').value);
+        location.href = '/app';
+      } catch (err) {
+        error.textContent = err.message || 'Nao foi possivel entrar.';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Entrar';
+      }
+    });
+  </script>
+</body>
+</html>
+

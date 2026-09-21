@@ -1,0 +1,19 @@
+{
+  "attachment_id": "97ab6ffc-d219-4b32-b392-25093dffab83",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-13T17:05:34.825392+00:00",
+  "source_type": "file",
+  "original_name": "shot.png",
+  "mime_type": "image/png",
+  "extension": ".png",
+  "size_bytes": 107,
+  "sha256": "5E3A0D5C4153EE6C1FE0075A0C8924B4E8D390767090CEB642658A9CA6E8CFB6",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\97ab6ffc-d219-4b32-b392-25093dffab83_shot.png",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "image",
+    "status": "STORED",
+    "vision": "VISION_NOT_AVAILABLE"
+  }
+}

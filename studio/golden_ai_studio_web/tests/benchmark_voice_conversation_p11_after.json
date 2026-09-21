@@ -1,0 +1,29 @@
+{
+  "sample_size_per_profile": 8,
+  "profiles": [
+    {
+      "profile": "GENERAL_CURRENT",
+      "model": "qwen/qwen3.8-27b",
+      "successes": 5,
+      "failures": 3,
+      "ttft_p50_ms": 288,
+      "ttft_p95_ms": 309,
+      "total_p50_ms": 705,
+      "total_p95_ms": 725,
+      "naturalness_avg": 3,
+      "avg_chars": 676
+    },
+    {
+      "profile": "VOICE_FAST",
+      "model": "qwen/qwen3.8-27b",
+      "successes": 3,
+      "failures": 5,
+      "ttft_p50_ms": 410,
+      "ttft_p95_ms": 410,
+      "total_p50_ms": 512,
+      "total_p95_ms": 512,
+      "naturalness_avg": 8,
+      "avg_chars": 169
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "attachment_id": "bfe119a8-771d-4591-b5cb-ef6e91594698",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-14T00:00:43.527632+00:00",
+  "source_type": "file",
+  "original_name": "strategy.py",
+  "mime_type": "text/x-python",
+  "extension": ".py",
+  "size_bytes": 28,
+  "sha256": "DD916298D5969A23C9C212300946A764EDFF03CBF958B8768252D4F2DF9165C4",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\bfe119a8-771d-4591-b5cb-ef6e91594698_strategy.py",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 2,
+    "preview_chars": 26
+  }
+}

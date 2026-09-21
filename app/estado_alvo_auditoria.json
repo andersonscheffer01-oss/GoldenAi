@@ -1,0 +1,134 @@
+{
+  "arquivo_alvo": {
+    "ok": true,
+    "tipo": "PROJETO_TESTE",
+    "caminho": "C:\\GoldenAI\\projetos\\Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5",
+    "nome": "Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5",
+    "origem_resolucao": "PAINEL_NOME_PROJETOS"
+  },
+  "ultimo_veredito": {
+    "arquivo": "C:\\GoldenAI\\projetos\\Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5",
+    "nome": "Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5",
+    "tipo": "PROJETO_TESTE",
+    "autorizado": true,
+    "quantidade": 5,
+    "veredito": "VEREDITO FINAL\nARQUIVO: C:\\GoldenAI\\projetos\\Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5\nSHA256 CODIGO: 9216c5053f9d19f4c99d28c73ec91e4d722c5b86e4e637a23c3d5c33786d06b7\nMODO: AUDITORIA DETERMINISTICA SEMANTICA V1.9.6.1\n\nCONFIRMADOS PARA CORRECAO\n- C1 | Funcao AbrirCompra | Linhas 604-620 | Stop loss pode ser maior ou igual ao preço de ask\n- C2 | Funcao AbrirVenda | Linhas 623-636 | Stop loss pode ser menor ou igual ao preço de bid\n- C4 | Funcao GerenciarParcial | Linhas 697-715 | Verificação incorreta de parcial já executada\n- C5 | Funcao GerenciarTrailing | Linhas 766-807 | Trailing pode mover SL para além do preço de entrada\n- C6 | Funcao LucroFechadoHoje | Linhas 295-344 | Não verifica se o ticket é válido antes de acessar dados\n\nREJEITADOS / NAO CONFIRMADOS\n- C3 | Funcao CalcularLote | A=NAO_CONFIRMADO | B=NAO_CONFIRMADO\n- C7 | Funcao SinalCompra | A=NAO_CONFIRMADO | B=NAO_CONFIRMADO\n- C8 | Funcao SinalVenda | A=NAO_CONFIRMADO | B=NAO_CONFIRMADO\n\nREPETIBILIDADE SEMANTICA/ESTRUTURAL: APROVADA\nDOIS VALIDADORES: CONCLUIDOS\nIMUTABILIDADE DO ARQUIVO: APROVADA\nAUTOCORRECAO AUTORIZADA: SIM\nQUANTIDADE DE BUGS CONFIRMADOS: 5\nASSINATURA FINAL: 61db0d35e4126d40c3c42991041a24bf2aa27eef243c2f144cdec5d8552254f3",
+    "deterministico_aprovado": true,
+    "sha256_codigo": "9216c5053f9d19f4c99d28c73ec91e4d722c5b86e4e637a23c3d5c33786d06b7",
+    "assinatura_final": "61db0d35e4126d40c3c42991041a24bf2aa27eef243c2f144cdec5d8552254f3",
+    "confirmados": [
+      {
+        "id": "C1",
+        "funcao": "AbrirCompra",
+        "linhas": "604-620",
+        "categoria": "PRECO_STOP",
+        "simbolo_chave": "sl",
+        "problema": "Stop loss pode ser maior ou igual ao preço de ask",
+        "problema_b": "Stop loss pode ser maior ou igual ao preço de ask",
+        "evidencia": "O código não verifica se o SL calculado é menor que o preço de ask, o que pode resultar em ordens inválidas.",
+        "evidencia_b": "O código não verifica se o SL calculado é menor que o preço de ask, o que pode resultar em ordens inválidas.",
+        "validador_a": "A função AbrirCompra calcula o stop loss (sl) como ask - distanciaStop, mas não verifica se esse valor é menor que o ask. Isso pode resultar em um SL maior ou igual ao preço de ask, o que gera ordens inválidas. A verificação 'if(sl >= NormalizarPreco(ask)) return;' está presente, mas o cálculo do sl pode ainda gerar valores inválidos antes dessa verificação.",
+        "validador_b": "A função AbrirCompra calcula o stop loss (sl) como ask - distanciaStop, mas não verifica se esse valor é menor que o ask. Isso pode resultar em um SL maior ou igual ao preço de ask, o que gera ordens inválidas. A verificação 'if(sl >= NormalizarPreco(ask)) return;' está presente, mas o cálculo do sl pode ainda gerar valores inválidos antes dessa verificação."
+      },
+      {
+        "id": "C2",
+        "funcao": "AbrirVenda",
+        "linhas": "623-636",
+        "categoria": "PRECO_STOP",
+        "simbolo_chave": "sl",
+        "problema": "Stop loss pode ser menor ou igual ao preço de bid",
+        "problema_b": "Stop loss pode ser menor ou igual ao preço de bid",
+        "evidencia": "O código não verifica se o SL calculado é maior que o preço de bid, o que pode resultar em ordens inválidas.",
+        "evidencia_b": "O código não verifica se o SL calculado é maior que o preço de bid, o que pode resultar em ordens inválidas.",
+        "validador_a": "A função AbrirVenda calcula o stop loss (sl) como bid + distanciaStop, mas não verifica se esse valor é maior que o bid. Isso pode resultar em um SL menor ou igual ao preço de bid, o que gera ordens inválidas. A verificação 'if(sl >= NormalizarPreco(bid)) return;' está presente, mas o cálculo do sl pode ainda gerar valores inválidos antes dessa verificação.",
+        "validador_b": "A função AbrirVenda calcula o stop loss (sl) como bid + distanciaStop, mas não verifica se esse valor é maior que o bid. Isso pode resultar em um SL menor ou igual ao preço de bid, o que gera ordens inválidas. A verificação 'if(sl >= NormalizarPreco(bid)) return;' está presente, mas o cálculo do sl pode ainda gerar valores inválidos antes dessa verificação."
+      },
+      {
+        "id": "C4",
+        "funcao": "GerenciarParcial",
+        "linhas": "697-715",
+        "categoria": "POSICAO_ORDEM",
+        "simbolo_chave": "parcialJaFeita",
+        "problema": "Verificação incorreta de parcial já executada",
+        "problema_b": "Verificação incorreta de parcial já executada",
+        "evidencia": "O código verifica se já existe uma parcial com base no SL, mas não garante que a posição original ainda exista ou que o ticket seja válido para a posição atual.",
+        "evidencia_b": "O código verifica se já existe uma parcial com base no SL, mas não garante que a posição original ainda exista ou que o ticket seja válido para a posição atual.",
+        "validador_a": "Na função GerenciarParcial, o código verifica se já existe uma parcial com base no SL, mas não garante que a posição original ainda exista ou que o ticket seja válido para a posição atual. O código itera sobre todas as posições e verifica o ticket, mas não há verificação se a posição original ainda existe.",
+        "validador_b": "Na função GerenciarParcial, o código verifica se já existe uma parcial com base no SL, mas não garante que a posição original ainda exista ou que o ticket seja válido para a posição atual. O código itera sobre todas as posições e verifica o ticket, mas não há verificação se a posição original ainda existe."
+      },
+      {
+        "id": "C5",
+        "funcao": "GerenciarTrailing",
+        "linhas": "766-807",
+        "categoria": "TRAILING",
+        "simbolo_chave": "novoSL",
+        "problema": "Trailing pode mover SL para além do preço de entrada",
+        "problema_b": "Trailing pode mover SL para além do preço de entrada",
+        "evidencia": "A verificação de proteção permite que o SL seja ajustado, mas não impede que ele seja movido para além do preço de entrada, o que pode resultar em perdas ilógicas.",
+        "evidencia_b": "A verificação de proteção permite que o SL seja ajustado, mas não impede que ele seja movido para além do preço de entrada, o que pode resultar em perdas ilógicas.",
+        "validador_a": "Na função GerenciarTrailing, o código permite que o SL seja ajustado, mas não impede que ele seja movido para além do preço de entrada. A verificação 'if(tipo == POSITION_TYPE_BUY && novoSL <= entrada) return;' permite que o SL seja ajustado para valores menores ou iguais ao preço de entrada, o que pode resultar em perdas ilógicas.",
+        "validador_b": "Na função GerenciarTrailing, o código permite que o SL seja ajustado, mas não impede que ele seja movido para além do preço de entrada. A verificação 'if(tipo == POSITION_TYPE_BUY && novoSL <= entrada) return;' permite que o SL seja ajustado para valores menores ou iguais ao preço de entrada, o que pode resultar em perdas ilógicas."
+      },
+      {
+        "id": "C6",
+        "funcao": "LucroFechadoHoje",
+        "linhas": "295-344",
+        "categoria": "VALIDACAO_PARAMETRO",
+        "simbolo_chave": "lucro",
+        "problema": "Não verifica se o ticket é válido antes de acessar dados",
+        "problema_b": "Não verifica se o ticket é válido antes de acessar dados",
+        "evidencia": "O código acessa dados de deal sem verificar se o ticket é válido, o que pode causar erros ao tentar acessar dados de deals inválidos.",
+        "evidencia_b": "O código acessa dados de deal sem verificar se o ticket é válido, o que pode causar erros ao tentar acessar dados de deals inválidos.",
+        "validador_a": "Na função LucroFechadoHoje, o código acessa dados de deal sem verificar se o ticket é válido antes de acessar os dados. A linha 'ulong ticket = HistoryDealGetTicket(i);' pode retornar 0, indicando um ticket inválido, mas o código não verifica isso antes de acessar os dados da deal.",
+        "validador_b": "Na função LucroFechadoHoje, o código acessa dados de deal sem verificar se o ticket é válido antes de acessar os dados. A linha 'ulong ticket = HistoryDealGetTicket(i);' pode retornar 0, indicando um ticket inválido, mas o código não verifica isso antes de acessar os dados da deal."
+      }
+    ],
+    "rejeitados": [
+      {
+        "id": "C3",
+        "funcao": "CalcularLote",
+        "linhas": "824-849",
+        "categoria": "CALCULO_LOTE",
+        "simbolo_chave": "loteCalculado",
+        "problema": "Cálculo de lote pode resultar em valor inválido",
+        "problema_b": "Cálculo de lote pode resultar em valor inválido",
+        "evidencia": "O cálculo do lote pode gerar valores inválidos se tickSize ou tickValue forem zero ou inválidos, mas o código não trata isso corretamente antes de normalizar.",
+        "evidencia_b": "O cálculo do lote pode gerar valores inválidos se tickSize ou tickValue forem zero ou inválidos, mas o código não trata isso corretamente antes de normalizar.",
+        "status_a": "NAO_CONFIRMADO",
+        "status_b": "NAO_CONFIRMADO",
+        "motivo_a": "Embora o cálculo do lote possa gerar valores inválidos, o código possui verificações para tickSize e tickValue antes do cálculo. A função NormalizarLote é chamada após o cálculo, o que corrige valores inválidos. A verificação de valores inválidos é feita, mas o problema pode ocorrer se os valores forem inválidos antes da normalização.",
+        "motivo_b": "Embora o cálculo do lote possa gerar valores inválidos, o código possui verificações para tickSize e tickValue antes do cálculo. A função NormalizarLote é chamada após o cálculo, o que corrige valores inválidos. A verificação de valores inválidos é feita, mas o problema pode ocorrer se os valores forem inválidos antes da normalização."
+      },
+      {
+        "id": "C7",
+        "funcao": "SinalCompra",
+        "linhas": "402-423",
+        "categoria": "INDICADOR",
+        "simbolo_chave": "rejeicao",
+        "problema": "Condição de sinal pode ser inconsistente",
+        "problema_b": "Condição de sinal pode ser inconsistente",
+        "evidencia": "A função SinalCompra pode retornar verdadeiro mesmo quando o candle não atende a todas as condições de sinal, dependendo do modo de sinal selecionado.",
+        "evidencia_b": "A função SinalCompra pode retornar verdadeiro mesmo quando o candle não atende a todas as condições de sinal, dependendo do modo de sinal selecionado.",
+        "status_a": "NAO_CONFIRMADO",
+        "status_b": "NAO_CONFIRMADO",
+        "motivo_a": "A função SinalCompra pode retornar verdadeiro mesmo quando o candle não atende a todas as condições de sinal, dependendo do modo de sinal selecionado. No entanto, o código verifica as condições de sinal corretamente e o comportamento é intencional.",
+        "motivo_b": "A função SinalCompra pode retornar verdadeiro mesmo quando o candle não atende a todas as condições de sinal, dependendo do modo de sinal selecionado. No entanto, o código verifica as condições de sinal corretamente e o comportamento é intencional."
+      },
+      {
+        "id": "C8",
+        "funcao": "SinalVenda",
+        "linhas": "426-449",
+        "categoria": "INDICADOR",
+        "simbolo_chave": "rejeicao",
+        "problema": "Condição de sinal pode ser inconsistente",
+        "problema_b": "Condição de sinal pode ser inconsistente",
+        "evidencia": "A função SinalVenda pode retornar verdadeiro mesmo quando o candle não atende a todas as condições de sinal, dependendo do modo de sinal selecionado.",
+        "evidencia_b": "A função SinalVenda pode retornar verdadeiro mesmo quando o candle não atende a todas as condições de sinal, dependendo do modo de sinal selecionado.",
+        "status_a": "NAO_CONFIRMADO",
+        "status_b": "NAO_CONFIRMADO",
+        "motivo_a": "A função SinalVenda pode retornar verdadeiro mesmo quando o candle não atende a todas as condições de sinal, dependendo do modo de sinal selecionado. No entanto, o código verifica as condições de sinal corretamente e o comportamento é intencional.",
+        "motivo_b": "A função SinalVenda pode retornar verdadeiro mesmo quando o candle não atende a todas as condições de sinal, dependendo do modo de sinal selecionado. No entanto, o código verifica as condições de sinal corretamente e o comportamento é intencional."
+      }
+    ]
+  }
+}

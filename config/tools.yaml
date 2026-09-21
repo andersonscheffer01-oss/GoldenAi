@@ -1,0 +1,30 @@
+# Golden AI - Configuração de Ferramentas
+# OpenCode, Tools Infrastructure e Coding Agent
+
+opencode:
+  enabled: true
+  cmd: C:\Users\Anderson\AppData\Roaming\npm\opencode.cmd
+  models:
+    - opencode/deepseek-v4-flash-free
+    - opencode/hy3-free
+    - opencode/nemotron-3.5-lightning-free
+  timeout_seconds: 900
+  work_dir: C:\GoldenAI\sandbox\opencode
+
+tools:
+  enabled: true
+  auto_discovery: true
+  allow_remote_paid: false
+  default_cost_policy: free_or_local
+
+coding_agent:
+  enabled: true
+  provider: codex_cli
+  local_only: true
+  paid_fallback: false
+  model_provider: ollama
+  self_development_enabled: true
+  checkpoint_enabled: true
+  backup_before_edit: true
+  rollback_on_failure: true
+  timeout_seconds: 300

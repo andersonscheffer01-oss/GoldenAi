@@ -1,0 +1,18 @@
+{
+  "attachment_id": "4ffe140a-9cf1-47d6-92ee-5498a26857b9",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-13T17:04:31.287486+00:00",
+  "source_type": "file",
+  "original_name": "unknown.bin",
+  "mime_type": "application/octet-stream",
+  "extension": ".bin",
+  "size_bytes": 3,
+  "sha256": "51A1F05AF85E342E3C849B47D387086476282D5F50DC240C19216D6EDFB1EB5A",
+  "storage_path": "",
+  "processing_status": "UNSUPPORTED_FORMAT",
+  "metadata": {
+    "category": "text",
+    "status": "UNSUPPORTED_FORMAT"
+  }
+}

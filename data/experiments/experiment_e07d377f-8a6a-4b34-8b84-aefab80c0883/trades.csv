@@ -1,0 +1,2 @@
+trade_id,experiment_id,symbol,side,signal_time,entry_time,entry_price,exit_time,exit_price,quantity,gross_pnl,costs,net_pnl,return_pct,exit_reason,mae,mfe,bars_held
+experiment_e07d377f-8a6a-4b34-8b84-aefab80c0883_T00001,experiment_e07d377f-8a6a-4b34-8b84-aefab80c0883,SMOKE,LONG,2026-02-01T00:00:00+00:00,2026-02-02T00:00:00+00:00,10.0,2026-02-02T00:00:00+00:00,15.0,1.0,5.0,0.4,4.6,0.0046,hold_bars_1,,,1

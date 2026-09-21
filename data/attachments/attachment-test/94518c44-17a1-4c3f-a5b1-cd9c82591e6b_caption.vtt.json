@@ -1,0 +1,20 @@
+{
+  "attachment_id": "94518c44-17a1-4c3f-a5b1-cd9c82591e6b",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-19T22:33:10.251403+00:00",
+  "source_type": "file",
+  "original_name": "caption.vtt",
+  "mime_type": "text/vtt",
+  "extension": ".vtt",
+  "size_bytes": 39,
+  "sha256": "1B22C629A12F3FC4D67327D7174DDA7AFFB9600637A09EE948DC61DBDD71F839",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\94518c44-17a1-4c3f-a5b1-cd9c82591e6b_caption.vtt",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 4,
+    "preview_chars": 35
+  }
+}

@@ -1,0 +1,26 @@
+# Golden AI - Configuração de Segurança
+# Permissões, paths permitidos e protegidos
+
+read_only: false
+write_enabled: true
+command_execution_enabled: true
+mt5_integration_enabled: true
+trading_mode: demo
+
+allowed_paths:
+  - C:\GoldenAI\projetos
+  - C:\GoldenAI\sandbox
+  - C:\GoldenAI\sandbox\downloads
+  - C:\GoldenAI\experiments
+  - C:\GoldenAI\knowledge
+  - C:\GoldenAI\data
+  - C:\GoldenAI\logs
+  - C:\Users\Anderson\Desktop
+  - C:\Users\Anderson\Documents
+  - C:\Users\Anderson\Downloads
+  - C:\Users\Anderson\AppData\Roaming\MetaQuotes\Terminal
+
+protected_paths:
+  - C:\GoldenAI\app
+  - C:\GoldenAI\studio
+  - C:\GoldenAI\backups

@@ -1,0 +1,44 @@
+{
+  "data_hora": "2026-08-19T01:40:31",
+  "relatorio_path": "C:\\GoldenAI\\app\\ultima_autocorrecao.json",
+  "modo": "EDICAO_CIRURGICA_FUNCAO",
+  "status": "BUG_NAO_DEMONSTRADO",
+  "arquivo": "Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5",
+  "caminho": "C:\\GoldenAI\\projetos\\Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5",
+  "backup": null,
+  "bugs_autorizados": 1,
+  "ids_autorizados": [
+    "C4"
+  ],
+  "funcao_autorizada": "GerenciarParcial",
+  "intervalo_autorizado": [
+    687,
+    735
+  ],
+  "sha256_antes": "9216c5053f9d19f4c99d28c73ec91e4d722c5b86e4e637a23c3d5c33786d06b7",
+  "sha256_depois": null,
+  "compilacao": {},
+  "invariantes_escopo": {},
+  "alteracoes": [],
+  "rollback_executado": false,
+  "original_mt5_alterado": false,
+  "tentativas": [],
+  "observacao": "O bug C4 foi revogado pela revalidacao forense: dois revisores independentes nao encontraram evidencia suficiente no codigo atual.",
+  "revalidacao_bug": {
+    "status": "NAO_DEMONSTRADO",
+    "revisores": [
+      {
+        "status": "NAO_DEMONSTRADO",
+        "evidencia": "O código verifica se já existe uma parcial com base no ticket (linha 704), o que evita a execução duplicada para a mesma posição. A verificação ocorre dentro do loop que itera pelas posições atuais, e só prossegue se o ticket for igual ao da posição atual (ticket). Isso impede que o código execute parciais em posições diferentes ou inválidas. Não há evidência de falha na verificação do ticket ou na validade da posição original.",
+        "condicao_exata_que_falha": "Não foi encontrado um caminho concreto no código onde a verificação incorreta de parcial já executada ocorra, pois o código usa o ticket para garantir que a verificação seja feita apenas na posição atual.",
+        "mudanca_minima_necessaria": "Nenhuma mudança é necessária, pois o código já protege contra parciais duplicadas usando o ticket da posição."
+      },
+      {
+        "status": "NAO_DEMONSTRADO",
+        "evidencia": "O código verifica se já existe uma parcial com base no ticket (linha 704), o que evita a execução duplicada para a mesma posição. A verificação ocorre dentro do loop que itera pelas posições atuais, e só prossegue se o ticket for igual ao da posição atual (ticket). Isso impede que o código execute parciais em posições diferentes ou inválidas. Não há evidência de que o código possa verificar tickets de posições diferentes ou inválidas, pois ele usa o ticket específico passado como parâmetro para filtrar as verificações.",
+        "condicao_exata_que_falha": "Não há caminho no código atual onde uma parcial seja executada com base em um ticket inválido ou diferente do ticket da posição atual.",
+        "mudanca_minima_necessaria": "Nenhuma mudança é necessária, pois o código já protege contra a execução duplicada de parciais usando o ticket correto."
+      }
+    ]
+  }
+}

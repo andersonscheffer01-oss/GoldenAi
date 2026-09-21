@@ -1,0 +1,24 @@
+; Analisa a vela M15 das 09:00 nos ultimos 120 dias e mede as 30 velas M1 seguintes
+SimboloDaAnalise=XAUUSD
+TimeframeDaVelaAnalisada=15
+HoraDaVelaAnalisada=9
+MinutoDaVelaAnalisada=0
+LinhasDoRangeAnalisado=0
+ModoDeSelecaoDasVelas=1
+ListaDeHorarios=01:00,01:15,01:30,01:45,02:00,02:15,02:30,02:45
+InicioDaSessao=01:00
+FimDaSessao=05:00
+IntervaloEntreVelasEmMinutos=15
+QuantidadeDeDiasParaAnalisar=120
+TimeframeParaMedirORompimento=1
+VelasAposReferenciaParaMedir=30
+ConfirmacaoDoRompimento=1
+DistanciaMinimaDoRompimentoEmPontos=10.0
+IgnorarDiasSemRompimentoNosAvancos=true
+MostrarPainelEstatistico=true
+DesenharUltimoRangeNoGrafico=true
+PosicaoHorizontalDoPainel=18
+PosicaoVerticalDoPainel=24
+EscalaDoPainel=1.0
+ExportarResultadosParaCSV=false
+NomeDoArquivoCSV=Estatistica_Range_MTF.csv

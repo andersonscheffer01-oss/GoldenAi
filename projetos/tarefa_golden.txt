@@ -1,0 +1,205 @@
+Arquivo alvo (SOMENTE LEITURA - nao altere o arquivo em disco): C:\GoldenAI\projetos\Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5
+
+Voce e um engenheiro senior de MQL5 em modo PATCH CIRURGICO.
+
+REGRAS ABSOLUTAS:
+- Corrija SOMENTE o bug autorizado.
+- Altere SOMENTE a funcao autorizada.
+- NAO altere o arquivo em disco: apenas leia e retorne o JSON pedido.
+- Nao crie funcoes auxiliares fora da funcao autorizada.
+- Nao mude assinaturas, inputs, parametros globais, estrategia ou defaults.
+- Preserve a finalidade e o comportamento nao relacionado ao bug.
+- Faca a menor correcao necessaria.
+- NAO responda com perguntas nem analise longa. Retorne SOMENTE o JSON.
+
+BUG AUTORIZADO:
+{
+  "id": "C1",
+  "funcao": "AbrirCompra",
+  "linhas": "604-620",
+  "categoria": "PRECO_STOP",
+  "simbolo_chave": "sl",
+  "problema": "SL pode ser maior ou igual ao preço de ask",
+  "problema_b": "SL pode ser maior ou igual ao preço de ask",
+  "evidencia": "A verificação 'if(sl >= ask)' pode falhar se o SL for calculado como igual ao ask, o que é inválido para uma ordem de compra.",
+  "evidencia_b": "A verificação 'if(sl >= ask)' pode falhar se o SL for calculado como igual ao ask, o que é inválido para uma ordem de compra.",
+  "validador_a": "A função AbrirCompra calcula o SL como ask - distanciaStop, e depois verifica 'if(sl >= ask)'. Se o cálculo resultar em sl igual a ask, essa verificação falha e a ordem é enviada com SL inválido. O código não impede que sl seja calculado como igual ao ask, o que é inválido para uma ordem de compra.",
+  "validador_b": "A função AbrirCompra calcula o SL como ask - distanciaStop, e depois verifica 'if(sl >= ask)' para evitar ordens inválidas. No entanto, se a distanciaStop for zero ou muito pequena, o SL pode acabar sendo igual ao ask, o que é inválido para uma ordem de compra. A verificação não impede que isso aconteça, pois o cálculo pode resultar em sl == ask."
+}
+
+CONTRATO DE CORRECAO CONGELADO:
+{
+  "bug_id": "C1",
+  "funcao": "AbrirCompra",
+  "objetivo": "Corrigir o bug onde SL pode ser maior ou igual ao preço de ask em ordens de compra.",
+  "deve_preservar": [
+    "assinatura da função",
+    "direção da ordem (BUY)",
+    "cálculo de lote",
+    "cálculo de TP",
+    "uso de SymbolInfoDouble",
+    "uso de NormalizarPreco",
+    "uso de trade.Buy"
+  ],
+  "nao_pode_fazer": [
+    "adicionar novas regras de mercado",
+    "modificar lógica de cálculo de lote",
+    "alterar direção da ordem (SELL)",
+    "incluir proteções não relacionadas ao bug"
+  ],
+  "criterios_aceitacao": [
+    "compilação sem erros",
+    "verificação de que sl < ask antes de enviar ordem",
+    "não deve permitir SL igual ou maior que ask em ordens de compra"
+  ]
+}
+
+FUNCAO REAL AUTORIZADA:
+AbrirCompra
+
+FUNCAO ORIGINAL:
+--- INICIO FUNCAO ---
+void AbrirCompra(double atrAtual)
+{
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double distanciaStop = DistanciaStop(atrAtual);
+   double distanciaAlvo = DistanciaAlvo(atrAtual);
+   double sl = NormalizarPreco(ask - distanciaStop);
+   double tp = NormalizarPreco(ask + distanciaAlvo);
+   double lote = CalcularLote(ask - sl);
+
+   if(lote <= 0.0)
+      return;
+
+   if(sl >= ask)
+      return;
+
+   trade.Buy(lote, _Symbol, ask, sl, tp, "Compra EMA20/EMA200 ATR v2");
+}
+
+--- FIM FUNCAO ---
+
+CONTEXTO SOMENTE PARA LEITURA (NAO PODE SER ALTERADO):
+--- INICIO CONTEXTO ---
+00559: bool VolumeNormal(const MqlRates &rates[])
+00560: {
+00561:    double soma = 0.0;
+00562:    for(int i = 2; i < PeriodoMediaVolume + 2; i++)
+00563:       soma += (double)rates[i].tick_volume;
+00564: 
+00565:    double media = soma / PeriodoMediaVolume;
+00566:    if(media <= 0.0)
+00567:       return false;
+00568: 
+00569:    return ((double)rates[1].tick_volume >= media * VolumeMinMultiplicador);
+00570: }
+00571: 
+00572: //+------------------------------------------------------------------+
+00573: double CalcularVWAPDiario()
+00574: {
+00575:    MqlRates rates[];
+00576:    ArraySetAsSeries(rates, true);
+00577: 
+00578:    datetime inicioDia = iTime(_Symbol, PERIOD_D1, 0);
+00579:    if(inicioDia <= 0)
+00580:       return iClose(_Symbol, _Period, 1);
+00581: 
+00582:    int copiados = CopyRates(_Symbol, _Period, inicioDia, TimeCurrent(), rates);
+00583:    if(copiados <= 0)
+00584:       return iClose(_Symbol, _Period, 1);
+00585: 
+00586:    double pv = 0.0;
+00587:    double vol = 0.0;
+00588: 
+00589:    for(int i = 0; i < copiados; i++)
+00590:    {
+00591:       double precoTipico = (rates[i].high + rates[i].low + rates[i].close) / 3.0;
+00592:       double volume = (double)rates[i].tick_volume;
+00593:       pv += precoTipico * volume;
+00594:       vol += volume;
+00595:    }
+00596: 
+00597:    if(vol <= 0.0 || pv <= 0.0 || !MathIsValidNumber(pv))
+00598:       return iClose(_Symbol, _Period, 1);
+00599: 
+00600:    return pv / vol;
+00601: }
+00602: 
+00603: //+------------------------------------------------------------------+
+00604: void AbrirCompra(double atrAtual)
+00605: {
+00606:    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+00607:    double distanciaStop = DistanciaStop(atrAtual);
+00608:    double distanciaAlvo = DistanciaAlvo(atrAtual);
+00609:    double sl = NormalizarPreco(ask - distanciaStop);
+00610:    double tp = NormalizarPreco(ask + distanciaAlvo);
+00611:    double lote = CalcularLote(ask - sl);
+00612: 
+00613:    if(lote <= 0.0)
+00614:       return;
+00615: 
+00616:    if(sl >= ask)
+00617:       return;
+00618: 
+00619:    trade.Buy(lote, _Symbol, ask, sl, tp, "Compra EMA20/EMA200 ATR v2");
+00620: }
+00621: 
+00622: //+------------------------------------------------------------------+
+00623: void AbrirVenda(double atrAtual)
+00624: {
+00625:    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+00626:    double distanciaStop = DistanciaStop(atrAtual);
+00627:    double distanciaAlvo = DistanciaAlvo(atrAtual);
+00628:    double sl = NormalizarPreco(bid + distanciaStop);
+00629:    double tp = NormalizarPreco(bid - distanciaAlvo);
+00630:    double lote = CalcularLote(sl - bid);
+00631: 
+00632:    if(lote <= 0.0)
+00633:       return;
+00634: 
+00635:    trade.Sell(lote, _Symbol, bid, sl, tp, "Venda EMA20/EMA200 ATR v2");
+00636: }
+00637: 
+00638: //+------------------------------------------------------------------+
+00639: double DistanciaStop(double atrAtual)
+00640: {
+00641:    if(UsarStopTakeEmPontos)
+00642:       return StopPontos * _Point;
+00643: 
+00644:    return atrAtual * StopATR;
+00645: }
+00646: 
+00647: //+------------------------------------------------------------------+
+00648: double DistanciaAlvo(double atrAtual)
+00649: {
+00650:    if(UsarStopTakeEmPontos)
+00651:       return AlvoPontos * _Point;
+00652: 
+00653:    return atrAtual * AlvoATR;
+00654: }
+00655: 
+00656: //+------------------------------------------------------------------+
+00657: void GerenciarPosicoes(double atrAtual, double ema20)
+00658: {
+00659:    for(int i = PositionsTotal() - 1; i >= 0; i--)
+00660:    {
+00661:       ulong ticket = PositionGetTicket(i);
+00662:       if(ticket == 0)
+00663:          continue;
+00664: 
+00665:       if(PositionGetString(POSITION_SYMBOL) != _Symbol ||
+--- FIM CONTEXTO ---
+
+REJEICOES DE TENTATIVAS ANTERIORES:
+Nenhuma.
+
+IMPORTANTE:
+- Se uma tentativa anterior foi reprovada, produza uma solucao MATERIALMENTE
+  diferente que responda apenas aos motivos tecnicos validos da reprovacao.
+- Nao devolva exatamente a mesma funcao de uma tentativa rejeitada.
+- Nao altere nada fora da funcao autorizada.
+- Obedeca literalmente ao CONTRATO DE CORRECAO CONGELADO.
+- replacement_function deve conter a funcao MQL5 COMPLETA, e somente ela.
+
+Retorne exatamente este JSON (sem markdown):
+{"bug_id": "C1", "funcao": "AbrirCompra", "replacement_function": "<funcao MQL5 COMPLETA corrigida>"}

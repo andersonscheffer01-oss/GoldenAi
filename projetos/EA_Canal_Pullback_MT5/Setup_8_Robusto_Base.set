@@ -1,0 +1,168 @@
+﻿; saved on 2026.08.31 20:19:12
+; this file contains input parameters for testing/optimizing EA_Canal_Pullback_MT5 expert advisor
+; to use it in the strategy tester, click Load in the context menu of the Inputs tab
+;
+; 01 - Formacao do canal
+SimboloParaOperar=XAUUSD
+PeriodoDoGrafico=1||0||0||49153||N
+VelasParaFormarCanal=10||10||1||100||N
+UsarInicioDeCadaHora=true||false||0||true||N
+HoraInicialManual=0||0||1||10||N
+MinutoInicialManual=0||0||1||10||N
+ModoDeFormacaoDoCanal=2||0||0||2||N
+MetodoDeCalculoDoCanalHorario=0||0||0||3||N
+RenovacaoDoCanal=0||0||0||3||N
+MultiplicadorMaximoPavioHibrido=2||2.0||0.200000||20.000000||N
+PermitirNovaEntradaNoMesmoCanal=false||false||0||true||N
+; 02 - Tendencia e estrutura do pullback
+ModoDeIdentificacaoDaTendencia=3||1||0||3||N
+PeriodoMediaRapida=9||9||1||90||N
+PeriodoMediaLenta=21||21||1||210||N
+TimeframeDaTendencia=5||0||0||49153||N
+ExigirTendenciaDefinida=true||false||0||true||N
+PermitirPullbackContraTendencia=false||false||0||true||N
+BarrasParaAnalisarEstrutura=60||60||1||600||N
+ForcaDoPivoEstrutural=2||2||1||20||N
+; 03 - Canal automatico por pullback
+AtivarCanalAutomaticoPullback=true||false||0||true||N
+MinimoDeVelasDoPullback=2||2||1||20||N
+MaximoDeVelasDoPullback=8||8||1||80||N
+PermitirVelasNeutras=true||false||0||true||N
+MaximoDeVelasNeutras=1||1||1||10||N
+ExigirFechamentosContraTendencia=true||false||0||true||N
+UsarPavioNaIdentificacaoDoPullback=true||false||0||true||N
+PeriodoDoATR=14||14||1||140||N
+QuantidadeDeVelasParaMediaATR=10||10||1||100||N
+TimeframeDoATR=1||0||0||49153||N
+MultiplicadorDoATR=1||1.0||0.100000||10.000000||N
+UsarATRMedio=true||false||0||true||N
+UsarATRAntesDoPullback=true||false||0||true||N
+ModoDePosicionamentoDoCanal=2||1||0||4||N
+ExigirRetesteDoCanalPullback=true||false||0||true||N
+VelasMaximasParaRetestePullback=3||3||1||30||N
+EntradaNoRompimentoOuReteste=0||0||0||2||N
+ToleranciaRompimentoPullbackEmPontos=1||1.0||0.100000||10.000000||N
+PermitirNovaEntradaNoMesmoPullback=false||false||0||true||N
+MaximoDeVelasDeValidadeDoCanal=20||20||1||200||N
+CancelarSeRomperEstrutura=true||false||0||true||N
+; 04 - Rompimento e confirmacao
+PermitirCompras=true||false||0||true||N
+PermitirVendas=true||false||0||true||N
+ExigirFechamentoForaDoCanal=true||false||0||true||N
+ToleranciaDoRompimentoEmPontos=1||1.0||0.100000||10.000000||N
+VelasDeConfirmacao=1||1||1||10||N
+ExigirReteste=false||false||0||true||N
+MaximoDeVelasParaReteste=3||3||1||30||N
+EntradaSomenteAposFechamento=true||false||0||true||N
+NaoEntrarNaVelaQueFormaORompimento=true||false||0||true||N
+AtivarFiltroDeVelaGrande=true||false||0||true||N
+TamanhoMaximoDaVelaEmPontos=500||500.0||50.000000||5000.000000||N
+UsarATRParaFiltrarVelaGrande=true||false||0||true||N
+MultiplicadorMaximoDaVelaSobreATR=2.5||2.5||0.250000||25.000000||N
+; 05 - Take profit e multiplos alvos
+ModoDoTakeProfit=2||0||0||6||N
+MultiplicadorDoTakeProfit=1||1.0||0.100000||10.000000||N
+TakeProfitEmPontos=300||300.0||30.000000||3000.000000||N
+UsarMultiplosAlvos=true||false||0||true||N
+QuantidadeDeAlvos=4||4||1||40||N
+Alvo1Multiplicador=0.5||0.5||0.050000||5.000000||N
+Alvo2Multiplicador=1||1.0||0.100000||10.000000||N
+Alvo3Multiplicador=1.2||1.2||0.120000||12.000000||N
+Alvo4Multiplicador=1.5||1.5||0.150000||15.000000||N
+PercentualFechamentoAlvo1=25||25.0||2.500000||250.000000||N
+PercentualFechamentoAlvo2=25||25.0||2.500000||250.000000||N
+PercentualFechamentoAlvo3=25||25.0||2.500000||250.000000||N
+PercentualFechamentoAlvo4=25||25.0||2.500000||250.000000||N
+; 06 - Stop loss
+ModoDoStopLoss=0||0||0||7||N
+MultiplicadorDoStop=1||1.0||0.100000||10.000000||N
+StopFixoEmPontos=300||300.0||30.000000||3000.000000||N
+OffsetDoStopEmPontos=10||10.0||1.000000||100.000000||N
+MultiplicadorStopATR=1.5||1.5||0.150000||15.000000||N
+; 07 - Filtro ATR e tamanho do canal
+AtivarFiltroATR=true||false||0||true||N
+PeriodoATR=14||14||1||140||N
+TimeframeATR=1||0||0||49153||N
+ATRMinimoEmPontos=0||0.0||0.000000||0.000000||N
+ATRMaximoEmPontos=100000||100000.0||10000.000000||1000000.000000||N
+UsarFiltroDeTamanhoDoCanal=true||false||0||true||N
+TamanhoMinimoDoCanalSobreATR=0.5||0.5||0.050000||5.000000||N
+TamanhoMaximoDoCanalSobreATR=5||5.0||0.500000||50.000000||N
+; 08 - Breakeven
+AtivarBreakeven=true||false||0||true||N
+ModoDeAtivacaoDoBreakeven=2||0||0||2||N
+BreakevenEmPontos=200||200.0||20.000000||2000.000000||N
+BreakevenEmMultiploDoCanal=0.5||0.5||0.050000||5.000000||N
+LucroExtraNoBreakevenEmPontos=2||2.0||0.200000||20.000000||N
+; 09 - Trailing stop
+AtivarTrailingStop=false||false||0||true||N
+ModoDoTrailing=0||0||0||4||N
+TrailingInicioEmPontos=300||300.0||30.000000||3000.000000||N
+TrailingInicioEmMultiploDoCanal=1||1.0||0.100000||10.000000||N
+DistanciaDoTrailingEmPontos=150||150.0||15.000000||1500.000000||N
+PassoDoTrailingEmPontos=20||20.0||2.000000||200.000000||N
+TrailingBaseadoNoATR=false||false||0||true||N
+MultiplicadorTrailingATR=1||1.0||0.100000||10.000000||N
+; 10 - Gerenciamento de risco
+ModoDeCalculoDoLote=1||0||0||2||N
+LoteFixo=0.01||0.01||0.001000||0.100000||N
+PercentualDeRisco=0.5||0.5||0.100000||2.000000||N
+RiscoMonetario=50||50.0||5.000000||500.000000||N
+LoteMinimo=0.01||0.01||0.001000||0.100000||N
+LoteMaximo=100||100.0||10.000000||1000.000000||N
+PassoDoLote=0.01||0.01||0.001000||0.100000||N
+MaximoDeOperacoesPorDia=3||3||1||30||N
+MaximoDeOperacoesPorHora=1||1||1||10||N
+MaximoDeOperacoesAbertas=1||1||1||10||N
+MaximoDePerdasConsecutivas=3||3||1||30||N
+PerdaMaximaDiariaPercentual=3||3.0||0.300000||30.000000||N
+LucroMaximoDiario=0||0.0||0.000000||0.000000||N
+PausaAposStop=true||false||0||true||N
+MinutosDeCooldownAposOperacao=15||15||1||150||N
+; 11 - Filtros operacionais
+SpreadMaximoEmPontos=80||80.0||8.000000||800.000000||N
+SlippageMaximo=20||20||1||200||N
+MagicNumber=123456||123456||1||1234560||N
+PermitirApenasHorarioConfigurado=false||false||0||true||N
+HorarioInicialOperacao=00:00
+HorarioFinalOperacao=23:59
+AtivarSessao1=true||false||0||true||N
+InicioSessao1=00:00
+FimSessao1=23:59
+AtivarSessao2=false||false||0||true||N
+InicioSessao2=08:00
+FimSessao2=12:00
+AtivarSessao3=false||false||0||true||N
+InicioSessao3=13:00
+FimSessao3=17:00
+BloquearSextaFeira=false||false||0||true||N
+BloquearRollover=true||false||0||true||N
+InicioRollover=23:55
+FimRollover=00:10
+DistanciaMinimaDoCanal=0||0.0||0.000000||0.000000||N
+DistanciaMaximaDoCanal=100000||100000.0||10000.000000||1000000.000000||N
+AtivarFiltroDeNoticiaManual=false||false||0||true||N
+HorarioNoticia1=
+HorarioNoticia2=
+HorarioNoticia3=
+MinutosAntesDaNoticia=15||15||1||150||N
+MinutosDepoisDaNoticia=15||15||1||150||N
+; 12 - Visual e diagnostico
+DesenharCanalNoGrafico=true||false||0||true||N
+MostrarPainel=true||false||0||true||N
+PosicaoHorizontalDoPainel=16||16||1||160||N
+PosicaoVerticalDoPainel=24||24||1||240||N
+EscalaDoPainel=1||1.0||0.100000||10.000000||N
+PainelRecolhidoInicialmente=false||false||0||true||N
+AtivarLogsDetalhados=false||false||0||true||N
+RegistrarCadaEntradaNoDiario=true||false||0||true||N
+; 13 - Criterio de otimizacao robusta
+AtivarCriterioRobustoOnTester=true||false||0||true||N
+MinimoDePosicoesCompletasOnTester=100||100||10||500||N
+FatorLucroMinimoOnTester=1.15||1.15||0.05||2.00||N
+DrawdownMaximoPercentualOnTester=15.0||15.0||1.0||30.0||N
+PenalizarConcentracaoMensalOnTester=true||false||0||true||N
+ConcentracaoMensalMaximaOnTester=35.0||35.0||5.0||60.0||N
+RegistrarResumoOnTester=true||false||0||true||N
+RegistrarResumoPorHorarioOnTester=true||false||0||true||N
+MinimoDeEntradasParaDestacarHorario=10||10||5||50||N

@@ -1,0 +1,57 @@
+{
+  "cost_model": {
+    "commission": 0.1,
+    "currency": "POINTS",
+    "slippage": 0.1,
+    "spread": 0.1
+  },
+  "created_at": "2026-08-13T14:12:18.702558+00:00",
+  "dataset": {
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "created_at": "2026-08-13T14:12:18.696696+00:00",
+    "data_hash": "AD52E47696B32805118A429001021EB4D4F9D95DC89B83518EB487452E5213A0",
+    "dataset_id": "dataset_589afee9-7315-4de2-b93e-8a0a883129ff",
+    "end": "2026-02-03T00:00:00+00:00",
+    "row_count": 3,
+    "source": "synthetic_smoke",
+    "start": "2026-02-01T00:00:00+00:00",
+    "symbol": "SMOKE",
+    "timeframe": "D1",
+    "timezone": "UTC"
+  },
+  "development_segment": "TRAIN",
+  "execution_assumptions": "Signals are computed after candle N closes. Entries occur no earlier than candle N+1. No future candle is used to decide earlier entries.",
+  "final_evaluation_segment": "HOLDOUT",
+  "initial_capital": 1000,
+  "period": {
+    "end": "2026-02-03T00:00:00+00:00",
+    "start": "2026-02-01T00:00:00+00:00"
+  },
+  "position_sizing": {
+    "quantity": 1
+  },
+  "seed": 1,
+  "segments": [],
+  "selection_segment": "VALIDATION",
+  "strategy": {
+    "created_at": "2026-08-13T14:12:18.699879+00:00",
+    "description": "Hipotese smoke Quant V1",
+    "entry_logic_identifier": "close_above_open",
+    "exit_logic_identifier": "hold_bars",
+    "name": "smoke strategy",
+    "parameters": {
+      "hold_bars": 1
+    },
+    "strategy_id": "strategy_6dea09d8-0bd5-4c30-821b-ae582de73c59",
+    "symbol": "",
+    "timeframe": "",
+    "unknowns": {},
+    "version": "1.0"
+  }
+}

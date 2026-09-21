@@ -1,0 +1,129 @@
+[
+  {
+    "id": "1787879446233",
+    "title": "Nova conversa teste",
+    "context": "",
+    "messages": [
+      {
+        "role": "user",
+        "text": "Nova conversa teste"
+      }
+    ]
+  },
+  {
+    "id": "1787879472155",
+    "title": "Nova conversa teste",
+    "context": "",
+    "messages": [
+      {
+        "role": "user",
+        "text": "Nova conversa teste"
+      }
+    ]
+  },
+  {
+    "id": "1788137160296",
+    "title": "Por que aparece esse erro?",
+    "context": "",
+    "messages": [
+      {
+        "role": "user",
+        "text": "Por que aparece esse erro?",
+        "attachments": [
+          {
+            "attachment_id": "1aaf197a-dae2-47da-ba63-3f5fb0866c5e",
+            "session_id": "1788137160296",
+            "message_id": "",
+            "created_at": "2026-08-31T00:46:01.329880+00:00",
+            "source_type": "file",
+            "original_name": "shot.png",
+            "mime_type": "image/png",
+            "extension": ".png",
+            "size_bytes": 107,
+            "sha256": "5E3A0D5C4153EE6C1FE0075A0C8924B4E8D390767090CEB642658A9CA6E8CFB6",
+            "storage_path": "C:\\GoldenAI\\data\\attachments\\1788137160296\\1aaf197a-dae2-47da-ba63-3f5fb0866c5e_shot.png",
+            "processing_status": "STORED",
+            "metadata": {
+              "category": "image",
+              "status": "STORED",
+              "vision": "VISION_AVAILABLE"
+            }
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "text": "A imagem que você enviou é completamente branca, sem nenhum texto, imagem ou informação visível. Portanto, não há nenhum dado ou instrução visual para analisar ou interpretar. Se você está recebendo um erro ao tentar analisar a imagem, pode ser devido a um problema de comunicação ou de configuração no sistema que você está usando para enviar as imagens. Verifique se o sistema está configurado corretamente para enviar imagens e se o erro está relacionado a problemas de rede ou de software."
+      }
+    ]
+  },
+  {
+    "id": "1788137225600",
+    "title": "analise",
+    "context": "",
+    "messages": [
+      {
+        "role": "user",
+        "text": "analise",
+        "attachments": [
+          {
+            "attachment_id": "536c1895-7c06-4b07-847f-c21bd982f0de",
+            "session_id": "1788137225600",
+            "message_id": "",
+            "created_at": "2026-08-31T00:47:05.603425+00:00",
+            "source_type": "file",
+            "original_name": "note.txt",
+            "mime_type": "text/plain",
+            "extension": ".txt",
+            "size_bytes": 48,
+            "sha256": "12B0105DF09E0BD415FE0A073BDFBA166E7695D50F23E2D5C194C87DBC08395F",
+            "storage_path": "C:\\GoldenAI\\data\\attachments\\1788137225600\\536c1895-7c06-4b07-847f-c21bd982f0de_note.txt",
+            "processing_status": "STORED",
+            "metadata": {
+              "category": "text",
+              "status": "STORED",
+              "line_count": 2,
+              "preview_chars": 46
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "1788137230003",
+    "title": "Analise a imagem",
+    "context": "",
+    "messages": [
+      {
+        "role": "user",
+        "text": "Analise a imagem",
+        "attachments": [
+          {
+            "attachment_id": "0b90e967-ed34-4fb6-a396-9687d2dce619",
+            "session_id": "1788137230003",
+            "message_id": "",
+            "created_at": "2026-08-31T00:47:11.876591+00:00",
+            "source_type": "file",
+            "original_name": "shot.png",
+            "mime_type": "image/png",
+            "extension": ".png",
+            "size_bytes": 107,
+            "sha256": "5E3A0D5C4153EE6C1FE0075A0C8924B4E8D390767090CEB642658A9CA6E8CFB6",
+            "storage_path": "C:\\GoldenAI\\data\\attachments\\1788137230003\\0b90e967-ed34-4fb6-a396-9687d2dce619_shot.png",
+            "processing_status": "STORED",
+            "metadata": {
+              "category": "image",
+              "status": "STORED",
+              "vision": "VISION_AVAILABLE"
+            }
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "text": "A imagem que você enviou é completamente branca. Não há nenhum texto, imagem ou informação visível. Como não há nenhum dado ou informação útil para análise, não posso fornecer uma análise ou resposta a partir dessa imagem. Se você tiver outra imagem ou um texto que gostaria que eu analisasse, por favor, compartilhe."
+      }
+    ]
+  }
+]

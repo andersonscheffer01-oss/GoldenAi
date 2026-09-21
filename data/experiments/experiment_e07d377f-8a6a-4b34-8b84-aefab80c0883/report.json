@@ -1,0 +1,81 @@
+{
+  "costs": {
+    "commission": 0.1,
+    "currency": "POINTS",
+    "slippage": 0.1,
+    "spread": 0.1
+  },
+  "dataset": {
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "created_at": "2026-08-13T14:12:18.696696+00:00",
+    "data_hash": "AD52E47696B32805118A429001021EB4D4F9D95DC89B83518EB487452E5213A0",
+    "dataset_id": "dataset_589afee9-7315-4de2-b93e-8a0a883129ff",
+    "end": "2026-02-03T00:00:00+00:00",
+    "row_count": 3,
+    "source": "synthetic_smoke",
+    "start": "2026-02-01T00:00:00+00:00",
+    "symbol": "SMOKE",
+    "timeframe": "D1",
+    "timezone": "UTC"
+  },
+  "hashes": {
+    "backtest_hash": "5F3A163591C3D4998BE5E4E32F100D612CD95EA6DB33BEA7E59F288D41B57F7E",
+    "dataset_hash": "340CB017891C2339582D0CA8B65F3201611A88FBDC55FB6333C533A2B3372917",
+    "strategy_hash": "4D6ED84A802510577CCB54D5AA3E515D9312A10EE42A176EBE0C1FABA389EB63"
+  },
+  "interpretation": "Hipotese testada; resultado observado nao e garantia de resultado futuro.",
+  "limitations": [
+    "Resultados observados em backtest nao garantem resultados futuros.",
+    "Convencao temporal: sinal no fechamento N, entrada em N+1."
+  ],
+  "observed_results": {
+    "average_loss": null,
+    "average_trade": 4.6,
+    "average_win": 4.6,
+    "best_trade": 4.6,
+    "breakeven": 0,
+    "consecutive_losses": 0,
+    "consecutive_wins": 1,
+    "expectancy": 4.6,
+    "gross_loss": 0,
+    "gross_profit": 4.6,
+    "loss_rate": 0.0,
+    "losses": 0,
+    "max_drawdown_abs": 0.0,
+    "max_drawdown_pct": 0.0,
+    "net_profit": 4.6,
+    "payoff_ratio": null,
+    "profit_factor": null,
+    "sharpe_simplified": null,
+    "total_trades": 1,
+    "win_rate": 1.0,
+    "wins": 1,
+    "worst_trade": 4.6
+  },
+  "period": {
+    "end": "2026-02-03T00:00:00+00:00",
+    "start": "2026-02-01T00:00:00+00:00"
+  },
+  "strategy": {
+    "created_at": "2026-08-13T14:12:18.699879+00:00",
+    "description": "Hipotese smoke Quant V1",
+    "entry_logic_identifier": "close_above_open",
+    "exit_logic_identifier": "hold_bars",
+    "name": "smoke strategy",
+    "parameters": {
+      "hold_bars": 1
+    },
+    "strategy_id": "strategy_6dea09d8-0bd5-4c30-821b-ae582de73c59",
+    "symbol": "",
+    "timeframe": "",
+    "unknowns": {},
+    "version": "1.0"
+  },
+  "warnings": []
+}

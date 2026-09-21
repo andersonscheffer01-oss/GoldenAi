@@ -1,0 +1,20 @@
+{
+  "attachment_id": "1699da1c-5288-4de9-afca-bab1baab5172",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-13T23:59:55.585181+00:00",
+  "source_type": "file",
+  "original_name": "note.txt",
+  "mime_type": "text/plain",
+  "extension": ".txt",
+  "size_bytes": 48,
+  "sha256": "12B0105DF09E0BD415FE0A073BDFBA166E7695D50F23E2D5C194C87DBC08395F",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\1699da1c-5288-4de9-afca-bab1baab5172_note.txt",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 2,
+    "preview_chars": 46
+  }
+}

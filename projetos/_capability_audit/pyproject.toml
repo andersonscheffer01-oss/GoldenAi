@@ -1,0 +1,2 @@
+[tool.capability_audit]
+test_command='python -m unittest discover -s tests'

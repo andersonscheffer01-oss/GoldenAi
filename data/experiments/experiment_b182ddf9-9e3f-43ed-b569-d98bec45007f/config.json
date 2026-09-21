@@ -1,0 +1,57 @@
+{
+  "cost_model": {
+    "commission": 0.0,
+    "currency": "POINTS",
+    "slippage": 0.0,
+    "spread": 0.0
+  },
+  "created_at": "2026-08-13T16:41:00.254037+00:00",
+  "dataset": {
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "created_at": "2026-08-13T16:41:00.250740+00:00",
+    "data_hash": "D1E3B0A3D6DE90B142E65CED83DBA1A9C60CD9AC4F5B29FF563F9EDD6F838B7F",
+    "dataset_id": "dataset_287d1ca8-96bb-44bd-801b-3fa1cc62678e",
+    "end": "2026-01-06T00:00:00+00:00",
+    "row_count": 6,
+    "source": "csv:_market_chat_test.csv",
+    "start": "2026-01-01T00:00:00+00:00",
+    "symbol": "TEST",
+    "timeframe": "H1",
+    "timezone": "UTC"
+  },
+  "development_segment": "TRAIN",
+  "execution_assumptions": "Signals are computed after candle N closes. Entries occur no earlier than candle N+1. No future candle is used to decide earlier entries.",
+  "final_evaluation_segment": "HOLDOUT",
+  "initial_capital": 10000.0,
+  "period": {
+    "end": "2026-01-06T00:00:00+00:00",
+    "start": "2026-01-01T00:00:00+00:00"
+  },
+  "position_sizing": {
+    "quantity": 1.0
+  },
+  "seed": 1,
+  "segments": [],
+  "selection_segment": "VALIDATION",
+  "strategy": {
+    "created_at": "",
+    "description": "StrategySpec executada explicitamente via Quant Chat V1.",
+    "entry_logic_identifier": "always_long",
+    "exit_logic_identifier": "hold_bars",
+    "name": "B",
+    "parameters": {
+      "hold_bars": 1
+    },
+    "strategy_id": "",
+    "symbol": "TEST",
+    "timeframe": "H1",
+    "unknowns": {},
+    "version": "1.0"
+  }
+}

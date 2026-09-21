@@ -1,0 +1,72 @@
+# Golden AI - Docker Compose Produção
+# Deploy completo com Ollama + Golden AI + Backup
+
+services:
+  # Ollama (modelos de IA locais)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: golden-ollama-prod
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Golden AI
+  golden-ai:
+    build: .
+    container_name: golden-ai-prod
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      - ./projetos:/app/projetos
+      - ./config:/app/config
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backup automático
+  backup:
+    image: alpine:latest
+    container_name: golden-backup
+    volumes:
+      - ./data:/data:ro
+      - ./logs:/logs:ro
+      - ./backups:/backups
+    command: >
+      sh -c 'while true;
+      do
+        echo "Backup iniciado: $$(date)";
+        tar -czf /backups/backup-$$(date +%Y%m%d_%H%M%S).tar.gz /data /logs 2>/dev/null;
+        find /backups -name "backup-*.tar.gz" -mtime +7 -delete 2>/dev/null;
+        echo "Backup concluido: $$(date)";
+        sleep 86400;
+      done'
+    restart: always
+
+volumes:
+  ollama_data:

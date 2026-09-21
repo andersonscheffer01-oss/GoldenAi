@@ -1,0 +1,16 @@
+{
+  "initial_user_turns": 0,
+  "session_id_before": "a9c61bbcb9b64c8ebc13870ad33c29af",
+  "conversation_id_before": "f7b2deca71c44867909d9b6ab64691a6",
+  "barge_in_detected": false,
+  "utterance_source": "",
+  "context_before": 0,
+  "context_after": 0,
+  "session_id_after": "f08e87ec9b24487e9f35c29f5c3e05b9",
+  "conversation_id_after": "4ea41b4032b345a399f646066d468bb4",
+  "same_session": false,
+  "same_conversation": false,
+  "stale_audio_after_cancel": false,
+  "followup_processed": false,
+  "new_command": ""
+}

@@ -1,0 +1,53 @@
+{
+  "sample_size_per_model": 8,
+  "models": [
+    {
+      "provider": "groq",
+      "model": "llama-3.1-8b-instant",
+      "successes": 0,
+      "failures": 8,
+      "ttft_p50_ms": null,
+      "ttft_p95_ms": null,
+      "total_p50_ms": null,
+      "total_p95_ms": null,
+      "naturalness_avg": 0,
+      "avg_chars": 0
+    },
+    {
+      "provider": "groq",
+      "model": "qwen/qwen3.8-27b",
+      "successes": 8,
+      "failures": 0,
+      "ttft_p50_ms": 302,
+      "ttft_p95_ms": 339,
+      "total_p50_ms": 381,
+      "total_p95_ms": 416,
+      "naturalness_avg": 8,
+      "avg_chars": 188
+    },
+    {
+      "provider": "groq",
+      "model": "groq/compound-mini",
+      "successes": 8,
+      "failures": 0,
+      "ttft_p50_ms": 1168,
+      "ttft_p95_ms": 1357,
+      "total_p50_ms": 1254,
+      "total_p95_ms": 1489,
+      "naturalness_avg": 7.62,
+      "avg_chars": 182
+    },
+    {
+      "provider": "ollama",
+      "model": "qwen2.5-coder:14b",
+      "successes": 8,
+      "failures": 0,
+      "ttft_p50_ms": 47,
+      "ttft_p95_ms": 66,
+      "total_p50_ms": 1679,
+      "total_p95_ms": 2489,
+      "naturalness_avg": 8,
+      "avg_chars": 163
+    }
+  ]
+}

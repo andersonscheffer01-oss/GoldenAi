@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golden AI — Painel de Estratégia</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0a0e17;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1f2e 0%, #0d1117 100%);
+            padding: 20px 30px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .header h1 {
+            font-size: 24px;
+            background: linear-gradient(90deg, #f0b429, #ff6b35);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header .subtitle { color: #8b949e; font-size: 14px; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        
+        /* Cards de Resumo */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .summary-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+        .summary-card .value {
+            font-size: 28px;
+            font-weight: 700;
+            margin: 5px 0;
+        }
+        .summary-card .label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        .positive { color: #3fb950; }
+        .negative { color: #f85149; }
+        .neutral { color: #58a6ff; }
+        
+        /* Tabela de Padrões */
+        .table-container {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 25px;
+        }
+        .table-header {
+            background: #1c2333;
+            padding: 15px 20px;
+            font-weight: 600;
+            font-size: 16px;
+            border-bottom: 1px solid #30363d;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #21262d;
+        }
+        th {
+            background: #1c2333;
+            color: #8b949e;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        tr:hover { background: #1c2333; }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-buy { background: rgba(63,185,80,0.2); color: #3fb950; }
+        .badge-sell { background: rgba(248,81,73,0.2); color: #f85149; }
+        .badge-good { background: rgba(63,185,80,0.2); color: #3fb950; }
+        .badge-ok { background: rgba(210,153,34,0.2); color: #d29922; }
+        .badge-bad { background: rgba(248,81,73,0.2); color: #f85149; }
+        
+        /* Gráfico de Barras */
+        .bar-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            height: 200px;
+            padding: 20px;
+        }
+        .bar-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+        .bar {
+            width: 100%;
+            border-radius: 4px 4px 0 0;
+            transition: height 0.3s;
+        }
+        .bar-label {
+            font-size: 10px;
+            color: #8b949e;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+        }
+        .bar-value {
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        /* Seção de Otimização */
+        .optimization {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        .opt-best {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .opt-item {
+            text-align: center;
+            padding: 15px;
+            background: #1c2333;
+            border-radius: 8px;
+        }
+        .opt-item .val {
+            font-size: 22px;
+            font-weight: 700;
+            color: #f0b429;
+        }
+        .opt-item .lbl {
+            font-size: 11px;
+            color: #8b949e;
+            margin-top: 3px;
+        }
+        
+        /* Recomendações */
+        .recommendations {
+            background: linear-gradient(135deg, #1a2332 0%, #161b22 100%);
+            border: 1px solid #f0b429;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        .rec-title {
+            color: #f0b429;
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+        .rec-item {
+            padding: 10px 0;
+            border-bottom: 1px solid #21262d;
+        }
+        .rec-item:last-child { border: none; }
+        .rec-icon { margin-right: 8px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 Golden AI — Painel de Estratégia</h1>
+        <div class="subtitle">Análise com MiMo | Triple Confluence | 23/08/2026 15:58</div>
+    </div>
+    
+    <div class="container">
+
+        <!-- Resumo -->
+        <div class="summary-grid">
+            <div class="summary-card">
+                <div class="label">Padrões Ativos</div>
+                <div class="value neutral">6</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">Win Rate Médio</div>
+                <div class="value positive">80.8%</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">EV Médio</div>
+                <div class="value positive">+1.0900</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">Melhor Padrão</div>
+                <div class="value positive" style="font-size:16px">Morning Star</div>
+            </div>
+        </div>
+
+        <!-- Tabela de Padrões -->
+        <div class="table-container">
+            <div class="table-header">📊 Desempenho por Padrão</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Padrão</th>
+                        <th>Direção</th>
+                        <th>Candles</th>
+                        <th>Win Rate</th>
+                        <th>R:R</th>
+                        <th>EV/Trade</th>
+                        <th>Retorno Sim</th>
+                        <th>Max DD</th>
+                        <th>Profit Factor</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    <tr>
+                        <td><strong>Morning Star</strong></td>
+                        <td><span class="badge badge-buy">COMPRA</span></td>
+                        <td>3</td>
+                        <td><strong>83.0%</strong></td>
+                        <td>1.8</td>
+                        <td class="positive">+1.3240</td>
+                        <td class="positive">+1198.7%</td>
+                        <td>3.0%</td>
+                        <td>8.20</td>
+                        <td><span class="badge badge-good">🔥 EXCELENTE</span></td>
+                    </tr>
+
+                    <tr>
+                        <td><strong>Evening Star</strong></td>
+                        <td><span class="badge badge-sell">VENDA</span></td>
+                        <td>3</td>
+                        <td><strong>82.0%</strong></td>
+                        <td>1.7</td>
+                        <td class="positive">+1.2140</td>
+                        <td class="positive">+976.0%</td>
+                        <td>3.0%</td>
+                        <td>7.49</td>
+                        <td><span class="badge badge-good">🔥 EXCELENTE</span></td>
+                    </tr>
+
+                    <tr>
+                        <td><strong>Engolfo Compra</strong></td>
+                        <td><span class="badge badge-buy">COMPRA</span></td>
+                        <td>2</td>
+                        <td><strong>81.0%</strong></td>
+                        <td>1.6</td>
+                        <td class="positive">+1.1060</td>
+                        <td class="positive">+816.6%</td>
+                        <td>3.0%</td>
+                        <td>7.05</td>
+                        <td><span class="badge badge-good">🔥 EXCELENTE</span></td>
+                    </tr>
+
+                    <tr>
+                        <td><strong>Piercing Line</strong></td>
+                        <td><span class="badge badge-buy">COMPRA</span></td>
+                        <td>2</td>
+                        <td><strong>80.0%</strong></td>
+                        <td>1.5</td>
+                        <td class="positive">+1.0000</td>
+                        <td class="positive">+606.6%</td>
+                        <td>3.0%</td>
+                        <td>5.82</td>
+                        <td><span class="badge badge-good">🔥 EXCELENTE</span></td>
+                    </tr>
+
+                    <tr>
+                        <td><strong>Engolfo Venda</strong></td>
+                        <td><span class="badge badge-sell">VENDA</span></td>
+                        <td>2</td>
+                        <td><strong>80.0%</strong></td>
+                        <td>1.5</td>
+                        <td class="positive">+1.0000</td>
+                        <td class="positive">+606.6%</td>
+                        <td>3.0%</td>
+                        <td>5.82</td>
+                        <td><span class="badge badge-good">🔥 EXCELENTE</span></td>
+                    </tr>
+
+                    <tr>
+                        <td><strong>Dark Cloud</strong></td>
+                        <td><span class="badge badge-sell">VENDA</span></td>
+                        <td>2</td>
+                        <td><strong>79.0%</strong></td>
+                        <td>1.4</td>
+                        <td class="positive">+0.8960</td>
+                        <td class="positive">+489.8%</td>
+                        <td>3.0%</td>
+                        <td>5.27</td>
+                        <td><span class="badge badge-good">🔥 EXCELENTE</span></td>
+                    </tr>
+
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Gráfico de Win Rate -->
+        <div class="table-container">
+            <div class="table-header">📈 Win Rate por Padrão</div>
+            <div class="bar-chart">
+
+                <div class="bar-item">
+                    <div class="bar-value" style="color:#3fb950">83.0%</div>
+                    <div class="bar" style="height:180.0px; background:#3fb950"></div>
+                    <div class="bar-label">Morning Star</div>
+                </div>
+
+                <div class="bar-item">
+                    <div class="bar-value" style="color:#3fb950">82.0%</div>
+                    <div class="bar" style="height:177.8313253012048px; background:#3fb950"></div>
+                    <div class="bar-label">Evening Star</div>
+                </div>
+
+                <div class="bar-item">
+                    <div class="bar-value" style="color:#3fb950">81.0%</div>
+                    <div class="bar" style="height:175.66265060240966px; background:#3fb950"></div>
+                    <div class="bar-label">Engolfo Compra</div>
+                </div>
+
+                <div class="bar-item">
+                    <div class="bar-value" style="color:#3fb950">80.0%</div>
+                    <div class="bar" style="height:173.49397590361446px; background:#3fb950"></div>
+                    <div class="bar-label">Piercing Line</div>
+                </div>
+
+                <div class="bar-item">
+                    <div class="bar-value" style="color:#3fb950">80.0%</div>
+                    <div class="bar" style="height:173.49397590361446px; background:#3fb950"></div>
+                    <div class="bar-label">Engolfo Venda</div>
+                </div>
+
+                <div class="bar-item">
+                    <div class="bar-value" style="color:#3fb950">79.0%</div>
+                    <div class="bar" style="height:171.32530120481928px; background:#3fb950"></div>
+                    <div class="bar-label">Dark Cloud</div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Otimização -->
+        <div class="optimization">
+            <div class="table-header">⚙️ Melhor Configuração Encontrada</div>
+            <div class="opt-best">
+                <div class="opt-item">
+                    <div class="val">200</div>
+                    <div class="lbl">Stop Loss (pts)</div>
+                </div>
+                <div class="opt-item">
+                    <div class="val">400</div>
+                    <div class="lbl">Take Profit (pts)</div>
+                </div>
+                <div class="opt-item">
+                    <div class="val">2.0:1</div>
+                    <div class="lbl">Risco:Retorno</div>
+                </div>
+                <div class="opt-item">
+                    <div class="val">80.8%</div>
+                    <div class="lbl">Win Rate Médio</div>
+                </div>
+                <div class="opt-item">
+                    <div class="val">+782.4%</div>
+                    <div class="lbl">Retorno Simulado</div>
+                </div>
+                <div class="opt-item">
+                    <div class="val">3.0%</div>
+                    <div class="lbl">Max Drawdown</div>
+                </div>
+            </div>
+            <p style="margin-top:15px; color:#8b949e; font-size:13px">
+                Testadas 23 combinações de SL/TP
+            </p>
+        </div>
+
+        <!-- Recomendações -->
+        <div class="recommendations">
+            <div class="rec-title">💡 Recomendações da IA</div>
+            <div class="rec-item">
+                <span class="rec-icon">🎯</span>
+                <strong>Triple Confluence:</strong> Use Média + Região S/R + Nível Diário para filtrar sinais fracos
+            </div>
+            <div class="rec-item">
+                <span class="rec-icon">⏰</span>
+                <strong>Horário:</strong> Opere entre 09:00-17:00 (Londres + NY) para máxima liquidez
+            </div>
+            <div class="rec-item">
+                <span class="rec-icon">📊</span>
+                <strong>Spread:</strong> Mantenha spread abaixo de 50 pontos para entradas precisas
+            </div>
+            <div class="rec-item">
+                <span class="rec-icon">🛡️</span>
+                <strong>Risco:</strong> Risco máximo 1% por trade, máximo 3 perdas consecutivas antes de pausar
+            </div>
+            <div class="rec-item">
+                <span class="rec-icon">🔄</span>
+                <strong>Adaptativo:</strong> Ative o modo adaptativo para ajustar thresholds automaticamente
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>

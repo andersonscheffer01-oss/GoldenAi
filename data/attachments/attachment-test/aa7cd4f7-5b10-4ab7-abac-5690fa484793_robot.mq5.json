@@ -1,0 +1,20 @@
+{
+  "attachment_id": "aa7cd4f7-5b10-4ab7-abac-5690fa484793",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-19T22:33:10.215050+00:00",
+  "source_type": "file",
+  "original_name": "robot.mq5",
+  "mime_type": "application/octet-stream",
+  "extension": ".mq5",
+  "size_bytes": 35,
+  "sha256": "FB5D89EC9FB43C30114A9CE25AA16C854AB1A2F18A1969433BF1593BE540B37E",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\aa7cd4f7-5b10-4ab7-abac-5690fa484793_robot.mq5",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 2,
+    "preview_chars": 33
+  }
+}

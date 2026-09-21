@@ -1,0 +1,1 @@
+﻿Este e um documento de teste do modulo Docling. O Robo XAUUSD usa EMA 100, ATR 14 e VWAP.

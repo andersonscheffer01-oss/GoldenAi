@@ -1,0 +1,87 @@
+{
+  "reps": 10,
+  "dataset_size": 10,
+  "stt_model": "small",
+  "stt_compute": "int8",
+  "stt_load_ms": 1125.7195000007414,
+  "stt_p50_ms": 1293.974100000014,
+  "cold_silero_load_ms": 52.9567000003226,
+  "warm_silero_load_ms": 2.1778999998787185,
+  "cancel_latency": {
+    "p50_ms": 96.04160000071715,
+    "p95_ms": 96.06877000001077,
+    "min_ms": 95.0407999998788,
+    "max_ms": 96.08530000059545,
+    "mean_ms": 95.95025999997233,
+    "reps": 20
+  },
+  "cpu_ms": 156.25,
+  "wall_ms": 162.04070000003412,
+  "peak_ram_bytes": 1764,
+  "hangover_sweep": {
+    "150": {
+      "p50_ms": 900.0,
+      "cuts": 0,
+      "hangover_triggers": 60,
+      "hangover_cancelled": 0
+    },
+    "250": {
+      "p50_ms": 1020.0,
+      "cuts": 0,
+      "hangover_triggers": 100,
+      "hangover_cancelled": 0
+    },
+    "350": {
+      "p50_ms": 1110.0,
+      "cuts": 0,
+      "hangover_triggers": 130,
+      "hangover_cancelled": 0
+    },
+    "450": {
+      "p50_ms": 1230.0,
+      "cuts": 0,
+      "hangover_triggers": 170,
+      "hangover_cancelled": 0
+    }
+  },
+  "pipeline_a": {
+    "end_speech_delay": {
+      "p50_ms": 2048.0,
+      "p95_ms": 3072.0
+    },
+    "speech_start_ms": {
+      "p50_ms": 960.0,
+      "p95_ms": 2944.0
+    },
+    "missed_speech": 0,
+    "cut_final_word": 0,
+    "false_endpoint": 0
+  },
+  "pipeline_b": {
+    "end_speech_delay": {
+      "p50_ms": 1320.0,
+      "p95_ms": 1440.0
+    },
+    "speech_start_ms": {
+      "p50_ms": 1080.0,
+      "p95_ms": 3270.0
+    },
+    "missed_speech": 10,
+    "cut_final_word": 10,
+    "false_endpoint": 0
+  },
+  "pipeline_h": {
+    "end_speech_delay": {
+      "p50_ms": 1445.0,
+      "p95_ms": 1710.0
+    },
+    "speech_start_ms": {
+      "p50_ms": 1080.0,
+      "p95_ms": 3270.0
+    },
+    "missed_speech": 10,
+    "cut_final_word": 20,
+    "false_endpoint": 0
+  },
+  "winner": "A (HYBRID has cuts)"
+}

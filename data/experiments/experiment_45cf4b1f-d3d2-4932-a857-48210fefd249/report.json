@@ -1,0 +1,81 @@
+{
+  "costs": {
+    "commission": 0.0,
+    "currency": "POINTS",
+    "slippage": 0.0,
+    "spread": 0.0
+  },
+  "dataset": {
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "created_at": "2026-08-13T15:24:02.038009+00:00",
+    "data_hash": "D1E3B0A3D6DE90B142E65CED83DBA1A9C60CD9AC4F5B29FF563F9EDD6F838B7F",
+    "dataset_id": "dataset_9b44efa2-842e-4959-943b-c13617b6dd2e",
+    "end": "2026-01-06T00:00:00+00:00",
+    "row_count": 6,
+    "source": "csv:_market_chat_test.csv",
+    "start": "2026-01-01T00:00:00+00:00",
+    "symbol": "TEST",
+    "timeframe": "H1",
+    "timezone": "UTC"
+  },
+  "hashes": {
+    "backtest_hash": "1A9FE5CBA3CB51FEF89261B6E65E318B7C84BC6153062EB405EA82C50844D5A8",
+    "dataset_hash": "B85D3A1AED5A002AE98D3BDEAC169E74F8D4B05B95A4F2FCBA13EA4FE43AB9C6",
+    "strategy_hash": "B7FF83AE0BF51FC3F1F71140C5F5CB575ABFA669963F1D17A32C36F84AD007A2"
+  },
+  "interpretation": "Hipotese testada; resultado observado nao e garantia de resultado futuro.",
+  "limitations": [
+    "Resultados observados em backtest nao garantem resultados futuros.",
+    "Convencao temporal: sinal no fechamento N, entrada em N+1."
+  ],
+  "observed_results": {
+    "average_loss": null,
+    "average_trade": 2.0,
+    "average_win": 2.0,
+    "best_trade": 2.0,
+    "breakeven": 0,
+    "consecutive_losses": 0,
+    "consecutive_wins": 3,
+    "expectancy": 2.0,
+    "gross_loss": 0,
+    "gross_profit": 6.0,
+    "loss_rate": 0.0,
+    "losses": 0,
+    "max_drawdown_abs": 0.0,
+    "max_drawdown_pct": 0.0,
+    "net_profit": 6.0,
+    "payoff_ratio": null,
+    "profit_factor": null,
+    "sharpe_simplified": null,
+    "total_trades": 3,
+    "win_rate": 1.0,
+    "wins": 3,
+    "worst_trade": 2.0
+  },
+  "period": {
+    "end": "2026-01-06T00:00:00+00:00",
+    "start": "2026-01-01T00:00:00+00:00"
+  },
+  "strategy": {
+    "created_at": "",
+    "description": "StrategySpec executada explicitamente via Quant Chat V1.",
+    "entry_logic_identifier": "always_long",
+    "exit_logic_identifier": "hold_bars",
+    "name": "B",
+    "parameters": {
+      "hold_bars": 1
+    },
+    "strategy_id": "",
+    "symbol": "TEST",
+    "timeframe": "H1",
+    "unknowns": {},
+    "version": "1.0"
+  },
+  "warnings": []
+}

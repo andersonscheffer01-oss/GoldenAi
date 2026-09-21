@@ -1,0 +1,4 @@
+trade_id,experiment_id,symbol,side,signal_time,entry_time,entry_price,exit_time,exit_price,quantity,gross_pnl,costs,net_pnl,return_pct,exit_reason,mae,mfe,bars_held
+experiment_510c3486-10b9-4438-a0d0-82bada8afaef_T00001,experiment_510c3486-10b9-4438-a0d0-82bada8afaef,TEST,LONG,2026-01-01T00:00:00+00:00,2026-01-02T00:00:00+00:00,100.0,2026-01-02T00:00:00+00:00,102.0,1.0,2.0,0.0,2.0,0.0002,hold_bars_1,,,1
+experiment_510c3486-10b9-4438-a0d0-82bada8afaef_T00002,experiment_510c3486-10b9-4438-a0d0-82bada8afaef,TEST,LONG,2026-01-03T00:00:00+00:00,2026-01-04T00:00:00+00:00,104.0,2026-01-04T00:00:00+00:00,106.0,1.0,2.0,0.0,2.0,0.0002,hold_bars_1,,,1
+experiment_510c3486-10b9-4438-a0d0-82bada8afaef_T00003,experiment_510c3486-10b9-4438-a0d0-82bada8afaef,TEST,LONG,2026-01-05T00:00:00+00:00,2026-01-06T00:00:00+00:00,108.0,2026-01-06T00:00:00+00:00,110.0,1.0,2.0,0.0,2.0,0.0002,hold_bars_1,,,1

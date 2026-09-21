@@ -1,0 +1,20 @@
+{
+  "attachment_id": "cb563329-38dd-4b65-aca4-730e7056fbf1",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-13T23:56:17.734068+00:00",
+  "source_type": "file",
+  "original_name": "market.csv",
+  "mime_type": "application/vnd.ms-excel",
+  "extension": ".csv",
+  "size_bytes": 19,
+  "sha256": "4C8E3D0D6F62485215CA8F7EC5EFECA354BADEC342A9B04D12B23E067E6B70C7",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\cb563329-38dd-4b65-aca4-730e7056fbf1_market.csv",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 2,
+    "preview_chars": 17
+  }
+}

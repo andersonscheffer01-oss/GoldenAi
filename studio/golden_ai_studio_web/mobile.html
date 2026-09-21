@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0a0a0f">
+    <title>Jarvis</title>
+    <link rel="manifest" href="/manifest.json">
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        :root {
+            --bg: #0a0a0f; --bg2: #12121a; --bg3: #1a1a25;
+            --text: #e8e8e8; --text2: #999; --text3: #666;
+            --gold: #d4a843; --gold2: #b8912e;
+            --green: #2ecc71; --red: #e74c3c; --orange: #f39c12;
+            --border: #2a2a35;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg); color: var(--text);
+            height: 100dvh; display: flex; flex-direction: column;
+            overflow: hidden; -webkit-user-select: none; user-select: none;
+        }
+        .status-bar {
+            background: var(--bg2); border-bottom: 1px solid var(--border);
+            padding: 8px 16px; display: flex; align-items: center; gap: 8px;
+            font-size: 12px; color: var(--text2); flex-shrink: 0;
+        }
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+        }
+        .status-dot.ok { background: var(--green); }
+        .status-dot.offline { background: var(--red); }
+        .status-dot.connecting { background: var(--orange); animation: pulse 1s infinite; }
+        @keyframes pulse { 50% { opacity: 0.5; } }
+
+        .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .messages {
+            flex: 1; overflow-y: auto; padding: 16px; display: flex;
+            flex-direction: column; gap: 12px;
+        }
+        .msg {
+            max-width: 85%; padding: 10px 14px; border-radius: 12px;
+            font-size: 14px; line-height: 1.4; word-break: break-word;
+        }
+        .msg.user {
+            align-self: flex-end; background: var(--gold); color: #111;
+            border-bottom-right-radius: 4px;
+        }
+        .msg.jarvis {
+            align-self: flex-start; background: var(--bg2);
+            border: 1px solid var(--border); border-bottom-left-radius: 4px;
+        }
+        .msg.system {
+            align-self: center; background: transparent; color: var(--text3);
+            font-size: 12px; padding: 4px 8px;
+        }
+        .msg.error { color: var(--red); }
+        .msg.confirmation {
+            background: var(--bg3); border: 1px solid var(--orange);
+        }
+        .msg .confirm-btns {
+            display: flex; gap: 8px; margin-top: 8px;
+        }
+        .msg .confirm-btns button {
+            flex: 1; padding: 8px; border: none; border-radius: 6px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+        .btn-confirm { background: var(--green); color: #111; }
+        .btn-cancel { background: var(--red); color: #fff; }
+
+        .input-bar {
+            background: var(--bg2); border-top: 1px solid var(--border);
+            padding: 8px 12px; display: flex; gap: 8px; flex-shrink: 0;
+            padding-bottom: max(8px, env(safe-area-inset-bottom));
+        }
+        .input-bar input {
+            flex: 1; background: var(--bg3); border: 1px solid var(--border);
+            border-radius: 8px; padding: 10px 12px; color: var(--text);
+            font-size: 15px; outline: none;
+        }
+        .input-bar input:focus { border-color: var(--gold); }
+        .input-bar button {
+            background: var(--gold); border: none; border-radius: 8px;
+            padding: 10px 16px; color: #111; font-weight: 600;
+            font-size: 14px; cursor: pointer;
+        }
+        .input-bar button:disabled { opacity: 0.5; }
+
+        /* Pairing screen */
+        .pairing { display: none; flex-direction: column; align-items: center;
+            justify-content: center; flex: 1; padding: 32px; gap: 24px;
+        }
+        .pairing.active { display: flex; }
+        .pairing h1 { font-size: 24px; color: var(--gold); }
+        .pairing p { color: var(--text2); text-align: center; font-size: 14px; }
+        .pairing input {
+            width: 100%; max-width: 280px; background: var(--bg3);
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 12px; color: var(--text); font-size: 18px;
+            text-align: center; letter-spacing: 4px; text-transform: uppercase;
+            outline: none;
+        }
+        .pairing input:focus { border-color: var(--gold); }
+        .pairing button {
+            width: 100%; max-width: 280px; padding: 12px;
+            background: var(--gold); border: none; border-radius: 8px;
+            color: #111; font-size: 16px; font-weight: 600; cursor: pointer;
+        }
+        .pairing button:disabled { opacity: 0.5; }
+        .pairing .error { color: var(--red); font-size: 13px; }
+
+        /* Chat screen */
+        .chat { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+        .chat.active { display: flex; }
+
+        /* Hidden */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <!-- Pairing Screen -->
+    <div id="pairing" class="pairing active">
+        <h1>Jarvis</h1>
+        <p>Digite o código de pareamento exibido no PC</p>
+        <input type="text" id="pairing-code" maxlength="8" placeholder="XXXXXXXX"
+               autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+        <button id="pairing-btn" onclick="doPairing()">Conectar</button>
+        <div id="pairing-error" class="error"></div>
+    </div>
+
+    <!-- Chat Screen -->
+    <div id="chat" class="chat">
+        <div class="status-bar">
+            <div id="ws-dot" class="status-dot offline"></div>
+            <span id="ws-status">Desconectado</span>
+            <span style="flex:1"></span>
+            <span id="device-name"></span>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="input-bar">
+            <input type="text" id="cmd-input" placeholder="Digite um comando..."
+                   autocomplete="off" autocorrect="off">
+            <button id="send-btn" onclick="sendCommand()" disabled>Enviar</button>
+        </div>
+    </div>
+
+    <script>
+    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+    const httpProto = location.protocol === "https:" ? "https:" : "http:";
+    const GATEWAY_WS = `${wsProto}//${location.hostname}:8766/ws`;
+    const GATEWAY_HTTP = `${httpProto}//${location.hostname}:8766`;
+
+    let ws = null;
+    let token = localStorage.getItem('jarvis_device_token') || '';
+    let deviceId = localStorage.getItem('jarvis_device_id') || '';
+    let deviceName = localStorage.getItem('jarvis_device_name') || '';
+    let pendingConfirmations = {};
+    let reconnectTimer = null;
+
+    // ─── Pairing ────────────────────────────────────────────
+
+    async function doPairing() {
+        const code = document.getElementById('pairing-code').value.trim();
+        const errEl = document.getElementById('pairing-error');
+        const btn = document.getElementById('pairing-btn');
+
+        if (code.length < 4) {
+            errEl.textContent = 'Código muito curto';
+            return;
+        }
+
+        btn.disabled = true;
+        errEl.textContent = '';
+
+        try {
+            const resp = await fetch(`${GATEWAY_HTTP}/pairing/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    code: code,
+                    device_name: getDeviceName(),
+                    device_type: getDeviceType(),
+                }),
+            });
+            const data = await resp.json();
+
+            if (!data.ok) {
+                errEl.textContent = data.error || 'Pareamento falhou';
+                btn.disabled = false;
+                return;
+            }
+
+            // Store credentials
+            token = data.token;
+            deviceId = data.device_id;
+            deviceName = data.device_name;
+            localStorage.setItem('jarvis_device_token', token);
+            localStorage.setItem('jarvis_device_id', deviceId);
+            localStorage.setItem('jarvis_device_name', deviceName);
+
+            showChat();
+            connectWebSocket();
+        } catch (e) {
+            errEl.textContent = 'Erro de conexão';
+            btn.disabled = false;
+        }
+    }
+
+    function getDeviceName() {
+        const ua = navigator.userAgent;
+        if (/iPhone/.test(ua)) return 'iPhone';
+        if (/iPad/.test(ua)) return 'iPad';
+        if (/Android/.test(ua)) return 'Android';
+        return 'Device';
+    }
+
+    function getDeviceType() {
+        const ua = navigator.userAgent;
+        if (/iPhone/.test(ua)) return 'iphone';
+        if (/iPad/.test(ua)) return 'ipad';
+        if (/Android/.test(ua)) return 'android';
+        return 'unknown';
+    }
+
+    // ─── WebSocket ──────────────────────────────────────────
+
+    function connectWebSocket() {
+        if (ws && ws.readyState === WebSocket.OPEN) return;
+
+        updateStatus('connecting');
+        ws = new WebSocket(GATEWAY_WS);
+
+        ws.onopen = () => {
+            updateStatus('ok');
+            // Auth with device token
+            wsSend({ type: 'auth', payload: { token } });
+        };
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            handleMessage(msg);
+        };
+
+        ws.onclose = () => {
+            updateStatus('offline');
+            scheduleReconnect();
+        };
+
+        ws.onerror = () => {
+            updateStatus('offline');
+        };
+    }
+
+    function wsSend(msg) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            msg.id = msg.id || crypto.randomUUID();
+            msg.version = 1;
+            msg.timestamp = new Date().toISOString();
+            ws.send(JSON.stringify(msg));
+        }
+    }
+
+    function scheduleReconnect() {
+        if (reconnectTimer) return;
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            if (token) connectWebSocket();
+        }, 3000);
+    }
+
+    function updateStatus(state) {
+        const dot = document.getElementById('ws-dot');
+        const text = document.getElementById('ws-status');
+        dot.className = 'status-dot ' + state;
+        text.textContent = state === 'ok' ? 'Conectado' :
+                          state === 'connecting' ? 'Conectando...' : 'Desconectado';
+        document.getElementById('send-btn').disabled = state !== 'ok';
+    }
+
+    // ─── Message Handling ───────────────────────────────────
+
+    function handleMessage(msg) {
+        switch (msg.type) {
+            case 'auth_ok':
+                document.getElementById('device-name').textContent = deviceName;
+                addSystem('Conectado ao Jarvis');
+                break;
+
+            case 'auth_error':
+                addSystem('Autenticação falhou. Refaça o pareamento.');
+                localStorage.removeItem('jarvis_device_token');
+                localStorage.removeItem('jarvis_device_id');
+                showPairing();
+                break;
+
+            case 'command_ack':
+                if (!msg.payload.duplicate) {
+                    addSystem(`Executando: ${msg.payload.command}`);
+                }
+                break;
+
+            case 'command_result':
+                removePending(msg.id);
+                if (msg.payload.ok === false) {
+                    addError(msg.payload.error || 'Erro desconhecido');
+                } else {
+                    addJarvis(formatResult(msg.payload));
+                }
+                break;
+
+            case 'command_error':
+                removePending(msg.id);
+                addError(msg.payload.error || 'Erro de comando');
+                break;
+
+            case 'confirmation_required':
+                showConfirmation(msg);
+                break;
+
+            case 'pong':
+                break;
+
+            default:
+                console.log('Unknown message:', msg);
+        }
+    }
+
+    function formatResult(result) {
+        if (typeof result === 'string') return result;
+        if (result.text) return result.text;
+        if (result.message) return result.message;
+        try {
+            return JSON.stringify(result, null, 2);
+        } catch {
+            return String(result);
+        }
+    }
+
+    // ─── UI Messages ────────────────────────────────────────
+
+    function addUser(text) {
+        const div = document.createElement('div');
+        div.className = 'msg user';
+        div.textContent = text;
+        document.getElementById('messages').appendChild(div);
+        scrollToBottom();
+    }
+
+    function addJarvis(text) {
+        const div = document.createElement('div');
+        div.className = 'msg jarvis';
+        div.textContent = text;
+        document.getElementById('messages').appendChild(div);
+        scrollToBottom();
+    }
+
+    function addSystem(text) {
+        const div = document.createElement('div');
+        div.className = 'msg system';
+        div.textContent = text;
+        document.getElementById('messages').appendChild(div);
+        scrollToBottom();
+    }
+
+    function addError(text) {
+        const div = document.createElement('div');
+        div.className = 'msg jarvis error';
+        div.textContent = text;
+        document.getElementById('messages').appendChild(div);
+        scrollToBottom();
+    }
+
+    function showConfirmation(msg) {
+        const div = document.createElement('div');
+        div.className = 'msg confirmation';
+        div.innerHTML = `
+            <div><strong>Confirmação Necessária</strong></div>
+            <div style="margin:6px 0">${msg.payload.action || 'Ação'}</div>
+            <div style="font-size:12px;color:var(--text2)">${msg.payload.risco || msg.payload.risk || ''}</div>
+            <div class="confirm-btns">
+                <button class="btn-cancel" onclick="confirmAction('${msg.id}', false)">Cancelar</button>
+                <button class="btn-confirm" onclick="confirmAction('${msg.id}', true)">Confirmar</button>
+            </div>
+        `;
+        document.getElementById('messages').appendChild(div);
+        pendingConfirmations[msg.id] = msg;
+        scrollToBottom();
+    }
+
+    function confirmAction(requestId, accepted) {
+        const msg = pendingConfirmations[requestId];
+        if (!msg) return;
+
+        wsSend({
+            type: 'confirmation_response',
+            id: requestId,
+            payload: {
+                token: msg.payload.token,
+                accepted,
+            },
+        });
+
+        // Remove the confirmation UI
+        const div = document.querySelector(`[onclick="confirmAction('${requestId}', true)"]`)?.parentElement?.parentElement;
+        if (div) div.remove();
+
+        delete pendingConfirmations[requestId];
+        addSystem(accepted ? 'Confirmado' : 'Cancelado');
+    }
+
+    function removePending(requestId) {
+        // Remove pending indicator if any
+    }
+
+    function scrollToBottom() {
+        const el = document.getElementById('messages');
+        el.scrollTop = el.scrollHeight;
+    }
+
+    // ─── Send Command ───────────────────────────────────────
+
+    function sendCommand() {
+        const input = document.getElementById('cmd-input');
+        const text = input.value.trim();
+        if (!text) return;
+
+        addUser(text);
+        input.value = '';
+
+        const requestId = crypto.randomUUID();
+        wsSend({
+            type: 'command',
+            id: requestId,
+            payload: { command: text },
+        });
+    }
+
+    // ─── Screen Management ──────────────────────────────────
+
+    function showPairing() {
+        document.getElementById('pairing').classList.add('active');
+        document.getElementById('chat').classList.remove('active');
+    }
+
+    function showChat() {
+        document.getElementById('pairing').classList.remove('active');
+        document.getElementById('chat').classList.add('active');
+    }
+
+    // ─── Init ───────────────────────────────────────────────
+
+    document.getElementById('cmd-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendCommand();
+    });
+
+    document.getElementById('pairing-code').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doPairing();
+    });
+
+    // Check if we have stored credentials
+    if (token && deviceId) {
+        showChat();
+        connectWebSocket();
+    } else {
+        showPairing();
+    }
+
+    // Register service worker for PWA
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    // Ping to keep alive
+    setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            wsSend({ type: 'ping', payload: {} });
+        }
+    }, 25000);
+    </script>
+</body>
+</html>

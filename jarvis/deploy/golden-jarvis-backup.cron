@@ -1,0 +1,3 @@
+# Instale somente depois de testar backup.sh e test_restore.sh manualmente.
+# Backup diario as 03:15, com ambiente protegido carregado pelo administrador.
+15 3 * * * jarvis cd /opt/golden-jarvis && docker compose exec -T backend /opt/golden-jarvis/deploy/backup.sh >> /opt/golden-jarvis/logs/backup.log 2>&1

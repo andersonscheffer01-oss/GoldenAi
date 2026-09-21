@@ -1,0 +1,20 @@
+{
+  "attachment_id": "ca9274cf-535b-4c90-8550-ef2d7b23d6da",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-13T18:00:03.842846+00:00",
+  "source_type": "file",
+  "original_name": "data.json",
+  "mime_type": "application/json",
+  "extension": ".json",
+  "size_bytes": 10,
+  "sha256": "A895A3C78B51D645771ADC9C66CFF8AE01335BD34256C3BC8661C0B0C73B5001",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\ca9274cf-535b-4c90-8550-ef2d7b23d6da_data.json",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 1,
+    "preview_chars": 9
+  }
+}

@@ -1,0 +1,2 @@
+// comentario seguro
+void OnTick() {}

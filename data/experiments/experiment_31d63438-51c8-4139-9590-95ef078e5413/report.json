@@ -1,0 +1,87 @@
+{
+  "costs": {
+    "commission": 0.0,
+    "currency": "POINTS",
+    "slippage": 0.0,
+    "spread": 0.0
+  },
+  "dataset": {
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "created_at": "2026-08-14T20:50:54.612118+00:00",
+    "data_hash": "D1E3B0A3D6DE90B142E65CED83DBA1A9C60CD9AC4F5B29FF563F9EDD6F838B7F",
+    "dataset_id": "dataset_ca635981-d985-4feb-b816-cfcd979b6b48",
+    "end": "2026-01-06T00:00:00+00:00",
+    "row_count": 6,
+    "source": "csv:_market_chat_test.csv",
+    "start": "2026-01-01T00:00:00+00:00",
+    "symbol": "TEST",
+    "timeframe": "H1",
+    "timezone": "UTC"
+  },
+  "hashes": {
+    "backtest_hash": "443E2332362E837B7564C8D46BDE4BB9829037C85D3F157E650CAA7783F9CB1C",
+    "dataset_hash": "9FBE72E3D132ECB62D6EC6C2BDC13D790365D630244B8BF80A83B04CF68C3303",
+    "strategy_hash": "5C2F2E2C7AF11EEFA1419656FAF462A7D4A0577FAEEC87450877375061E732EA"
+  },
+  "interpretation": "Hipotese testada; resultado observado nao e garantia de resultado futuro.",
+  "limitations": [
+    "Resultados observados em backtest nao garantem resultados futuros.",
+    "Convencao temporal: sinal no fechamento N, entrada em N+1."
+  ],
+  "observed_results": {
+    "average_loss": null,
+    "average_trade": 2.0,
+    "average_win": 2.0,
+    "best_trade": 2.0,
+    "breakeven": 0,
+    "consecutive_losses": 0,
+    "consecutive_wins": 2,
+    "expectancy": 2.0,
+    "gross_loss": 0,
+    "gross_profit": 4.0,
+    "loss_rate": 0.0,
+    "losses": 0,
+    "max_drawdown_abs": 0.0,
+    "max_drawdown_pct": 0.0,
+    "net_profit": 4.0,
+    "payoff_ratio": null,
+    "profit_factor": null,
+    "sharpe_simplified": null,
+    "total_trades": 2,
+    "win_rate": 1.0,
+    "wins": 2,
+    "worst_trade": 2.0
+  },
+  "period": {
+    "end": "2026-01-06T00:00:00+00:00",
+    "start": "2026-01-01T00:00:00+00:00"
+  },
+  "strategy": {
+    "created_at": "",
+    "description": "Hipotese conceitual gerada a partir de Market V1; exige validacao Quant antes de qualquer conclusao.",
+    "entry_logic_identifier": "close_above_open",
+    "exit_logic_identifier": "hold_bars",
+    "name": "Market hypothesis",
+    "parameters": {
+      "alignment": "TREND_UP",
+      "hold_bars": 1,
+      "market_analysis_id": "market_analysis_26938289-c02b-4828-aef5-830b71f91aa1",
+      "signal": "POTENTIAL_LONG_CONTEXT"
+    },
+    "strategy_id": "",
+    "symbol": "TEST",
+    "timeframe": "H1",
+    "unknowns": {
+      "permission_required": "quant_backtest_before_use",
+      "validation_status": "NOT_BACKTESTED"
+    },
+    "version": "1.0"
+  },
+  "warnings": []
+}

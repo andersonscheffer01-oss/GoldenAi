@@ -1,0 +1,138 @@
+# NEXT SESSION HANDOFF
+
+**Date:** 2026-09-17
+**Status:** Phase 6.3A COMPLETE
+
+---
+
+## Architecture Current State
+
+```
+server_agent.py
+  -> LanConfig (GOLDEN_GATEWAY_LAN + GOLDEN_SSL env vars)
+  -> SSLContext load (if GOLDEN_SSL=1)
+  -> HTTP Server (8765) on bind_address + SSL
+  -> Gateway (8766) dual bind + SSL + CORS middleware:
+       127.0.0.1:8766 (loopback)
+       192.168.1.100:8766 (LAN, when enabled)
+       OPTIONS preflight handled by middleware
+       CORS headers on all HTTP responses
+  -> Same JarvisService -> SecurityManager -> ToolRegistry
+```
+
+## Completed Phases
+
+| Phase | Status |
+|-------|--------|
+| 1 - OpenClaw Audit | PASS |
+| 2 - Plugin Kernel | PASS |
+| 3 - Security Audit | PASS |
+| 4 - Gateway/WebSocket | PASS |
+| 5 - Browser Operational | PASS |
+| 5.1 - Real Browser Activation | PASS |
+| 6 - LAN + Device Pairing + PWA | PASS |
+| 6.1 - PC LAN Validation | PASS |
+| 6.2 - Production LAN Startup | PASS |
+| 6.2A - Dual Bind Fix | PASS |
+| 6.3 - HTTPS/WSS LOCAL | PASS |
+| 6.3A - CORS/Preflight Fix | PASS |
+
+## Test Count
+
+```
+453 passed, 4 skipped, 0 failed
+```
+
+## Network
+
+| Service | LAN OFF | LAN ON | LAN + SSL |
+|---------|---------|--------|-----------|
+| HTTP/PWA | 127.0.0.1:8765 | 192.168.1.100:8765 | https://192.168.1.100:8765 |
+| Gateway WS | 127.0.0.1:8766 | 127.0.0.1:8766 + LAN:8766 | wss://192.168.1.100:8766 |
+| Ollama | 127.0.0.1:11434 | 127.0.0.1:11434 | 127.0.0.1:11434 |
+
+## Security Invariants
+
+- Pairing code generation: localhost ONLY (403 from LAN)
+- Pairing confirm: LAN allowed with valid code
+- GET /devices: requires authentication
+- Device tokens: hashed, never plaintext
+- AuthManager: accepts shared token OR device token
+- Gateway: transport only, no tool execution
+- SecurityManager: single authority for permissions
+- Idempotency: (session_id, request_id) deduplication
+- TLS: fail closed, no HTTP fallback when GOLDEN_SSL=1
+- Private keys: never web-accessible, never logged, never in API
+
+## Components
+
+| Component | File | Status |
+|-----------|------|--------|
+| SSL Context | jarvis_core/ssl_context.py | Active, CA + server cert |
+| Gateway | jarvis_core/gateway/gateway.py | Active, dual bind, SSL |
+| Auth | jarvis_core/gateway/auth.py | Active, device tokens |
+| Device Pairing | jarvis_core/device_pairing.py | Active |
+| LAN Config | jarvis_core/lan_config.py | Active, SSL support |
+| Browser | jarvis_core/browser.py | Active, Playwright |
+| PWA | mobile.html | Active, ws/wss detection |
+| Service Worker | sw.js | Active |
+
+## Voice Status
+
+P1.4C — PAUSADO. Never reopen.
+
+## Certificate Files
+
+```
+C:\GoldenAI\certs\
+  ├── golden-local-ca.pem
+  ├── golden-local-ca.key
+  ├── golden-local-ca.cer
+  ├── golden-local-server.pem
+  ├── golden-local-server.key
+  └── metadata.json
+```
+
+## OpenClaw Policy
+
+Reference ONLY. Zero runtime dependency.
+
+## Next Phase
+
+**iPhone Trust Setup** — Install Root CA on iPhone, validate HTTPS/WSS.
+
+**Phase 7** — Multi-tab browsing.
+
+## Prohibited Regressions
+
+- Never bind 0.0.0.0 without explicit opt-in
+- Never expose to public internet
+- Never remove localhost-only pairing restriction
+- Never weaken SecurityManager
+- Never create duplicate services (single JarvisService)
+- Never fallback to HTTP when GOLDEN_SSL=1
+- Never expose private keys via web/API/logs
+
+## Resume Commands
+
+```bash
+# Run regression
+C:\GoldenAI\.venv\Scripts\python.exe -m pytest tests/ -v -q
+
+# Initialize certificates (one time)
+C:\GoldenAI\.venv\Scripts\python.exe -m jarvis_core.ssl_context init
+
+# Check certificate status
+C:\GoldenAI\.venv\Scripts\python.exe -m jarvis_core.ssl_context status
+
+# Add Root CA to Windows trust
+C:\GoldenAI\.venv\Scripts\python.exe -m jarvis_core.ssl_context add-trust
+
+# Start LAN + SSL
+set GOLDEN_GATEWAY_LAN=1
+set GOLDEN_SSL=1
+python server_agent.py
+
+# Start LAN OFF (no SSL)
+python server_agent.py
+```

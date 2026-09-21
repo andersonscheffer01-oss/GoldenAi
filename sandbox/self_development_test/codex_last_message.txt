@@ -1,0 +1,7 @@
+{
+  "name": "_edit_file",
+  "arguments": {
+    "file_path": "buggy_code.py",
+    "new_content": "def add(a, b):\n    return a + b"
+  }
+}

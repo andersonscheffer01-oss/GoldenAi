@@ -1,0 +1,553 @@
+{
+  "legacy": [
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 977.0766000001458,
+        "provider_complete_from_turn_ms": 977.0776000004844,
+        "first_text_chunk_from_turn_ms": 977.0789000031073,
+        "tts_request_start_from_turn_ms": 977.0800000042072,
+        "first_audio_bytes_from_turn_ms": 2749.1435000047204,
+        "playback_start_from_turn_ms": 2749.144500005059,
+        "response_complete_from_turn_ms": 11289.239900004759,
+        "tts_synthesis_duration_ms": 1772.0635000005132,
+        "audio_to_playback_ms": 0.0010000003385357559
+      }
+    },
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 846.794899996894,
+        "provider_complete_from_turn_ms": 846.795799996471,
+        "first_text_chunk_from_turn_ms": 846.7967999968096,
+        "tts_request_start_from_turn_ms": 846.7982000001939,
+        "first_audio_bytes_from_turn_ms": 2233.4140999955707,
+        "playback_start_from_turn_ms": 2233.4150999959093,
+        "response_complete_from_turn_ms": 9881.907899994985,
+        "tts_synthesis_duration_ms": 1386.6158999953768,
+        "audio_to_playback_ms": 0.0010000003385357559
+      }
+    },
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 598.716799999238,
+        "provider_complete_from_turn_ms": 598.7175000045681,
+        "first_text_chunk_from_turn_ms": 598.7181000018609,
+        "tts_request_start_from_turn_ms": 598.7195999987307,
+        "first_audio_bytes_from_turn_ms": 1899.8626000029617,
+        "playback_start_from_turn_ms": 1899.8961000033887,
+        "response_complete_from_turn_ms": 8552.805100000114,
+        "tts_synthesis_duration_ms": 1301.143000004231,
+        "audio_to_playback_ms": 0.0335000004270114
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 1832.6735000009649,
+        "provider_complete_from_turn_ms": 1832.674199999019,
+        "first_text_chunk_from_turn_ms": 1832.6748999970732,
+        "tts_request_start_from_turn_ms": 1832.6758999974118,
+        "first_audio_bytes_from_turn_ms": 3917.5600000016857,
+        "playback_start_from_turn_ms": 3917.561599999317,
+        "response_complete_from_turn_ms": 19570.897999998124,
+        "tts_synthesis_duration_ms": 2084.884100004274,
+        "audio_to_playback_ms": 0.0015999976312741637
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 1550.628199998755,
+        "provider_complete_from_turn_ms": 1550.629500001378,
+        "first_text_chunk_from_turn_ms": 1550.6303000001935,
+        "tts_request_start_from_turn_ms": 1550.6316000028164,
+        "first_audio_bytes_from_turn_ms": 3450.999300002877,
+        "playback_start_from_turn_ms": 3451.000399996701,
+        "response_complete_from_turn_ms": 17102.650799999537,
+        "tts_synthesis_duration_ms": 1900.3677000000607,
+        "audio_to_playback_ms": 0.0010999938240274787
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 1618.4770999971079,
+        "provider_complete_from_turn_ms": 1618.477800002438,
+        "first_text_chunk_from_turn_ms": 1618.4785000004922,
+        "tts_request_start_from_turn_ms": 1618.4800999981235,
+        "first_audio_bytes_from_turn_ms": 4120.864899996377,
+        "playback_start_from_turn_ms": 4120.865700002469,
+        "response_complete_from_turn_ms": 16775.044900001376,
+        "tts_synthesis_duration_ms": 2502.3847999982536,
+        "audio_to_playback_ms": 0.000800006091594696
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 2248.152799998934,
+        "provider_complete_from_turn_ms": 2248.1534000035026,
+        "first_text_chunk_from_turn_ms": 2248.154100001557,
+        "tts_request_start_from_turn_ms": 2248.1557999999495,
+        "first_audio_bytes_from_turn_ms": 4974.698600002739,
+        "playback_start_from_turn_ms": 4974.699500002316,
+        "response_complete_from_turn_ms": 23527.78400000534,
+        "tts_synthesis_duration_ms": 2726.5428000027896,
+        "audio_to_playback_ms": 0.0008999995770864189
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 1892.5649000011617,
+        "provider_complete_from_turn_ms": 1892.5656999999774,
+        "first_text_chunk_from_turn_ms": 1892.5665999995545,
+        "tts_request_start_from_turn_ms": 1892.5683000052231,
+        "first_audio_bytes_from_turn_ms": 5070.440900002723,
+        "playback_start_from_turn_ms": 5070.442500000354,
+        "response_complete_from_turn_ms": 21626.757100006216,
+        "tts_synthesis_duration_ms": 3177.8725999974995,
+        "audio_to_playback_ms": 0.0015999976312741637
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 3242.0764999988023,
+        "provider_complete_from_turn_ms": 3242.077099996095,
+        "first_text_chunk_from_turn_ms": 3242.077800001425,
+        "tts_request_start_from_turn_ms": 3242.0789999960107,
+        "first_audio_bytes_from_turn_ms": 8018.358900000749,
+        "playback_start_from_turn_ms": 8018.359999994573,
+        "response_complete_from_turn_ms": 38670.260300001246,
+        "tts_synthesis_duration_ms": 4776.279900004738,
+        "audio_to_playback_ms": 0.0010999938240274787
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 1537.0012999992468,
+        "provider_complete_from_turn_ms": 1537.0022999995854,
+        "first_text_chunk_from_turn_ms": 1537.003099998401,
+        "tts_request_start_from_turn_ms": 1537.0043000002624,
+        "first_audio_bytes_from_turn_ms": 3677.036799999769,
+        "playback_start_from_turn_ms": 3677.0381000023917,
+        "response_complete_from_turn_ms": 16328.013999998802,
+        "tts_synthesis_duration_ms": 2140.0324999995064,
+        "audio_to_playback_ms": 0.0013000026228837669
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 1958.5271999967517,
+        "provider_complete_from_turn_ms": 1958.5278000013204,
+        "first_text_chunk_from_turn_ms": 1958.5288999951445,
+        "tts_request_start_from_turn_ms": 1958.5299999962444,
+        "first_audio_bytes_from_turn_ms": 3992.0044999962556,
+        "playback_start_from_turn_ms": 3992.0055999973556,
+        "response_complete_from_turn_ms": 18642.44389999658,
+        "tts_synthesis_duration_ms": 2033.4745000000112,
+        "audio_to_playback_ms": 0.0011000010999850929
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 2441.5325000009034,
+        "provider_complete_from_turn_ms": 2441.5331999989576,
+        "first_text_chunk_from_turn_ms": 2441.5337999962503,
+        "tts_request_start_from_turn_ms": 2441.5349999981117,
+        "first_audio_bytes_from_turn_ms": 5277.81959999993,
+        "playback_start_from_turn_ms": 5277.821199997561,
+        "response_complete_from_turn_ms": 24924.13989999477,
+        "tts_synthesis_duration_ms": 2836.284600001818,
+        "audio_to_playback_ms": 0.0015999976312741637
+      }
+    }
+  ],
+  "sentence_stream": [
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 45.645099999092054,
+        "first_text_chunk_from_turn_ms": 950.5911999949603,
+        "tts_request_start_from_turn_ms": 950.5938000002061,
+        "first_audio_bytes_from_turn_ms": 2351.082099994528,
+        "playback_start_from_turn_ms": 2351.082099994528,
+        "response_complete_from_turn_ms": 10912.52149999491
+      }
+    },
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 44.60580000159098,
+        "first_text_chunk_from_turn_ms": 461.8902000001981,
+        "tts_request_start_from_turn_ms": 461.8923000016366,
+        "first_audio_bytes_from_turn_ms": 1826.559900000575,
+        "playback_start_from_turn_ms": 1826.559900000575,
+        "response_complete_from_turn_ms": 7385.1119999962975
+      }
+    },
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 44.1318000011961,
+        "first_text_chunk_from_turn_ms": 842.331900006684,
+        "tts_request_start_from_turn_ms": 842.3339000000851,
+        "first_audio_bytes_from_turn_ms": 2303.3819000047515,
+        "playback_start_from_turn_ms": 2303.3819000047515,
+        "response_complete_from_turn_ms": 9939.37270000606
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 60.851499998534564,
+        "first_text_chunk_from_turn_ms": 1104.2910000032862,
+        "tts_request_start_from_turn_ms": 11247.799400000076,
+        "first_audio_bytes_from_turn_ms": 2687.4510000052396,
+        "playback_start_from_turn_ms": 2687.4510000052396,
+        "response_complete_from_turn_ms": 21489.14930000319
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 61.134299998229835,
+        "first_text_chunk_from_turn_ms": 964.8081999985152,
+        "tts_request_start_from_turn_ms": 11304.374199993617,
+        "first_audio_bytes_from_turn_ms": 2661.156599999231,
+        "playback_start_from_turn_ms": 2661.156599999231,
+        "response_complete_from_turn_ms": 19563.69459999405
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 61.62860000040382,
+        "first_text_chunk_from_turn_ms": 688.510200001474,
+        "tts_request_start_from_turn_ms": 688.5116999983438,
+        "first_audio_bytes_from_turn_ms": 2417.179500000202,
+        "playback_start_from_turn_ms": 2417.179500000202,
+        "response_complete_from_turn_ms": 8960.451099999773
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 62.95269999827724,
+        "first_text_chunk_from_turn_ms": 482.54679999809014,
+        "tts_request_start_from_turn_ms": 16651.27969999594,
+        "first_audio_bytes_from_turn_ms": 2050.268499995582,
+        "playback_start_from_turn_ms": 2050.268499995582,
+        "response_complete_from_turn_ms": 24612.547600001562
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 63.29050000204006,
+        "first_text_chunk_from_turn_ms": 621.6246999974828,
+        "tts_request_start_from_turn_ms": 17963.43070000148,
+        "first_audio_bytes_from_turn_ms": 2280.130899998767,
+        "playback_start_from_turn_ms": 2280.130899998767,
+        "response_complete_from_turn_ms": 27138.270700001158
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 62.002899998333305,
+        "first_text_chunk_from_turn_ms": 691.1657999953604,
+        "tts_request_start_from_turn_ms": 16902.55839999736,
+        "first_audio_bytes_from_turn_ms": 1967.3394999990705,
+        "playback_start_from_turn_ms": 1967.3394999990705,
+        "response_complete_from_turn_ms": 25515.917199998512
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 56.34750000172062,
+        "first_text_chunk_from_turn_ms": 1509.6942000018316,
+        "tts_request_start_from_turn_ms": 16323.869300002116,
+        "first_audio_bytes_from_turn_ms": 3785.390600001847,
+        "playback_start_from_turn_ms": 3785.390600001847,
+        "response_complete_from_turn_ms": 29710.052700000233
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 56.24369999713963,
+        "first_text_chunk_from_turn_ms": 1650.0214999978198,
+        "tts_request_start_from_turn_ms": 16214.034299999184,
+        "first_audio_bytes_from_turn_ms": 3672.0659999991767,
+        "playback_start_from_turn_ms": 3672.0659999991767,
+        "response_complete_from_turn_ms": 28421.96430000331
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 60.33860000025015,
+        "first_text_chunk_from_turn_ms": 1792.658999998821,
+        "tts_request_start_from_turn_ms": 1792.661200001021,
+        "first_audio_bytes_from_turn_ms": 4170.281899998372,
+        "playback_start_from_turn_ms": 4170.281899998372,
+        "response_complete_from_turn_ms": 18807.6452000023
+      }
+    }
+  ],
+  "true_stream": [
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 44.26260000036564,
+        "provider_complete_from_turn_ms": 12274.680400005309,
+        "first_text_chunk_from_turn_ms": 1082.1571000051335,
+        "tts_request_start_from_turn_ms": 1082.159600002342,
+        "first_audio_bytes_from_turn_ms": 2252.4897000039346,
+        "playback_start_from_turn_ms": 2726.9287000017357,
+        "response_complete_from_turn_ms": 12274.685200005479,
+        "tts_synthesis_duration_ms": 1170.3301000015927,
+        "audio_to_playback_ms": 474.43899999780115
+      }
+    },
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 43.551200004003476,
+        "provider_complete_from_turn_ms": 9629.70150000183,
+        "first_text_chunk_from_turn_ms": 843.7974000044051,
+        "tts_request_start_from_turn_ms": 843.8001000031363,
+        "first_audio_bytes_from_turn_ms": 1653.9057000045432,
+        "playback_start_from_turn_ms": 2000.9783000059542,
+        "response_complete_from_turn_ms": 9629.70789999963,
+        "tts_synthesis_duration_ms": 810.1056000014069,
+        "audio_to_playback_ms": 347.07260000141105
+      }
+    },
+    {
+      "question": "Que horas são?",
+      "type": "resposta curta",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 42.470200001844205,
+        "provider_complete_from_turn_ms": 11213.253499998245,
+        "first_text_chunk_from_turn_ms": 944.3536000035238,
+        "tts_request_start_from_turn_ms": 944.355200001155,
+        "first_audio_bytes_from_turn_ms": 2189.9950000006356,
+        "playback_start_from_turn_ms": 2566.1011999982293,
+        "response_complete_from_turn_ms": 11213.256700000784,
+        "tts_synthesis_duration_ms": 1245.6397999994806,
+        "audio_to_playback_ms": 376.10619999759365
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 62.19549999514129,
+        "provider_complete_from_turn_ms": 18767.16839999426,
+        "first_text_chunk_from_turn_ms": 761.3682999945013,
+        "tts_request_start_from_turn_ms": 761.3706999982242,
+        "first_audio_bytes_from_turn_ms": 1867.625599996245,
+        "playback_start_from_turn_ms": 2263.890399997763,
+        "response_complete_from_turn_ms": 18767.171299994516,
+        "tts_synthesis_duration_ms": 1106.2548999980208,
+        "audio_to_playback_ms": 396.26480000151787
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 61.8082000000868,
+        "provider_complete_from_turn_ms": 20316.0485000044,
+        "first_text_chunk_from_turn_ms": 933.5429999991902,
+        "tts_request_start_from_turn_ms": 933.5451000006287,
+        "first_audio_bytes_from_turn_ms": 1951.3159999987693,
+        "playback_start_from_turn_ms": 2476.6056000007666,
+        "response_complete_from_turn_ms": 20316.052000001946,
+        "tts_synthesis_duration_ms": 1017.7708999981405,
+        "audio_to_playback_ms": 525.2896000019973
+      }
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "type": "resposta média",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 43.65430000325432,
+        "provider_complete_from_turn_ms": 21167.900900007226,
+        "first_text_chunk_from_turn_ms": 876.3312000010046,
+        "tts_request_start_from_turn_ms": 876.3331000009202,
+        "first_audio_bytes_from_turn_ms": 2130.3554000041913,
+        "playback_start_from_turn_ms": 2488.3873000071617,
+        "response_complete_from_turn_ms": 21167.90420000325,
+        "tts_synthesis_duration_ms": 1254.022300003271,
+        "audio_to_playback_ms": 358.03190000297036
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 45.53760000271723,
+        "provider_complete_from_turn_ms": 30947.27669999702,
+        "first_text_chunk_from_turn_ms": 707.9119999980321,
+        "tts_request_start_from_turn_ms": 707.9137999971863,
+        "first_audio_bytes_from_turn_ms": 1690.8567999998922,
+        "playback_start_from_turn_ms": 2070.2834999974584,
+        "response_complete_from_turn_ms": 30947.279899999558,
+        "tts_synthesis_duration_ms": 982.943000002706,
+        "audio_to_playback_ms": 379.4266999975662
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 63.02259999938542,
+        "provider_complete_from_turn_ms": 28170.956899994053,
+        "first_text_chunk_from_turn_ms": 691.8412999948487,
+        "tts_request_start_from_turn_ms": 691.8434999970486,
+        "first_audio_bytes_from_turn_ms": 1819.9725999947987,
+        "playback_start_from_turn_ms": 2226.145299995551,
+        "response_complete_from_turn_ms": 28170.960399998876,
+        "tts_synthesis_duration_ms": 1128.12909999775,
+        "audio_to_playback_ms": 406.17270000075223
+      }
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "type": "3 itens",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 55.94250000285683,
+        "provider_complete_from_turn_ms": 33592.630400002236,
+        "first_text_chunk_from_turn_ms": 822.6028000062797,
+        "tts_request_start_from_turn_ms": 822.6046000054339,
+        "first_audio_bytes_from_turn_ms": 2768.1343000003835,
+        "playback_start_from_turn_ms": 3253.4871000025305,
+        "response_complete_from_turn_ms": 33592.63340000325,
+        "tts_synthesis_duration_ms": 1945.5296999949496,
+        "audio_to_playback_ms": 485.352800002147
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 1,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 57.35149999964051,
+        "provider_complete_from_turn_ms": 30680.63429999893,
+        "first_text_chunk_from_turn_ms": 1650.5581000019447,
+        "tts_request_start_from_turn_ms": 1650.5603000041447,
+        "first_audio_bytes_from_turn_ms": 3631.1858000044595,
+        "playback_start_from_turn_ms": 4672.972699998354,
+        "response_complete_from_turn_ms": 30680.63770000299,
+        "tts_synthesis_duration_ms": 1980.6255000003148,
+        "audio_to_playback_ms": 1041.7868999938946
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 2,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 60.43640000279993,
+        "provider_complete_from_turn_ms": 18216.298999999708,
+        "first_text_chunk_from_turn_ms": 1693.8863000032143,
+        "tts_request_start_from_turn_ms": 1693.888000001607,
+        "first_audio_bytes_from_turn_ms": 3692.550500003563,
+        "playback_start_from_turn_ms": 4559.28750000021,
+        "response_complete_from_turn_ms": 18216.30250000453,
+        "tts_synthesis_duration_ms": 1998.6625000019558,
+        "audio_to_playback_ms": 866.7369999966468
+      }
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "type": "3-5 frases",
+      "run": 3,
+      "metrics": {
+        "provider_first_token_from_turn_ms": 58.08719999913592,
+        "provider_complete_from_turn_ms": 27544.826800003648,
+        "first_text_chunk_from_turn_ms": 1549.7949000055087,
+        "tts_request_start_from_turn_ms": 1549.7968000054243,
+        "first_audio_bytes_from_turn_ms": 2657.6822999995784,
+        "playback_start_from_turn_ms": 3235.4362000041874,
+        "response_complete_from_turn_ms": 27544.83060000348,
+        "tts_synthesis_duration_ms": 1107.885499994154,
+        "audio_to_playback_ms": 577.753900004609
+      }
+    }
+  ],
+  "stats": {
+    "legacy_kpi_p50": 3954.7835999983363,
+    "sentence_kpi_p50": 2384.130799997365,
+    "true_kpi_p50": 2527.2442500026955
+  }
+}

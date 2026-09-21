@@ -1,0 +1,20 @@
+{
+  "attachment_id": "cd4f9273-2474-413e-8cf7-87ada09c7e8c",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-19T22:08:48.536012+00:00",
+  "source_type": "file",
+  "original_name": "caption.srt",
+  "mime_type": "text/plain",
+  "extension": ".srt",
+  "size_bytes": 38,
+  "sha256": "C448A42759A1348E6439B1995FA71E3EDFC63F38D47EBC06F5786CF4CCB4D649",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\cd4f9273-2474-413e-8cf7-87ada09c7e8c_caption.srt",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 3,
+    "preview_chars": 35
+  }
+}

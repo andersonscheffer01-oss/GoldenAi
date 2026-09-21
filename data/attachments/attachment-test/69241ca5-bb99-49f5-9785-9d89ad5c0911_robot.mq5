@@ -1,0 +1,2 @@
+#property strict
+void OnTick(){}

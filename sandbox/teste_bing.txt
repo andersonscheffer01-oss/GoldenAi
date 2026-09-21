@@ -1,0 +1,2 @@
+status=COMPLETED engine=bing count=3
+[{"url": "https://www.bing.com/ck/a?!&&p=187b02be1ba5fdd728f70141c838b2327d4bd55d36979dc3d4d7404fe8e18b96JmltdHM9MTc4NzA5NzYwMA&ptn=3&ver=2&hsh=4&fclid=0d0d0acd-7b90-61b2-17f6-1d777a76606f&u=a1aHR0cHM6Ly93d3cubG93ZXMuY29tL2wvc2hvcC9sb3dlcy1tYXJrZXRwbGFjZT9tc29ja2lkPTBkMGQwYWNkN2I5MDYxYjIxN2Y2MWQ3NzdhNzY2MDZm&ntb=1", "title": "Lowe’s Marketplace | Shop From Invited Sellers", "snippet": "A: It’s a platform for approved third-party sellers to list and sell their products alongside Lowe’s inventory.

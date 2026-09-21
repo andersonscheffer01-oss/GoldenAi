@@ -1,0 +1,20 @@
+.receipt-full {
+  display: block;
+  max-width: 100%;
+  max-height: 72dvh;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.receipt-frame {
+  width: 100%;
+  height: 70dvh;
+  border: 1px solid #e5e9ee;
+  border-radius: 7px;
+}
+.category-manager { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.category-manager-row { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface, #fff); }
+.category-manager-row i { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 6px; color: #fff; font-style: normal; font-weight: 700; }
+.category-manager-row div { display: grid; gap: 2px; min-width: 0; }
+.category-manager-row strong { overflow-wrap: anywhere; }
+.category-manager-row small { color: var(--muted); }

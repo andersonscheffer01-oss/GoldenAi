@@ -1,0 +1,76 @@
+root: C:\GoldenAI
+projects_dir: C:\GoldenAI\projetos
+backups_dir: C:\GoldenAI\backups
+logs_dir: C:\GoldenAI\logs
+experiments_dir: C:\GoldenAI\experiments
+sandbox_dir: C:\GoldenAI\sandbox
+data_dir: C:\GoldenAI\data
+read_only: false
+write_enabled: true
+command_execution_enabled: true
+mt5_integration_enabled: true
+trading_mode: demo
+media_enabled: true
+internet_enabled: true
+pdf_editing_enabled: true
+code_analysis_enabled: true
+file_browser_enabled: true
+allowed_paths:
+  - C:\GoldenAI\projetos
+  - C:\GoldenAI\sandbox
+  - C:\GoldenAI\sandbox\downloads
+  - C:\GoldenAI\experiments
+  - C:\GoldenAI\knowledge
+  - C:\GoldenAI\data
+  - C:\GoldenAI\logs
+  - C:\Users\Anderson\Desktop
+  - C:\Users\Anderson\Documents
+  - C:\Users\Anderson\Downloads
+  - C:\Users\Anderson\AppData\Roaming\MetaQuotes\Terminal
+protected_paths:
+  - C:\GoldenAI\app
+  - C:\GoldenAI\studio
+  - C:\GoldenAI\backups
+model_routing_enabled: true
+ollama_api_url: http://127.0.0.1:11434
+model_profiles:
+  FAST: qwen2.5-coder:14b
+  CODER: qwen2.5-coder:14b
+  EXPERT: qwen2.5-coder:14b
+model_timeout_fast: 60
+model_timeout_coder: 120
+model_timeout_expert: 300
+model_circuit_failure_threshold: 3
+model_circuit_cooldown_seconds: 60
+model_auto_download: false
+external_first: false
+nvidia_api_url: https://integrate.api.nvidia.com/v1
+nvidia_api_key: ""
+nvidia_model_name: z-ai/glm-5.2
+nvidia_timeout_seconds: 180
+opencode:
+  enabled: true
+  cmd: C:\Users\Anderson\AppData\Roaming\npm\opencode.cmd
+  models:
+    - opencode/deepseek-v4-flash-free
+    - opencode/hy3-free
+    - opencode/nemotron-3.5-lightning-free
+  timeout_seconds: 900
+  work_dir: C:\GoldenAI\sandbox\opencode
+tools:
+  enabled: true
+  auto_discovery: true
+  allow_remote_paid: false
+  default_cost_policy: free_or_local
+coding_agent:
+  enabled: true
+  provider: codex_cli
+  local_only: true
+  paid_fallback: false
+  model_provider: ollama
+  self_development_enabled: true
+  checkpoint_enabled: true
+  backup_before_edit: true
+  rollback_on_failure: true
+  timeout_seconds: 300
+

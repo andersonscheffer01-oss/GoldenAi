@@ -1,0 +1,18 @@
+{
+  "attachment_id": "7dbf7acc-8ba1-4787-aea6-0d193f11868b",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-19T22:08:42.254350+00:00",
+  "source_type": "file",
+  "original_name": "blocked.exe",
+  "mime_type": "application/x-msdownload",
+  "extension": ".exe",
+  "size_bytes": 2,
+  "sha256": "9B8DB510EF42B8ED54A3712636FDA55A4F8CFCD5493E20B74AB00CD4F3979F2D",
+  "storage_path": "",
+  "processing_status": "BLOCKED_EXECUTABLE",
+  "metadata": {
+    "category": "text",
+    "status": "BLOCKED_EXECUTABLE"
+  }
+}

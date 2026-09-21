@@ -1,0 +1,173 @@
+{
+  "streaming": [
+    {
+      "question": "Que horas são?",
+      "run": 1,
+      "mode": "streaming",
+      "provider_ttft_ms": 491.3742999997339,
+      "tts_first_audio_ms": 2814.2692999972496,
+      "total_response_ms": 8467.18890000193,
+      "response": "Desculpe, mas eu não tenho acesso a informações em tempo real.",
+      "error": ""
+    },
+    {
+      "question": "Que horas são?",
+      "run": 2,
+      "mode": "streaming",
+      "provider_ttft_ms": 45.62900000018999,
+      "tts_first_audio_ms": 2743.679700004577,
+      "total_response_ms": 11391.685199996573,
+      "response": "Desculpe, não tenho acesso a informações em tempo real, então não sei exatamente que horas são agora",
+      "error": ""
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "run": 1,
+      "mode": "streaming",
+      "provider_ttft_ms": 76.89160000154516,
+      "tts_first_audio_ms": 2170.223699999042,
+      "total_response_ms": 18944.543300000078,
+      "response": "Latência é o tempo de espera entre a solicitação de um serviço e a resposta recebida. Em tecnologia,",
+      "error": ""
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "run": 2,
+      "mode": "streaming",
+      "provider_ttft_ms": 60.47000000398839,
+      "tts_first_audio_ms": 3128.9175000056275,
+      "total_response_ms": 14683.118800006923,
+      "response": "Latência é o tempo que leva para uma informação ser transmitida de um ponto a outro, geralmente usad",
+      "error": ""
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "run": 1,
+      "mode": "streaming",
+      "provider_ttft_ms": 75.16500000201631,
+      "tts_first_audio_ms": 2049.3288000070606,
+      "total_response_ms": 25779.7716999994,
+      "response": "1. Implementar mais recursos de segurança para proteger os dados dos usuários.\n2. Oferecer suporte e",
+      "error": ""
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "run": 2,
+      "mode": "streaming",
+      "provider_ttft_ms": 64.50559999939287,
+      "tts_first_audio_ms": 2243.2565999988583,
+      "total_response_ms": 24986.591100001533,
+      "response": "1. Implementar um sistema de feedback automático para otimizar os serviços.\n2. Expandir a integrabil",
+      "error": ""
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "run": 1,
+      "mode": "streaming",
+      "provider_ttft_ms": 76.53550000395626,
+      "tts_first_audio_ms": 3517.750699997123,
+      "total_response_ms": 26244.333200003894,
+      "response": "Trading algoritmico é uma forma de negociação de ativos financeiros em que os trades são executados ",
+      "error": ""
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "run": 2,
+      "mode": "streaming",
+      "provider_ttft_ms": 64.43969999963883,
+      "tts_first_audio_ms": 3838.000900002953,
+      "total_response_ms": 29126.406000003044,
+      "response": "Trading algorítico é a prática de usar programas de computador, conhecidos como algoritmos, para aut",
+      "error": ""
+    }
+  ],
+  "legacy": [
+    {
+      "question": "Que horas são?",
+      "run": 1,
+      "mode": "legacy",
+      "provider_ttft_ms": 1109.2408999975305,
+      "tts_first_audio_ms": 1774.8519000015222,
+      "total_response_ms": 12520.994799997425,
+      "response": "Desculpe, mas não tenho acesso a informações em tempo real, então não posso dizer exatamente que hor",
+      "error": ""
+    },
+    {
+      "question": "Que horas são?",
+      "run": 2,
+      "mode": "legacy",
+      "provider_ttft_ms": 903.8995000009891,
+      "tts_first_audio_ms": 2689.204200003587,
+      "total_response_ms": 12141.366700001527,
+      "response": "Desculpe, mas eu não tenho acesso a informações em tempo real, então não sei que horas são agora.",
+      "error": ""
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "run": 1,
+      "mode": "legacy",
+      "provider_ttft_ms": 1318.4545000040089,
+      "tts_first_audio_ms": 1774.6236000020872,
+      "total_response_ms": 11726.607200005674,
+      "response": "Latência é o tempo de espera ou atraso entre o momento em que uma solicitação é feita e o momento em",
+      "error": ""
+    },
+    {
+      "question": "Explique rapidamente o que é latência.",
+      "run": 2,
+      "mode": "legacy",
+      "provider_ttft_ms": 1679.6193000045605,
+      "tts_first_audio_ms": 1738.039600000775,
+      "total_response_ms": 16041.057800001,
+      "response": "Latência é o tempo de espera entre a requisição de uma informação e a sua entrega. Em redes de compu",
+      "error": ""
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "run": 1,
+      "mode": "legacy",
+      "provider_ttft_ms": 2367.8063999977894,
+      "tts_first_audio_ms": 1781.3306000025477,
+      "total_response_ms": 22806.055200002447,
+      "response": "1. Atualize a interface com um design mais moderno e atraente.\n2. Implemente recursos de personaliza",
+      "error": ""
+    },
+    {
+      "question": "Me dê três ideias para melhorar o Golden.",
+      "run": 2,
+      "mode": "legacy",
+      "provider_ttft_ms": 4789.313799999945,
+      "tts_first_audio_ms": 3488.627999999153,
+      "total_response_ms": 51830.87279999745,
+      "response": "1. **Incentivos Personalizados**: Implementar um sistema de recompensas personalizadas que reconheça",
+      "error": ""
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "run": 1,
+      "mode": "legacy",
+      "provider_ttft_ms": 3495.9401000014623,
+      "tts_first_audio_ms": 2809.6017999996548,
+      "total_response_ms": 32846.111600003496,
+      "response": "Trading algorítico é uma técnica de negociação em que os trades são executados por algoritmos, que s",
+      "error": ""
+    },
+    {
+      "question": "O que é trading algoritmico?",
+      "run": 2,
+      "mode": "legacy",
+      "provider_ttft_ms": 1953.3350999990944,
+      "tts_first_audio_ms": 1879.1989000019385,
+      "total_response_ms": 18474.170200002845,
+      "response": "Trading algoritmico é uma forma de negociação de ativos financeiros em que os trades são executados ",
+      "error": ""
+    }
+  ],
+  "stats": {
+    "legacy_ttft_p50": 1816.4772000018274,
+    "streaming_ttft_p50": 69.83530000070459,
+    "legacy_tts_p50": 1830.264750002243,
+    "streaming_tts_p50": 2778.9745000009134,
+    "delta": 948.7097499986703
+  }
+}

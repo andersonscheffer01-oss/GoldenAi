@@ -1,0 +1,20 @@
+{
+  "attachment_id": "d4eb6fad-f2a2-4c5f-ad7d-3d67c19c4b7b",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-13T23:59:03.731263+00:00",
+  "source_type": "file",
+  "original_name": "readme.md",
+  "mime_type": "text/markdown",
+  "extension": ".md",
+  "size_bytes": 7,
+  "sha256": "09076DD9BBB7DC875DFACD1413CA2AFC7B33209341F66C94C150499F2BB11220",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\d4eb6fad-f2a2-4c5f-ad7d-3d67c19c4b7b_readme.md",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 1,
+    "preview_chars": 6
+  }
+}

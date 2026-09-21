@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golden AI Browser Test Fixture</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .hidden { display: none; }
+        #test-form { margin: 20px 0; }
+        #test-form input, #test-form textarea { display: block; margin: 5px 0; padding: 5px; }
+        #dynamic-content { padding: 10px; background: #f0f0f0; }
+        #scroll-target { height: 2000px; background: linear-gradient(red, blue); }
+        a { color: blue; }
+    </style>
+</head>
+<body>
+    <h1 id="main-title">Browser Test Page</h1>
+    <p id="description">This is a test page for Golden AI browser tools.</p>
+
+    <h2>Links</h2>
+    <a href="https://example.com" id="link-example">Example Link</a>
+    <a href="https://python.org" id="link-python">Python Link</a>
+
+    <h2>Form</h2>
+    <form id="test-form">
+        <input type="text" id="name-input" name="name" placeholder="Enter your name" aria-label="Name field">
+        <input type="email" id="email-input" name="email" placeholder="Enter your email">
+        <textarea id="message-input" name="message" placeholder="Enter message"></textarea>
+        <select id="country-select" name="country">
+            <option value="us">United States</option>
+            <option value="br">Brazil</option>
+        </select>
+        <button type="submit" id="submit-btn">Submit Form</button>
+        <button type="button" id="action-btn" onclick="showDynamic()">Show Dynamic</button>
+    </form>
+
+    <h2>Interactive Elements</h2>
+    <button id="click-counter-btn" onclick="incrementCounter()">Click Me</button>
+    <span id="counter-display">0</span>
+    <div id="dynamic-content" class="hidden">Dynamic content loaded!</div>
+
+    <h2>Scrollable Area</h2>
+    <div id="scroll-area" style="height: 200px; overflow-y: auto; border: 1px solid #ccc;">
+        <div id="scroll-target">
+            <p style="padding: 10px;">Scroll content line 1</p>
+            <p style="padding: 10px;">Scroll content line 2</p>
+            <p style="padding: 10px;">Scroll content line 3</p>
+        </div>
+    </div>
+
+    <script>
+        let counter = 0;
+        function incrementCounter() {
+            counter++;
+            document.getElementById('counter-display').textContent = counter;
+        }
+        function showDynamic() {
+            document.getElementById('dynamic-content').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "cost_model": {
+    "commission": 0.0,
+    "currency": "POINTS",
+    "slippage": 0.0,
+    "spread": 0.0
+  },
+  "created_at": "2026-08-19T22:29:32.626142+00:00",
+  "dataset": {
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "created_at": "2026-08-19T22:29:32.620792+00:00",
+    "data_hash": "D1E3B0A3D6DE90B142E65CED83DBA1A9C60CD9AC4F5B29FF563F9EDD6F838B7F",
+    "dataset_id": "dataset_1ad5aebc-b612-4042-bd5f-6105768abee2",
+    "end": "2026-01-06T00:00:00+00:00",
+    "row_count": 6,
+    "source": "csv:_market_chat_test.csv",
+    "start": "2026-01-01T00:00:00+00:00",
+    "symbol": "TEST",
+    "timeframe": "H1",
+    "timezone": "UTC"
+  },
+  "development_segment": "TRAIN",
+  "execution_assumptions": "Signals are computed after candle N closes. Entries occur no earlier than candle N+1. No future candle is used to decide earlier entries.",
+  "final_evaluation_segment": "HOLDOUT",
+  "initial_capital": 10000.0,
+  "period": {
+    "end": "2026-01-06T00:00:00+00:00",
+    "start": "2026-01-01T00:00:00+00:00"
+  },
+  "position_sizing": {
+    "quantity": 1.0
+  },
+  "seed": 1,
+  "segments": [],
+  "selection_segment": "VALIDATION",
+  "strategy": {
+    "created_at": "",
+    "description": "Hipotese conceitual gerada a partir de Market V1; exige validacao Quant antes de qualquer conclusao.",
+    "entry_logic_identifier": "close_above_open",
+    "exit_logic_identifier": "hold_bars",
+    "name": "Market hypothesis",
+    "parameters": {
+      "alignment": "TREND_UP",
+      "hold_bars": 1,
+      "market_analysis_id": "market_analysis_b321b1c8-2d7a-47a1-9ff9-431809819102",
+      "signal": "POTENTIAL_LONG_CONTEXT"
+    },
+    "strategy_id": "",
+    "symbol": "TEST",
+    "timeframe": "H1",
+    "unknowns": {
+      "permission_required": "quant_backtest_before_use",
+      "validation_status": "NOT_BACKTESTED"
+    },
+    "version": "1.0"
+  }
+}

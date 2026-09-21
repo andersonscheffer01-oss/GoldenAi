@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>JARVIS UI — Markdown XSS Tests</title>
+<style>
+  body { font-family: monospace; background: #0d0d0d; color: #e8e8e8; padding: 20px; }
+  .pass { color: #22c55e; }
+  .fail { color: #ef4444; font-weight: bold; }
+  .test { margin: 8px 0; padding: 8px; background: #1a1a1a; border-radius: 4px; }
+  .test .label { color: #999; }
+  .summary { margin-top: 20px; padding: 12px; background: #141414; border: 1px solid #2a2a35; border-radius: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>Markdown XSS Tests</h1>
+<div id="results"></div>
+<div id="summary" class="summary"></div>
+
+<script src="../lib/marked.min.js"></script>
+<script src="../src/markdown-sanitizer.js"></script>
+<script>
+(function() {
+  const results = document.getElementById('results');
+  const summary = document.getElementById('summary');
+  let passed = 0, failed = 0;
+
+  const XSS_PAYLOADS = [
+    { name: 'script tag', input: '<script>alert(1)</script>', mustNotContain: ['<script', 'alert'] },
+    { name: 'script with src', input: '<script src="evil.js"></script>', mustNotContain: ['<script'] },
+    { name: 'img onerror', input: '<img src=x onerror=alert(1)>', mustNotContain: ['onerror', 'alert'] },
+    { name: 'img onerror (quoted)', input: '<img src="x" onerror="alert(1)">', mustNotContain: ['onerror', 'alert'] },
+    { name: 'SVG onload', input: '<svg onload=alert(1)>', mustNotContain: ['onload', 'alert'] },
+    { name: 'javascript URL', input: '[click](javascript:alert(1))', mustNotContain: ['javascript:'] },
+    { name: 'javascript URL (uppercase)', input: '[click](JavaScript:alert(1))', mustNotContain: ['javascript:', 'JavaScript:'] },
+    { name: 'data URL', input: '[click](data:text/html,<script>alert(1)</script>)', mustNotContain: ['<script'] },
+    { name: 'iframe', input: '<iframe src="evil.com"></iframe>', mustNotContain: ['<iframe'] },
+    { name: 'object', input: '<object data="evil.swf"></object>', mustNotContain: ['<object'] },
+    { name: 'embed', input: '<embed src="evil.swf">', mustNotContain: ['<embed'] },
+    { name: 'form', input: '<form action="evil.com"><input type="submit"></form>', mustNotContain: ['<form', '<input'] },
+    { name: 'meta refresh', input: '<meta http-equiv="refresh" content="0;url=evil.com">', mustNotContain: ['<meta'] },
+    { name: 'link stylesheet', input: '<link rel="stylesheet" href="evil.css">', mustNotContain: ['<link'] },
+    { name: 'style tag', input: '<style>body{background:red}</style>', mustNotContain: ['<style'] },
+    { name: 'div with onclick', input: '<div onclick="alert(1)">click</div>', mustNotContain: ['onclick', 'alert'] },
+    { name: 'body with onload', input: '<body onload="alert(1)">', mustNotContain: ['onload', 'alert'] },
+    { name: 'input with autofocus', input: '<input autofocus onfocus="alert(1)">', mustNotContain: ['onfocus', 'alert'] },
+    { name: 'details with ontoggle', input: '<details open ontoggle="alert(1)">test</details>', mustNotContain: ['ontoggle', 'alert'] },
+    { name: 'marquee with onstart', input: '<marquee onstart="alert(1)">test</marquee>', mustNotContain: ['onstart', 'alert'] },
+    { name: 'video with onerror', input: '<video><source onerror="alert(1)"></video>', mustNotContain: ['onerror', 'alert'] },
+    { name: 'math tag', input: '<math><mi//xlink:href="javascript:alert(1)">test</math>', mustNotContain: ['javascript:'] },
+    { name: 'mixed case script', input: '<ScRiPt>alert(1)</ScRiPt>', mustNotContain: ['alert'] },
+    { name: 'nested script', input: '<scr<script>ipt>alert(1)</scr</script>ipt>', mustNotContain: ['alert'] },
+    { name: 'HTML entity bypass', input: '<img src=x onerror=&#97;&#108;&#101;&#114;&#116;(1)>', mustNotContain: ['alert'] },
+    { name: 'markdown with inline HTML', input: 'Hello <b onclick="alert(1)">world</b>', mustNotContain: ['onclick', 'alert'] },
+    { name: 'markdown link with JS URL', input: '[clickme](javascript:void(0))', mustNotContain: ['javascript:'] },
+    { name: 'markdown image with JS URL', input: '![img](javascript:alert(1))', mustNotContain: ['javascript:'] },
+    { name: 'markdown image with onerror', input: '![img](x onerror=alert(1))', mustNotContain: ['onerror', 'alert'] },
+    { name: 'table with script', input: '| a | b |\n|---|---|\n| <script>alert(1)</script> | c |', mustNotContain: ['<script', 'alert'] },
+  ];
+
+  // Safe patterns that SHOULD render
+  const SAFE_PATTERNS = [
+    { name: 'bold text', input: '**bold**', shouldContain: ['<b>', 'bold'] },
+    { name: 'italic text', input: '*italic*', shouldContain: ['<em>', 'italic'] },
+    { name: 'code block', input: '`code`', shouldContain: ['<code>', 'code'] },
+    { name: 'heading', input: '# Title', shouldContain: ['<h1', 'Title'] },
+    { name: 'list', input: '- item', shouldContain: ['<li', 'item'] },
+    { name: 'link (safe)', input: '[click](https://example.com)', shouldContain: ['<a', 'example.com'] },
+    { name: 'image (safe)', input: '![alt](https://example.com/img.png)', shouldContain: ['<img', 'example.com'] },
+  ];
+
+  function runTest(test, type) {
+    const output = window.SafeMarkdown(test.input);
+    const div = document.createElement('div');
+    div.className = 'test';
+
+    let pass = true;
+    const checks = type === 'xss' ? test.mustNotContain : test.shouldContain;
+
+    for (const check of checks) {
+      if (type === 'xss') {
+        if (output.toLowerCase().includes(check.toLowerCase())) {
+          pass = false;
+          break;
+        }
+      } else {
+        if (!output.toLowerCase().includes(check.toLowerCase())) {
+          pass = false;
+          break;
+        }
+      }
+    }
+
+    if (pass) {
+      passed++;
+      div.innerHTML = `<span class="pass">PASS</span> <span class="label">${test.name}</span>`;
+    } else {
+      failed++;
+      div.innerHTML = `<span class="fail">FAIL</span> <span class="label">${test.name}</span><br><small>Input: ${escape(test.input)}<br>Output: ${escape(output)}</small>`;
+    }
+    results.appendChild(div);
+  }
+
+  function escape(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // Run XSS tests
+  const xssHeader = document.createElement('h2');
+  xssHeader.textContent = 'XSS Prevention Tests';
+  results.appendChild(xssHeader);
+  XSS_PAYLOADS.forEach(t => runTest(t, 'xss'));
+
+  // Run safe pattern tests
+  const safeHeader = document.createElement('h2');
+  safeHeader.textContent = 'Safe Markdown Rendering Tests';
+  results.appendChild(safeHeader);
+  SAFE_PATTERNS.forEach(t => runTest(t, 'safe'));
+
+  // Summary
+  const total = passed + failed;
+  summary.innerHTML = `
+    <strong>Results:</strong> <span class="pass">${passed} passed</span> / <span class="${failed ? 'fail' : 'pass'}">${failed} failed</span> / ${total} total<br>
+    <strong>Verdict:</strong> ${failed === 0 ? '<span class="pass">ALL XSS TESTS PASSED</span>' : '<span class="fail">XSS VULNERABILITIES DETECTED</span>'}
+  `;
+
+  // Export for programmatic access
+  window.XSS_TEST_RESULTS = { passed, failed, total };
+})();
+</script>
+</body>
+</html>

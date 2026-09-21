@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f6f8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Golden Jarvis</title>
+  <link rel="manifest" href="/manifest.json"><link rel="apple-touch-icon" href="/assets/icons/icon-192.png"><link rel="stylesheet" href="/assets/css/app.css"><link rel="stylesheet" href="/assets/css/finance-media.css">
+</head>
+<body class="finance-theme">
+  <div class="app-shell">
+    <aside class="desktop-sidebar" aria-label="Navegação financeira">
+      <div class="sidebar-brand"><span class="brand-mark">GJ</span><div><strong>Golden Jarvis</strong><small>Gestão financeira</small></div></div>
+      <nav class="sidebar-nav">
+        <button class="side-item active" data-finance-section="overview"><span>⌂</span>Visão geral</button><button class="side-item" data-finance-section="entries"><span>≡</span>Lançamentos</button><button class="side-item" data-finance-section="accounts"><span>▣</span>Contas</button><button class="side-item" data-finance-section="cards"><span>▤</span>Cartões</button><button class="side-item" data-target-view="open-finance"><span>↻</span>Open Finance</button><button class="side-item" data-finance-section="budgets"><span>◫</span>Orçamentos</button><button class="side-item" data-finance-section="installments"><span>◷</span>Parcelas</button><button class="side-item" data-finance-section="invoices"><span>▤</span>Faturas</button><button class="side-item" data-target-view="alertas"><span>!</span>Alertas</button><button class="side-item" data-finance-section="reports"><span>⌁</span>Relatórios</button>
+      </nav>
+      <div class="sidebar-nav sidebar-bottom"><button class="side-item" data-target-view="jarvis"><span>✦</span>Jarvis</button><button class="side-item" data-target-view="config"><span>⚙</span>Ajustes</button></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark">GJ</span><strong>Golden Jarvis</strong></div>
+        <div class="period-control" id="periodControl"><label for="periodPreset">Período</label><select id="periodPreset"><option value="today">Hoje</option><option value="week">Semana atual</option><option value="month" selected>Mês atual</option><option value="previous-month">Mês anterior</option><option value="30-days">Últimos 30 dias</option><option value="year">Este ano</option><option value="custom">Personalizado</option></select><div id="customPeriod" class="custom-period hidden"><input id="filterStart" type="date" aria-label="Data inicial"><input id="filterEnd" type="date" aria-label="Data final"><button class="secondary-btn" id="applyPeriod">Aplicar</button></div></div>
+        <div class="top-actions"><button class="primary-btn" id="addEntryTop">+ Adicionar lançamento</button><button class="icon-only" id="notificationsTop" title="Notificações" aria-label="Notificações">●</button><div class="system-pill"><span id="apiDot" class="dot"></span><span id="apiStatus">Conectando...</span></div><button class="user-menu" id="userMenu"><span id="userInitial">U</span><strong id="userName">Usuário</strong></button></div>
+      </header>
+      <main class="main-area">
+        <section id="view-financas" class="view active"></section>
+        <section id="view-jarvis" class="view chat-view"><div class="chat-toolbar"><div><strong>Conversas</strong><div id="conversationStatus" class="toolbar-note">Carregando...</div></div><button class="secondary-btn" id="newConversationButton">Nova conversa</button></div><div id="conversationList" class="conversation-list"></div><div class="messages" id="messages"></div><div class="composer"><div id="chatPreview" class="preview hidden"></div><div class="composer-row"><button class="round-btn" id="cameraButton" title="Câmera">Foto</button><button class="round-btn" id="attachButton" title="Anexar">Anexar</button><textarea id="chatInput" class="chat-input" rows="1" maxlength="4000" placeholder="Mensagem para Golden Jarvis..." autocomplete="off"></textarea><button class="round-btn muted" id="micButton" title="Voz">Voz</button><button class="send-btn" id="sendButton">Enviar</button></div><input id="chatImageInput" class="hidden-input" type="file" accept="image/*" capture="environment"><input id="chatFileInput" class="hidden-input" type="file" accept="image/jpeg,image/png,image/webp,application/pdf"></div></section>
+        <section id="view-open-finance" class="view"></section><section id="view-alertas" class="view"></section><section id="view-config" class="view"></section>
+      </main>
+    </div>
+    <button class="mobile-fab" id="mobileAdd" aria-label="Adicionar lançamento">+</button>
+    <nav class="bottom-nav" aria-label="Menu principal"><button class="nav-item active" data-finance-section="overview"><span>⌂</span>Início</button><button class="nav-item" data-finance-section="entries"><span>≡</span>Lançamentos</button><button class="nav-item add-placeholder" id="addNav"><span>+</span>Adicionar</button><button class="nav-item" data-target-view="open-finance"><span>↻</span>Open Finance</button><button class="nav-item" id="moreNav"><span>•••</span>Mais</button></nav>
+  </div>
+  <div id="actionSheetRoot"></div>
+  <script src="https://cdn.pluggy.ai/pluggy-connect/v2.8.2/pluggy-connect.js"></script><script src="/assets/js/api.js?v=0.29.0"></script><script src="/assets/js/auth.js?v=0.29.0"></script><script src="/assets/js/chat.js?v=0.29.0"></script><script src="/assets/js/dashboard.js?v=0.29.0"></script><script src="/assets/js/upload.js?v=0.29.0"></script><script src="/assets/js/open-finance.js?v=0.29.0"></script><script src="/assets/js/app.js?v=0.29.0"></script>
+</body>
+</html>

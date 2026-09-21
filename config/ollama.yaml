@@ -1,0 +1,24 @@
+# Golden AI - Configuração de Modelos
+# Ollama, NVIDIA e multi-provider
+
+model_routing_enabled: true
+ollama_api_url: http://127.0.0.1:11434
+
+model_profiles:
+  FAST: qwen2.5-coder:14b
+  CODER: qwen2.5-coder:14b
+  EXPERT: qwen2.5-coder:14b
+
+model_timeout_fast: 60
+model_timeout_coder: 120
+model_timeout_expert: 300
+model_circuit_failure_threshold: 3
+model_circuit_cooldown_seconds: 60
+model_auto_download: false
+
+# Multi-provider fallback
+external_first: false
+nvidia_api_url: https://integrate.api.nvidia.com/v1
+nvidia_api_key: ""
+nvidia_model_name: z-ai/glm-5.2
+nvidia_timeout_seconds: 180

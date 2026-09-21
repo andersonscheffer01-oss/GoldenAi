@@ -1,0 +1,21 @@
+# Golden AI - Docker Ignore
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+_archive_debug
+backups
+logs
+data
+projetos
+sandbox
+experiments
+*.md
+!requirements.txt
+.vscode
+.idea
+*.swp
+*.swo

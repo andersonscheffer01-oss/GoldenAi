@@ -1,0 +1,20 @@
+{
+  "attachment_id": "ae035eb5-df0f-4b92-9fc0-3f6f55d983f6",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-19T22:29:14.874628+00:00",
+  "source_type": "file",
+  "original_name": "note.txt",
+  "mime_type": "text/plain",
+  "extension": ".txt",
+  "size_bytes": 48,
+  "sha256": "12B0105DF09E0BD415FE0A073BDFBA166E7695D50F23E2D5C194C87DBC08395F",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\ae035eb5-df0f-4b92-9fc0-3f6f55d983f6_note.txt",
+  "processing_status": "TOO_LARGE",
+  "metadata": {
+    "category": "text",
+    "status": "TOO_LARGE",
+    "line_count": 2,
+    "preview_chars": 46
+  }
+}

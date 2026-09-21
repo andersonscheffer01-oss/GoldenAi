@@ -1,0 +1,2659 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<script>if(window.self!==window.top){window.top.location.replace(window.location.href)}</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Golden AI - Dashboard</title>
+<style>
+:root { --gold:#D4A843; --bg:#0D0D0D; --bg2:#141414; --bg3:#1A1A1A; --border:#2A2A2A; --text:#EDEDED; --text2:#999; --green:#22C55E; --red:#EF4444; --blue:#3B82F6; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+.header { background:var(--bg2); border-bottom:1px solid var(--border); padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
+.header h1 { font-size:20px; display:flex; align-items:center; gap:10px; }
+.header h1 span { color:var(--gold); }
+.back-btn { background:var(--bg3); border:1px solid var(--border); color:var(--text2); padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; text-decoration:none; }
+.back-btn:hover { border-color:var(--gold); color:var(--gold); }
+.container { max-width:1400px; margin:0 auto; padding:24px; }
+.tabs { display:flex; gap:8px; margin-bottom:24px; }
+.tab { background:var(--bg3); border:1px solid var(--border); color:var(--text2); padding:8px 18px; border-radius:8px; cursor:pointer; font-size:13px; transition:all .2s; }
+.tab.active { border-color:var(--gold); color:var(--gold); background:rgba(212,168,67,0.1); }
+.tab:hover { border-color:var(--gold); }
+.stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+.stat-card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:20px; text-align:center; }
+.stat-value { font-size:28px; font-weight:700; color:var(--gold); }
+.stat-label { font-size:12px; color:var(--text2); margin-top:4px; }
+.section { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:24px; }
+.section-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.section-title { font-size:16px; font-weight:600; }
+.filter-bar { display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; align-items:center; }
+.filter-btn { background:var(--bg3); border:1px solid var(--border); color:var(--text2); padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; transition:all .2s; }
+.filter-btn.active, .filter-btn:hover { border-color:var(--gold); color:var(--gold); }
+.search-box { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:8px 14px; border-radius:8px; font-size:13px; flex:1; min-width:200px; }
+.search-box::placeholder { color:var(--text2); }
+.robot-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; }
+.robot-card { background:var(--bg3); border:1px solid var(--border); border-radius:10px; padding:16px; cursor:pointer; transition:all .2s; }
+.robot-card:hover { border-color:var(--gold); transform:translateY(-2px); }
+.robot-card.compiled { border-left:3px solid var(--green); }
+.robot-card.not-compiled { border-left:3px solid var(--red); }
+.robot-name { font-size:14px; font-weight:600; margin-bottom:8px; }
+.robot-desc { font-size:12px; color:var(--text); margin:8px 0; line-height:1.4; }
+.robot-stats { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.robot-stat { font-size:10px; color:var(--text2); background:var(--bg); padding:3px 8px; border-radius:4px; }
+.robot-stat.green { color:var(--green); }
+.robot-stat.blue { color:var(--blue); }
+.robot-stat.gold { color:var(--gold); }
+.form-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+.form-grid label { font-size:11px; color:var(--text2); display:block; margin-bottom:4px; }
+.form-grid input, .form-grid select { width:100%; background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:8px; border-radius:6px; font-size:13px; }
+#cmpStrategies label { display:flex !important; align-items:center; gap:6px; width:100%; margin:0; padding:4px 6px !important; overflow:hidden; }
+#cmpStrategies input[type="checkbox"] { width:auto !important; flex:0 0 auto; margin:0 !important; padding:0; }
+#cmpStrategies label:hover { background:var(--bg3); }
+.btn-gold { background:var(--gold); color:#0D0D0D; border:none; padding:10px 24px; border-radius:8px; cursor:pointer; font-weight:600; font-size:13px; }
+.btn-gold:hover { opacity:0.9; }
+.result-card { background:var(--bg3); padding:12px; border-radius:8px; text-align:center; }
+.result-card .value { font-size:20px; font-weight:700; }
+.result-card .label { font-size:10px; color:var(--text2); margin-top:4px; }
+@media(max-width:768px) { .stats-grid { grid-template-columns:repeat(2,1fr); } .form-grid { grid-template-columns:repeat(2,1fr); } .robot-grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div id="statusBar" style="background:#111;border-bottom:1px solid var(--border);padding:6px 20px;display:flex;gap:16px;font-size:12px;color:var(--dim);align-items:center;">
+  <span id="stMt5">⚪ MT5...</span>
+  <span id="stOllama">⚪ Ollama...</span>
+  <span id="stOpenrouter">⚪ OpenRouter...</span>
+  <span id="stCline">⚪ Cline...</span>
+  <span id="stDisk">💾...</span>
+  <span style="margin-left:auto;font-size:11px;color:var(--text2);" id="stVersion"></span>
+</div>
+<div class="header">
+  <h1>📊 <span>Golden AI</span> - Dashboard</h1>
+  <div style="display:flex;gap:12px;">
+    <a href="market.html" class="back-btn" style="border-color:var(--gold);color:var(--gold);">Radar Macro</a>
+    <a href="studio_v7.html" class="back-btn">← Voltar ao Chat</a>
+    <button class="back-btn" onclick="showSecurityPanel()">🔐 Segurança</button>
+    <button class="back-btn" onclick="location.reload()" style="border-color:var(--green);color:var(--green);">🔄 Atualizar</button>
+  </div>
+</div>
+<div class="container">
+  <!-- TABS -->
+  <div class="tabs">
+    <button class="tab active" id="tabRobots" onclick="showTab('robots')">🤖 Meus Robôs</button>
+    <button class="tab" id="tabBacktest" onclick="showTab('backtest')">📈 Backtest</button>
+    <button class="tab" id="tabScanner" onclick="showTab('scanner')">🔍 Scanner</button>
+    <button class="tab" id="tabCompare" onclick="showTab('compare')">Comparar Estrategias</button>
+    <button class="tab" id="tabValidation" onclick="showTab('validation')">Validacao</button>
+    <button class="tab" id="tabStrategies" onclick="showTab('strategies')">Estrategias</button>
+    <button class="tab" id="tabJarvis" onclick="showTab('jarvis')">🤖 Jarvis</button>
+  </div>
+
+  <!-- ═══ ROBOTS TAB ═══ -->
+  <div id="panelRobots">
+    <div class="stats-grid" id="statsGrid">
+      <div class="stat-card"><div class="stat-value" id="totalEAs">0</div><div class="stat-label">EAs Instalados</div></div>
+      <div class="stat-card"><div class="stat-value" id="compiledEAs">0</div><div class="stat-label">Compilados (.ex5)</div></div>
+      <div class="stat-card"><div class="stat-value" id="totalLines">0</div><div class="stat-label">Total de Linhas</div></div>
+      <div class="stat-card"><div class="stat-value" id="totalInputs">0</div><div class="stat-label">Parâmetros</div></div>
+    </div>
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🤖 Meus Robôs MQL5</span>
+        <span id="robotCount" style="color:var(--gold);font-size:13px;">Carregando...</span>
+      </div>
+      <div class="filter-bar">
+        <input type="text" class="search-box" id="searchBox" placeholder="🔍 Buscar robô..." oninput="filterRobots()">
+        <button class="filter-btn active" id="fAll" onclick="setFilter('all')">Todos</button>
+        <button class="filter-btn" id="fCompiled" onclick="setFilter('compiled')">✅ Compilados</button>
+        <button class="filter-btn" id="fNotCompiled" onclick="setFilter('notCompiled')">⚠️ Não Compilados</button>
+      </div>
+      <div class="robot-grid" id="robotGrid">
+        <div style="text-align:center;padding:40px;color:var(--text2);grid-column:1/-1;">⏳ Carregando robôs...</div>
+      </div>
+    </div>
+    <div class="section" id="robotDetails" style="display:none;">
+      <div class="section-header">
+        <span class="section-title" id="detailsTitle">📋 Detalhes</span>
+        <button class="back-btn" onclick="document.getElementById('robotDetails').style.display='none'">✕ Fechar</button>
+      </div>
+      <div id="detailsContent" style="font-size:13px;line-height:1.6;"></div>
+    </div>
+  </div>
+
+  <!-- ═══ BACKTEST TAB ═══ -->
+  <div id="panelBacktest" style="display:none;">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">📈 Backtest com Dados Reais do MT5</span>
+        <span style="color:var(--green);font-size:12px;">🟢 MT5 Conectado</span>
+      </div>
+      
+      <!-- SELECIONAR ROBÔ DO MT5 -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
+        <div style="font-weight:600;color:var(--gold);margin-bottom:8px;">🤖 Selecionar Robô do MetaTrader 5</div>
+        <div style="display:flex;gap:12px;align-items:flex-end;">
+          <div style="flex:1;"><label style="font-size:11px;color:var(--text2);">Seus Robôs (Meus Robos)</label><select id="btRobot" onchange="onRobotSelect()" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;margin-top:4px;"><option value="">-- Selecione um robô --</option></select></div>
+          <button class="btn-gold" onclick="analyzeRobot()" style="margin-bottom:4px;">🔍 Analisar Robô</button>
+        </div>
+        <div id="robotAnalysis" style="display:none;margin-top:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;"></div>
+      </div>
+
+      <!-- CONFIGURAÇÕES MANUAIS -->
+      <div style="font-weight:600;color:var(--text2);margin-bottom:8px;font-size:13px;">⚙️ Configurações do Backtest</div>
+      <div class="form-grid">
+        <div><label>Ativo</label><select id="btSymbol"><option value="XAUUSD">XAUUSD (Ouro)</option><option value="XAGUSD">XAGUSD (Prata)</option><option value="EURUSD">EURUSD</option><option value="GBPUSD">GBPUSD</option><option value="USDJPY">USDJPY</option><option value="US100">US100</option><option value="US30">US30</option><option value="US500">US500</option><option value="GER40">GER40</option><option value="BTCUSD">BTCUSD</option><option value="ETHUSD">ETHUSD</option></select></div>
+        <div><label>Timeframe</label><select id="btTimeframe"><option value="M1">M1</option><option value="M5">M5</option><option value="M15" selected>M15</option><option value="M30">M30</option><option value="H1">H1</option><option value="H4">H4</option><option value="D1">D1</option><option value="W1">W1</option></select></div>
+        <div><label>Estratégia</label><select id="btStrategy"><option value="ma_cross">Médias Móveis</option><option value="rsi_reversal">RSI</option><option value="bollinger">Bollinger</option><option value="macd">MACD</option><option value="scalping">Scalping EMA+ATR</option><option value="breakout">Breakout</option></select></div>
+        <div><label>Saldo Inicial ($)</label><input type="number" id="btBalance" value="10000"></div>
+      </div>
+      <div class="form-grid">
+        <div><label>Stop Loss (pontos)</label><input type="number" id="btSL" value="500"></div>
+        <div><label>Take Profit (pontos)</label><input type="number" id="btTP" value="1000"></div>
+        <div><label>Lote</label><input type="number" id="btLot" value="0.01" step="0.01"></div>
+        <div><label>Barras Históricas</label><input type="number" id="btCount" value="3000"></div>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap;align-items:center;">
+        <button class="btn-gold" onclick="runBacktest()">🚀 Simulação Rápida</button>
+        <button class="btn-gold" onclick="runRealBacktest()" style="background:var(--green);color:#0D0D0D;">⚡ Backtest Real no MT5</button>
+        <div style="display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid var(--blue);">
+          <button class="btn-gold" onclick="setAnalysisMode('day')" id="modePA" style="background:var(--blue);color:#fff;border-radius:0;border:none;">📊 Day Trade</button>
+          <button class="btn-gold" onclick="setAnalysisMode('scalp')" id="modeScalp" style="background:transparent;color:var(--blue);border-radius:0;border:none;border-left:1px solid var(--blue);">⚡ Scalp</button>
+          <button class="btn-gold" onclick="setAnalysisMode('swing')" id="modeSwing" style="background:transparent;color:var(--blue);border-radius:0;border:none;border-left:1px solid var(--blue);">📈 Swing</button>
+        </div>
+        <button class="btn-gold" onclick="runChartAnalysis()" style="background:var(--blue);color:#fff;">🧠 Analisar com IA</button>
+        <div style="display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid #7c3aed;">
+          <button class="btn-gold" id="specPA" onclick="setSpecialistMode('day')" style="background:#7c3aed;color:#fff;border-radius:0;border:none;font-size:11px;">📊 Day</button>
+          <button class="btn-gold" id="specSC" onclick="setSpecialistMode('scalp')" style="background:transparent;color:#F59E0B;border-radius:0;border:none;border-left:1px solid #7c3aed;font-size:11px;">⚡ Scalp</button>
+          <button class="btn-gold" id="specSW" onclick="setSpecialistMode('swing')" style="background:transparent;color:#22C55E;border-radius:0;border:none;border-left:1px solid #7c3aed;font-size:11px;">📈 Swing</button>
+        </div>
+        <button class="btn-gold" onclick="runFullAnalysis()" style="background:linear-gradient(135deg,#7c3aed,#2563eb);color:#fff;">🔬 Analisar</button>
+      </div>
+      <div style="margin-top:16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="color:var(--gold);font-weight:600;">🛡️ Breakeven + Trailing Stop</span>
+          <div style="display:flex;gap:8px;">
+            <button class="btn-gold" onclick="togglePositionManager()" id="pmToggleBtn" style="background:var(--purple);color:#fff;font-size:11px;padding:4px 12px;">🛡️ Ativar Manager</button>
+            <button class="btn-gold" onclick="runSimulator()" style="background:var(--gold);color:#0D0D0D;font-size:11px;padding:4px 12px;">🧪 Simular Impacto</button>
+          </div>
+        </div>
+        <div id="pmStatus"></div>
+      </div>
+      <div id="btResult" style="margin-top:16px;"></div>
+    </div>
+  </div>
+
+  <!-- ═══ SCANNER TAB ═══ -->
+  <div id="panelScanner" style="display:none;">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🔍 Golden Scanner - Monitoramento em Tempo Real</span>
+        <div>
+          <button class="btn-gold" onclick="scannerScanAll()" style="background:var(--purple);">📡 Scannear Todos</button>
+          <button class="btn-gold" onclick="scannerRadar()" style="background:linear-gradient(135deg,#1a8a4a,#2ecc71);">🎯 Radar</button>
+          <button class="btn-gold" onclick="scannerPerformance()" style="background:linear-gradient(135deg,#e67e22,#f39c12);">📊 Performance</button>
+          <button class="btn-gold" onclick="scannerStatistics()" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">📈 Statistics</button>
+          <button class="btn-gold" id="autoTradeBtn" onclick="toggleAutoTrade()" style="background:var(--bg3);color:var(--text2);">🤖 AUTO-TRADE: OFF</button>
+        </div>
+      </div>
+      <div class="form-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:15px;">
+        <div><label>Ativo (vazio = todos)</label><select id="scannerSymbol"><option value="">Todos os Ativos</option><option value="XAUUSD">XAUUSD</option><option value="XAGUSD">XAGUSD</option><option value="EURUSD">EURUSD</option><option value="GBPUSD">GBPUSD</option><option value="USDJPY">USDJPY</option><option value="US100">US100</option><option value="US30">US30</option><option value="US500">US500</option><option value="GER40">GER40</option><option value="BTCUSD">BTCUSD</option><option value="ETHUSD">ETHUSD</option></select></div>
+      </div>
+      <div id="scannerStatus" style="color:var(--dim);margin-bottom:10px;font-size:13px;">Clique em Scannear para iniciar...</div>
+      <div id="riskStatus" style="margin-bottom:10px;"></div>
+      <div id="scannerResults"></div>
+    </div>
+  </div>
+
+  <!-- ═══ COMPARE TAB ═══ -->
+  <div id="panelCompare" style="display:none;">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">⚖️ Comparar Estratégias</span>
+      </div>
+      <div class="form-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div><label>Ativo</label><select id="cmpSymbol"><option value="XAUUSD">XAUUSD (Ouro)</option><option value="XAGUSD">XAGUSD (Prata)</option><option value="EURUSD">EURUSD</option><option value="GBPUSD">GBPUSD</option><option value="USDJPY">USDJPY</option><option value="US100">US100</option><option value="US30">US30</option><option value="US500">US500</option><option value="GER40">GER40</option><option value="BTCUSD">BTCUSD</option><option value="ETHUSD">ETHUSD</option></select></div>
+        <div><label>Timeframe</label><select id="cmpTimeframe"><option value="M1">M1</option><option value="M5">M5</option><option value="M15" selected>M15</option><option value="M30">M30</option><option value="H1">H1</option><option value="H4">H4</option><option value="D1">D1</option><option value="W1">W1</option></select></div>
+        <div><label>Estratégias (marque várias)</label><div id="cmpStrategies" style="width:100%;min-height:92px;max-height:180px;overflow:auto;background:var(--bg2);color:var(--text);border:1px solid var(--border);padding:6px;"></div></div>
+        <div style="display:flex;align-items:flex-end;"><button class="btn-gold" onclick="runCompare()" style="width:100%;">⚖️ Comparar Todas</button></div>
+      </div>
+      <div id="cmpResult"></div>
+    </div>
+  </div>
+
+  <!-- VALIDATION TAB -->
+  <div id="panelValidation" style="display:none;">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Validacao de Estrategias</span>
+        <div>
+          <button class="btn-gold" onclick="runValidation()" style="background:linear-gradient(135deg,#059669,#10b981);">Rodar Validacao</button>
+          <button class="btn-gold" onclick="runMonteCarlo()" style="background:linear-gradient(135deg,#dc2626,#ef4444);">Monte Carlo</button>
+          <button class="btn-gold" onclick="runRobustness()" style="background:linear-gradient(135deg,#7c3aed,#a855f7);">Robustez</button>
+        </div>
+      </div>
+      <div class="form-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:15px;">
+        <div><label>Estratégia (opcional)</label><select id="valStrategy"><option value="">Parâmetros manuais</option></select></div>
+        <div><label>Win Rate %</label><input type="number" id="valWR" value="50" min="30" max="80"></div>
+        <div><label>Avg Win (R)</label><input type="number" id="valAvgWin" value="1.5" step="0.1" min="0.5" max="5"></div>
+        <div><label>Avg Loss (R)</label><input type="number" id="valAvgLoss" value="1.0" step="0.1" min="0.5" max="3"></div>
+        <div><label>Trades</label><input type="number" id="valTrades" value="200" min="50" max="1000"></div>
+        <div><label>Balance $</label><input type="number" id="valBalance" value="10000" min="1000" max="100000"></div>
+      </div>
+      <div id="valResult"></div>
+    </div>
+  </div>
+
+  <!-- ═══ STRATEGY MANAGER TAB ═══ -->
+  <div id="panelStrategies" style="display:none;">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Estrategias - 47 Setups (22 Scalp / 15 Day / 10 Swing)</span>
+        <div>
+          <button class="btn-gold" onclick="loadStrategies()" style="background:var(--gold);">Recarregar</button>
+        </div>
+      </div>
+      <!-- MODE TOGGLES -->
+      <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;">
+        <span style="font-size:12px;color:var(--text2);">Modos:</span>
+        <button id="modeScalp" class="filter-btn active" onclick="toggleMode('scalp')" style="border-color:var(--green);color:var(--green);">⚡ SCALP</button>
+        <button id="modeDay" class="filter-btn active" onclick="toggleMode('day')" style="border-color:var(--blue);color:var(--blue);"> DAY TRADE</button>
+        <button id="modeSwing" class="filter-btn active" onclick="toggleMode('swing')" style="border-color:#a855f7;color:#a855f7;"> SWING</button>
+        <span style="margin-left:16px;font-size:12px;color:var(--text2);">Presets:</span>
+        <button class="filter-btn" onclick="applyPreset('all')">Todos</button>
+        <button class="filter-btn" onclick="applyPreset('scalp')">Apenas Scalp</button>
+        <button class="filter-btn" onclick="applyPreset('day')">Apenas Day</button>
+        <button class="filter-btn" onclick="applyPreset('swing')">Apenas Swing</button>
+        <button class="filter-btn" onclick="applyPreset('conservative')">Conservador (Tier A)</button>
+        <button class="filter-btn" onclick="applyPreset('tier_a')">Apenas Tier A</button>
+      </div>
+      <!-- STATS -->
+      <div id="strategyStats" style="display:flex;gap:12px;margin-bottom:16px;"></div>
+      <!-- FILTER -->
+      <div class="filter-bar">
+        <button class="filter-btn active" id="filterAll" onclick="filterStrategies('all')">Todas</button>
+        <button class="filter-btn" id="filterON" onclick="filterStrategies('on')">ON</button>
+        <button class="filter-btn" id="filterOFF" onclick="filterStrategies('off')">OFF</button>
+        <button class="filter-btn" id="filterA" onclick="filterStrategies('A')">Tier A</button>
+        <button class="filter-btn" id="filterB" onclick="filterStrategies('B')">Tier B</button>
+        <button class="filter-btn" id="filterC" onclick="filterStrategies('C')">Tier C</button>
+        <input class="search-box" id="strategySearch" placeholder="Buscar estrategia..." oninput="filterStrategies()">
+      </div>
+      <!-- STRATEGY GRID -->
+      <div id="strategyGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;"></div>
+      <!-- AUTO RANKING -->
+      <div style="margin-top:20px;">
+        <div class="section-header">
+          <span class="section-title">Auto-Ranking (Recomendacoes)</span>
+          <button class="btn-gold" onclick="loadAutoRank()" style="background:linear-gradient(135deg,#f59e0b,#f97316);">Ver Recomendacoes</button>
+          <button class="btn-gold" onclick="loadStrategyAudit()" style="background:linear-gradient(135deg,#0ea5e9,#2563eb);">Auditar Regras</button>
+          <button class="btn-gold" onclick="runStrategyMatrix()" style="background:linear-gradient(135deg,#059669,#0f766e);">Matriz Backtest</button>
+          <button class="btn-gold" onclick="loadValidationAll()" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">Validar com Dados Reais</button>
+          <button class="btn-gold" onclick="importMT5History()" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);">Importar Historico MT5</button>
+        </div>
+        <div id="autoRankResult"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ JARVIS TAB ═══ -->
+  <div id="panelJarvis" style="display:none;">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🤖 Jarvis 2.0 — Assistente PC</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="jarvisStateBadge" style="font-size:12px;padding:4px 10px;border-radius:12px;background:rgba(59,130,246,.2);color:var(--blue);border:1px solid var(--blue);">IDLE</span>
+          <button class="btn-gold" onclick="refreshJarvisStatus()" style="background:var(--gold);">Atualizar</button>
+        </div>
+      </div>
+
+      <!-- STATUS CARDS -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;">
+        <div class="stat-card">
+          <div style="font-size:10px;color:var(--text2);">BRAIN (LLM)</div>
+          <div id="jarvisBrainModel" style="font-size:13px;color:var(--gold);font-weight:600;">qwen2.5-coder:14b</div>
+        </div>
+        <div class="stat-card">
+          <div style="font-size:10px;color:var(--text2);">WAKE WORD</div>
+          <div id="jarvisWakeWord" style="font-size:13px;color:var(--green);font-weight:600;">"jarvis" ON</div>
+        </div>
+        <div class="stat-card">
+          <div style="font-size:10px;color:var(--text2);">STT (WHISPER)</div>
+          <div id="jarvisWhisper" style="font-size:13px;color:var(--text);font-weight:600;">verificando...</div>
+        </div>
+        <div class="stat-card">
+          <div style="font-size:10px;color:var(--text2);">PENDENTES</div>
+          <div id="jarvisPending" style="font-size:13px;color:var(--text);font-weight:600;">0</div>
+        </div>
+      </div>
+
+      <!-- CHAT AREA -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:8px;">💬 Conversa com o Jarvis</div>
+        <div id="jarvisChat" style="max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
+          <div style="text-align:center;color:var(--text2);font-size:12px;padding:20px;">
+            Diga "Jarvis" + comando ou digite abaixo. Ex: "Jarvis abre o chrome"
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <input id="jarvisInput" type="text" placeholder="Digite um comando... (Enter para enviar)"
+                 style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:13px;outline:none;"
+                 onkeydown="if(event.key==='Enter')jarvisSend()">
+          <button class="btn-gold" onclick="jarvisSend()" id="jarvisSendBtn" style="padding:10px 20px;">Enviar</button>
+        </div>
+      </div>
+
+      <!-- QUICK COMMANDS -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+        <span style="font-size:11px;color:var(--text2);align-self:center;">Rápidos:</span>
+        <button class="filter-btn" onclick="jarvisQuick('que horas sao')">🕐 Hora</button>
+        <button class="filter-btn" onclick="jarvisQuick('como esta o computador')">💻 Status PC</button>
+        <button class="filter-btn" onclick="jarvisQuick('tira um print da tela')">📸 Print</button>
+        <button class="filter-btn" onclick="jarvisQuick('quais programas estao abertos')">📋 Processos</button>
+        <button class="filter-btn" onclick="jarvisQuick('abre os downloads')">📁 Downloads</button>
+        <button class="filter-btn" onclick="jarvisQuick('abre o metatrader')">📈 MT5</button>
+      </div>
+
+      <!-- HISTORY -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-size:12px;color:var(--text2);">📜 Histórico de Ações</div>
+          <button class="filter-btn" onclick="loadJarvisHistory()">Atualizar</button>
+        </div>
+        <div id="jarvisHistory" style="max-height:260px;overflow-y:auto;font-size:12px;">
+          <div style="color:var(--text2);text-align:center;padding:14px;">Nenhuma ação ainda.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="securityModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:50;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeSecurityPanel()">
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(680px,100%);max-height:85vh;overflow:auto;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;"><h2 style="font-size:17px;color:var(--gold);">🔐 Segurança e aprovações</h2><button class="back-btn" onclick="closeSecurityPanel()">✕</button></div>
+    <div id="securityBody" style="font-size:13px;color:var(--text2);">Carregando...</div>
+  </div>
+</div>
+
+<script>
+let allRobots = [];
+let currentFilter = 'all';
+
+async function securityData(){const r=await fetch('/api/security/status');return r.json()}
+function closeSecurityPanel(){document.getElementById('securityModal').style.display='none'}
+async function setSecurityMode(mode){const r=await fetch('/api/security/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});const d=await r.json();if(!d.ok)return alert(d.error||'Falha ao alterar modo');renderSecurityPanel(await securityData())}
+async function decideSecurity(id,action,scope){const r=await fetch('/api/security/'+(action==='approve'?'approve':'deny'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:id,scope:scope||'ONCE'})});const d=await r.json();if(!d.ok)return alert(d.error||'Falha na decisão');renderSecurityPanel(await securityData())}
+function renderSecurityPanel(d){const mode=d.mode||'READ_ONLY', labels={READ_ONLY:'Somente leitura',ASK:'Solicitar aprovação',AUTO_SAFE:'Automático seguro',FULL:'Acesso completo'}, pending=(d.requests||[]).filter(r=>r.status==='PENDING');let h='<div style="margin-bottom:12px;">Modo atual: <b style="color:var(--gold)">'+(labels[mode]||mode)+'</b></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;">';Object.entries(labels).forEach(([k,v])=>h+='<button class="filter-btn '+(k===mode?'active':'')+'" onclick="setSecurityMode(\''+k+'\')">'+v+'</button>');h+='<button class="filter-btn" style="color:var(--red);border-color:var(--red);" onclick="lockdownSecurity()">Bloquear agora</button></div><div style="margin-bottom:8px;">Ações aguardando aprovação</div>';h+=pending.length?pending.map(r=>'<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin:8px 0;"><b>'+r.action+'</b> <span style="color:var(--text2)">'+r.risk_level+'</span><div style="font-size:11px;margin-top:4px;word-break:break-word;">'+(r.target||'')+'<br>'+r.reason+'</div><div style="display:flex;gap:6px;margin-top:8px;"><button class="filter-btn active" onclick="decideSecurity(\''+r.request_id+'\',\'approve\',\'ONCE\')">Aprovar uma vez</button><button class="filter-btn" onclick="decideSecurity(\''+r.request_id+'\',\'approve\',\'TASK\')">Aprovar tarefa</button><button class="filter-btn" onclick="decideSecurity(\''+r.request_id+'\',\'deny\')">Negar</button></div></div>').join(''):'<div style="color:var(--text2);padding:10px 0;">Nenhuma aprovação pendente.</div>';h+='<div style="font-size:11px;color:var(--text2);margin-top:14px;">Operações de trading real exigem aprovação separada. O bloqueio interrompe o gerenciador de posições e impede novas mutações.</div>';document.getElementById('securityBody').innerHTML=h}
+async function lockdownSecurity(){if(!confirm('Ativar bloqueio imediato? Novas ações de escrita e trading serão impedidas.'))return;const r=await fetch('/api/security/lockdown',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const d=await r.json();if(!d.ok)return alert(d.error||'Falha ao bloquear');renderSecurityPanel(await securityData())}
+async function showSecurityPanel(){document.getElementById('securityModal').style.display='flex';try{renderSecurityPanel(await securityData())}catch(e){document.getElementById('securityBody').textContent='Falha ao carregar segurança.'}}
+
+// ═══ STATUS BAR ═══
+async function refreshStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const c = d.connections || {};
+    const setEl = (id, html) => { const el = document.getElementById(id); if(el) el.innerHTML = html; };
+    // MT5
+    if (c.mt5 && c.mt5.ok) {
+      setEl('stMt5', '<span style="color:var(--green);">🟢 MT5 ' + (c.mt5.account||'?') + ' ' + (c.mt5.server||'') + '</span>');
+    } else {
+      setEl('stMt5', '<span style="color:var(--red);">🔴 MT5 Desconectado</span>');
+    }
+    // Ollama
+    setEl('stOllama', c.ollama && c.ollama.ok ? '<span style="color:var(--green);">🟢 Ollama Local</span>' : '<span style="color:var(--red);">🔴 Ollama Off</span>');
+    // OpenRouter
+    setEl('stOpenrouter', c.openrouter && c.openrouter.ok ? '<span style="color:var(--green);">🟢 OpenRouter</span>' : '<span style="color:#888;">⚪ OpenRouter</span>');
+    // Cline
+    setEl('stCline', c.cline && c.cline.ok ? '<span style="color:var(--green);">🟢 ClinePass</span>' : '<span style="color:#888;">⚪ Cline</span>');
+    // Disk
+    if (d.system) {
+      setEl('stDisk', '💾 Disk: ' + d.system.disk.toFixed(1) + '% | CPU: ' + d.system.cpu.toFixed(0) + '% | RAM: ' + d.system.memory.toFixed(1) + '%');
+    }
+    setEl('stVersion', d.version || '');
+  } catch(e) {
+    const setEl = (id, html) => { const el = document.getElementById(id); if(el) el.innerHTML = html; };
+    setEl('stMt5', '<span style="color:var(--red);">🔴 Servidor offline</span>');
+  }
+}
+refreshStatus();
+setInterval(refreshStatus, 15000);
+
+// ═══ TAB SWITCHING ═══
+function showTab(tab) {
+  document.getElementById('panelRobots').style.display = tab === 'robots' ? 'block' : 'none';
+  document.getElementById('panelBacktest').style.display = tab === 'backtest' ? 'block' : 'none';
+  document.getElementById('panelScanner').style.display = tab === 'scanner' ? 'block' : 'none';
+  document.getElementById('panelCompare').style.display = tab === 'compare' ? 'block' : 'none';
+  document.getElementById('panelValidation').style.display = tab === 'validation' ? 'block' : 'none';
+  document.getElementById('panelStrategies').style.display = tab === 'strategies' ? 'block' : 'none';
+  document.getElementById('panelJarvis').style.display = tab === 'jarvis' ? 'block' : 'none';
+  document.getElementById('tabRobots').className = 'tab' + (tab === 'robots' ? ' active' : '');
+  document.getElementById('tabBacktest').className = 'tab' + (tab === 'backtest' ? ' active' : '');
+  document.getElementById('tabScanner').className = 'tab' + (tab === 'scanner' ? ' active' : '');
+  document.getElementById('tabCompare').className = 'tab' + (tab === 'compare' ? ' active' : '');
+  document.getElementById('tabValidation').className = 'tab' + (tab === 'validation' ? ' active' : '');
+  document.getElementById('tabStrategies').className = 'tab' + (tab === 'strategies' ? ' active' : '');
+  document.getElementById('tabJarvis').className = 'tab' + (tab === 'jarvis' ? ' active' : '');
+  if (tab === 'strategies' && !strategiesLoaded) loadStrategies();
+  if (tab === 'jarvis') refreshJarvisStatus();
+}
+
+// ═══ JARVIS PANEL ═══
+let jarvisLoading = false;
+
+async function refreshJarvisStatus() {
+  try {
+    const [brainR, voiceR] = await Promise.all([
+      fetch('/api/jarvis/brain/status', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),
+      fetch('/api/jarvis/voice/status', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+    ]);
+    const brain = await brainR.json();
+    const voice = await voiceR.json();
+    const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+    if (brain.ok) {
+      set('jarvisBrainModel', brain.model || 'n/a');
+      set('jarvisPending', String(brain.pending_steps || 0));
+      set('jarvisStateBadge', brain.state || 'IDLE');
+    }
+    if (voice.ok) {
+      set('jarvisWakeWord', '"' + (voice.wake_word || 'jarvis') + '" ' + (voice.wake_word_enabled ? 'ON' : 'OFF'));
+      set('jarvisWhisper', voice.whisper_available ? '✅ pronto' : '⚠️ indisponivel');
+    }
+  } catch(e) { console.error('Jarvis status:', e); }
+}
+
+function jarvisAddMsg(role, text, isTool) {
+  const chat = document.getElementById('jarvisChat');
+  if (!chat) return;
+  const div = document.createElement('div');
+  if (role === 'user') {
+    div.style.cssText = 'align-self:flex-end;max-width:80%;background:linear-gradient(135deg,var(--gold),#b8860b);color:#111;padding:8px 14px;border-radius:14px 14px 4px 14px;font-size:13px;';
+    div.textContent = text;
+  } else {
+    const bg = isTool ? 'rgba(34,197,94,.15);border:1px solid var(--green)' : 'var(--bg2);border:1px solid var(--border)';
+    div.style.cssText = 'align-self:flex-start;max-width:85%;background:' + bg + ';color:var(--text);padding:8px 14px;border-radius:14px 14px 14px 4px;font-size:13px;white-space:pre-wrap;';
+    div.textContent = text;
+  }
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function jarvisSend() {
+  const input = document.getElementById('jarvisInput');
+  const text = (input.value || '').trim();
+  if (!text || jarvisLoading) return;
+  input.value = '';
+  jarvisAddMsg('user', text);
+  jarvisLoading = true;
+  const btn = document.getElementById('jarvisSendBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Pensando...'; }
+  try {
+    const r = await fetch('/api/jarvis/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const d = await r.json();
+    if (d.ok) {
+      jarvisAddMsg('jarvis', d.response || '(sem resposta)', d.tool && d.tool !== 'respond');
+    } else {
+      jarvisAddMsg('jarvis', '❌ ' + (d.error || 'Erro desconhecido'));
+    }
+    refreshJarvisStatus();
+    loadJarvisHistory();
+  } catch(e) {
+    jarvisAddMsg('jarvis', '❌ Erro: ' + e.message);
+  }
+  jarvisLoading = false;
+  if (btn) { btn.disabled = false; btn.textContent = 'Enviar'; }
+}
+
+function jarvisQuick(text) {
+  const input = document.getElementById('jarvisInput');
+  if (input) { input.value = text; jarvisSend(); }
+}
+
+async function loadJarvisHistory() {
+  try {
+    const r = await fetch('/api/desktop/status', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d = await r.json();
+    const el = document.getElementById('jarvisHistory');
+    if (!el) return;
+    const hist = (d.history || []).slice(0, 15);
+    if (!hist.length) { el.innerHTML = '<div style="color:var(--text2);text-align:center;padding:14px;">Nenhuma ação ainda.</div>'; return; }
+    el.innerHTML = hist.map(h => {
+      const ok = h.status === 'executado';
+      const warn = h.status === 'aguardando_confirmacao';
+      const icon = ok ? '✅' : (warn ? '⏳' : (h.status === 'simulado' ? '🧪' : '❌'));
+      const time = h.timestamp ? new Date(h.timestamp * 1000).toLocaleTimeString('pt-BR') : '';
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);gap:8px;">' +
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + icon + ' ' + (h.command || h.tool || '?') + '</span>' +
+        '<span style="color:var(--text2);font-size:11px;white-space:nowrap;">' + time + '</span></div>';
+    }).join('');
+  } catch(e) { console.error('Jarvis history:', e); }
+}
+loadJarvisHistory();
+
+// ═══ LOAD ROBOTS ═══
+async function loadRobots() {
+  try {
+    const r = await fetch('/api/mt5/list_robots');
+    const d = await r.json();
+    if (d.ok) { allRobots = d.robots; renderStats(); renderRobots(); }
+    else { document.getElementById('robotGrid').innerHTML = '<div style="color:var(--red);grid-column:1/-1;">' + d.error + '</div>'; }
+  } catch(e) { document.getElementById('robotGrid').innerHTML = '<div style="color:var(--red);grid-column:1/-1;">Erro: ' + e.message + '</div>'; }
+}
+
+function renderStats() {
+  document.getElementById('totalEAs').textContent = allRobots.length;
+  document.getElementById('compiledEAs').textContent = allRobots.filter(r => r.compiled).length;
+  document.getElementById('totalLines').textContent = allRobots.reduce((a, r) => a + r.lines, 0).toLocaleString();
+  document.getElementById('totalInputs').textContent = allRobots.reduce((a, r) => a + r.inputs, 0);
+  document.getElementById('robotCount').textContent = allRobots.length + ' robôs';
+}
+
+function renderRobots() {
+  let filtered = allRobots;
+  if (currentFilter === 'compiled') filtered = filtered.filter(r => r.compiled);
+  if (currentFilter === 'notCompiled') filtered = filtered.filter(r => !r.compiled);
+  const q = document.getElementById('searchBox').value.toLowerCase();
+  if (q) filtered = filtered.filter(r => r.name.toLowerCase().includes(q) || (r.description || '').toLowerCase().includes(q));
+  if (!filtered.length) { document.getElementById('robotGrid').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2);grid-column:1/-1;">Nenhum robô encontrado</div>'; return; }
+  document.getElementById('robotGrid').innerHTML = filtered.map(r => {
+    const mod = new Date(r.modified * 1000).toLocaleDateString('pt-BR');
+    return '<div class="robot-card ' + (r.compiled ? 'compiled' : 'not-compiled') + '" onclick="showDetails(\'' + r.name.replace(/'/g, "\\'") + '\')">' +
+      '<div class="robot-name">' + (r.compiled ? '⚡' : '📝') + ' ' + r.name +
+      (r.compiled ? ' <span style="color:var(--green);font-size:10px;">EX5</span>' : ' <span style="color:var(--red);font-size:10px;">NO EX5</span>') + '</div>' +
+      (r.description ? '<div class="robot-desc">' + r.description + '</div>' : '') +
+      '<div style="font-size:11px;color:var(--text2);">' + mod + '</div>' +
+      '<div class="robot-stats"><span class="robot-stat green">' + r.lines + ' linhas</span><span class="robot-stat blue">' + r.functions + ' funções</span><span class="robot-stat gold">' + r.inputs + ' inputs</span><span class="robot-stat">' + r.size_kb + ' KB</span></div></div>';
+  }).join('');
+}
+
+async function showDetails(name) {
+  const panel = document.getElementById('robotDetails');
+  panel.style.display = 'block';
+  document.getElementById('detailsTitle').textContent = '📋 ' + name;
+  document.getElementById('detailsContent').innerHTML = '⏳ Carregando...';
+  try {
+    const r = await fetch('/api/mt5/robot_details', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+    const d = await r.json();
+    if (!d.ok) { document.getElementById('detailsContent').innerHTML = '<div style="color:var(--red);">' + d.error + '</div>'; return; }
+    let h = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">' +
+      '<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--green);">' + d.lines + '</div><div style="font-size:11px;color:var(--text2);">Linhas</div></div>' +
+      '<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--blue);">' + d.functions.length + '</div><div style="font-size:11px;color:var(--text2);">Funções</div></div>' +
+      '<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--gold);">' + d.inputs.length + '</div><div style="font-size:11px;color:var(--text2);">Inputs</div></div>' +
+      '<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center;"><div style="font-size:20px;font-weight:700;">' + d.size_kb + ' KB</div><div style="font-size:11px;color:var(--text2);">Tamanho</div></div></div>';
+    if (d.description) h += '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:12px;"><b>📝 Descrição:</b> ' + d.description + '</div>';
+    if (d.inputs.length) { h += '<div style="margin-bottom:12px;"><b>⚙️ Parâmetros (' + d.inputs.length + '):</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">'; d.inputs.forEach(i => h += '<span class="robot-stat gold">' + i + '</span>'); h += '</div></div>'; }
+    if (d.functions.length) { h += '<div><b>🔧 Funções (' + d.functions.length + '):</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">'; d.functions.forEach(f => h += '<span class="robot-stat blue">' + f + '()</span>'); h += '</div></div>'; }
+    document.getElementById('detailsContent').innerHTML = h;
+    panel.scrollIntoView({behavior:'smooth'});
+  } catch(e) { document.getElementById('detailsContent').innerHTML = '<div style="color:var(--red);">Erro: ' + e.message + '</div>'; }
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-bar .filter-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(f === 'all' ? 'fAll' : f === 'compiled' ? 'fCompiled' : 'fNotCompiled').classList.add('active');
+  renderRobots();
+}
+
+// ═══ LOAD ROBOTS INTO BACKTEST DROPDOWN ═══
+async function loadRobotsForBacktest() {
+  try {
+    const r = await fetch('/api/mt5/list_robots');
+    const d = await r.json();
+    if (d.ok && d.robots) {
+      const sel = document.getElementById('btRobot');
+      d.robots.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.name;
+        const comp = r.compiled ? '✅' : '📝';
+        opt.textContent = comp + ' ' + r.name + ' (' + r.lines + ' linhas)';
+        sel.appendChild(opt);
+      });
+    }
+  } catch(e) { console.log('Erro ao carregar robôs:', e); }
+}
+
+function onRobotSelect() {
+  const name = document.getElementById('btRobot').value;
+  if (name) analyzeRobot();
+}
+
+async function analyzeRobot() {
+  const name = document.getElementById('btRobot').value;
+  if (!name) { alert('Selecione um robô primeiro!'); return; }
+  const div = document.getElementById('robotAnalysis');
+  div.style.display = 'block';
+  div.innerHTML = '<div style="color:var(--text2);">⏳ Analisando ' + name + '...</div>';
+  try {
+    const r = await fetch('/api/mt5/analyze_robot', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name}) });
+    const d = await r.json();
+    if (d.ok) {
+      // Salvar parâmetros do robô para o backtest
+      currentRobotParams = d.indicator_params || {};
+      // Preencher campos automaticamente
+      document.getElementById('btSymbol').value = d.symbol || 'XAUUSD';
+      document.getElementById('btTimeframe').value = d.timeframe || 'M15';
+      document.getElementById('btSL').value = d.sl || 500;
+      document.getElementById('btTP').value = d.tp || 1000;
+      document.getElementById('btLot').value = d.lot || 0.01;
+      // Selecionar estratégia detectada
+      const stratSel = document.getElementById('btStrategy');
+      for (let i = 0; i < stratSel.options.length; i++) {
+        if (stratSel.options[i].value === d.strategy) { stratSel.selectedIndex = i; break; }
+      }
+      // Mostrar análise
+      let indicators = '';
+      if (d.indicators) {
+        const ind = d.indicators;
+        const active = [];
+        if (ind.iMA) active.push('EMA/SMA');
+        if (ind.iRSI) active.push('RSI');
+        if (ind.iBands) active.push('Bollinger');
+        if (ind.iMACD) active.push('MACD');
+        if (ind.iATR) active.push('ATR');
+        if (ind.iStochastic) active.push('Estocástico');
+        if (ind.iADX) active.push('ADX');
+        if (ind.SMC_FVG) active.push('SMC/FVG');
+        if (ind.Candle_Patterns) active.push('Padrões Candle');
+        if (ind.S_R_Zonas) active.push('S/R Zonas');
+        indicators = active.join(' + ') || 'Nenhum detectado';
+      }
+      div.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">' +
+        '<div><span style="color:var(--gold);font-weight:600;">📋 Estratégia Detectada:</span><br><span style="color:var(--green);">' + d.strategy_name + '</span></div>' +
+        '<div><span style="color:var(--gold);font-weight:600;">📊 Ativo:</span> ' + d.symbol + ' | <b>TF:</b> ' + d.timeframe + '</div>' +
+        '<div><span style="color:var(--gold);font-weight:600;">⚙️ SL:</span> ' + d.sl + ' | <b>TP:</span> ' + d.tp + ' | <b>Lote:</span> ' + d.lot + '</div>' +
+        '</div>' +
+        '<div style="margin-top:8px;"><span style="color:var(--gold);font-weight:600;">🔧 Indicadores:</span> <span style="color:var(--text);">' + indicators + '</span></div>' +
+        '<div style="margin-top:4px;font-size:11px;color:var(--text2);">' + d.lines + ' linhas | ' + d.functions + ' funções | ' + d.inputs + ' inputs' + (d.description ? ' | ' + d.description : '') + '</div>' +
+        '<div style="margin-top:8px;font-size:11px;color:var(--blue);">✅ Parâmetros preenchidos automaticamente! Clique em "🚀 Rodar Backtest" para simular.</div>';
+    } else {
+      div.innerHTML = '<div style="color:var(--red);">❌ ' + d.error + '</div>';
+    }
+  } catch(e) { div.innerHTML = '<div style="color:var(--red);">❌ Erro: ' + e.message + '</div>'; }
+}
+
+// Salvar parâmetros do robô analisado
+let currentRobotParams = {};
+let lastAnalysis = '';  // Última análise de IA para auto-trade
+let analysisMode = 'day';  // Modo: scalp, day, swing
+
+// ═══ MODO DE ANALISE ═══
+const MODE_TF = {
+  scalp: {tfs: ['M1','M5'], default: 'M1', desc: '⚡ M1/M5 para entradas rapidas'},
+  day: {tfs: ['M15','M30','H1'], default: 'M15', desc: '📊 M5-H1 para analise completa'},
+  swing: {tfs: ['H1','H4','D1'], default: 'H1', desc: '📈 H1 a D1 para tendencias'},
+};
+function setAnalysisMode(mode) {
+  analysisMode = mode;
+  // Atualizar visual dos botoes
+  ['modePA', 'modeScalp', 'modeSwing'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (id === 'modePA' && mode === 'day') {
+      btn.style.background = 'var(--blue)'; btn.style.color = '#fff';
+    } else if (id === 'modeScalp' && mode === 'scalp') {
+      btn.style.background = 'var(--gold)'; btn.style.color = '#0D0D0D';
+    } else if (id === 'modeSwing' && mode === 'swing') {
+      btn.style.background = 'var(--green)'; btn.style.color = '#0D0D0D';
+    } else {
+      btn.style.background = 'transparent';
+      btn.style.color = (id === 'modePA') ? 'var(--blue)' : (id === 'modeScalp') ? 'var(--gold)' : 'var(--green)';
+    }
+  });
+  // Auto mudar timeframe
+  const cfg = MODE_TF[mode];
+  if (cfg) {
+    const tfSelect = document.getElementById('btTimeframe');
+    // Filtrar options para mostrar apenas os do modo
+    Array.from(tfSelect.options).forEach(opt => {
+      opt.disabled = !cfg.tfs.includes(opt.value);
+      opt.style.display = cfg.tfs.includes(opt.value) ? '' : 'none';
+    });
+    // Selecionar default se o atual nao for do modo
+    if (!cfg.tfs.includes(tfSelect.value)) {
+      tfSelect.value = cfg.default;
+    }
+    // Mostrar descricao do modo
+    const tfLabel = tfSelect.parentElement.querySelector('label');
+    if (tfLabel) tfLabel.textContent = 'Timeframe (' + cfg.desc + ')';
+  }
+}
+
+// ═══ BACKTEST ═══
+async function runBacktest() {
+  const res = document.getElementById('btResult');
+  res.innerHTML = '<div style="color:var(--text2);padding:20px;">⏳ Baixando dados do MT5 e simulando...</div>';
+  try {
+    const body = {
+      strategy: document.getElementById('btStrategy').value,
+      symbol: document.getElementById('btSymbol').value,
+      timeframe: document.getElementById('btTimeframe').value,
+      sl: parseInt(document.getElementById('btSL').value),
+      tp: parseInt(document.getElementById('btTP').value),
+      lot: parseFloat(document.getElementById('btLot').value),
+      balance: parseFloat(document.getElementById('btBalance').value),
+      count: parseInt(document.getElementById('btCount').value),
+      indicator_params: currentRobotParams,
+    };
+    const r = await fetch('/api/mt5/backtest', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await r.json();
+    if (d.ok) { res.innerHTML = renderBtResult(d); drawEquity('eqCanvas', d.equity_curve, d.stats.initial_balance); }
+    else { res.innerHTML = '<div style="color:var(--red);">❌ ' + d.error + '</div>'; }
+  } catch(e) { res.innerHTML = '<div style="color:var(--red);">❌ ' + e.message + '</div>'; }
+}
+
+function renderBtResult(d) {
+  const s = d.stats;
+  const pc = s.total_pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  return '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px;">' +
+    '<div class="result-card"><div class="value" style="color:' + pc + ';">' + (s.total_pnl>=0?'+':'') + '$' + s.total_pnl + '</div><div class="label">PnL Total</div></div>' +
+    '<div class="result-card"><div class="value" style="color:' + (s.win_rate>=50?'var(--green)':'var(--red)') + ';">' + s.win_rate + '%</div><div class="label">Win Rate</div></div>' +
+    '<div class="result-card"><div class="value" style="color:var(--blue);">' + s.total_trades + '</div><div class="label">Trades</div></div>' +
+    '<div class="result-card"><div class="value" style="color:var(--gold);">' + s.profit_factor + '</div><div class="label">Profit Factor</div></div>' +
+    '<div class="result-card"><div class="value" style="color:var(--red);">' + s.max_drawdown + '%</div><div class="label">Max Drawdown</div></div>' +
+    '<div class="result-card"><div class="value" style="color:' + (s.return_pct>=0?'var(--green)':'var(--red)') + ';">' + s.return_pct + '%</div><div class="label">Retorno</div></div>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+    '<div style="background:var(--bg3);padding:16px;border-radius:8px;"><div style="font-weight:600;margin-bottom:8px;color:var(--gold);">📈 Equity Curve</div><canvas id="eqCanvas" style="width:100%;height:200px;"></canvas></div>' +
+    '<div style="background:var(--bg3);padding:16px;border-radius:8px;"><div style="font-weight:600;margin-bottom:8px;color:var(--gold);">📊 Estatísticas</div><div style="font-size:12px;line-height:2;">' +
+    '💰 Inicial: $' + s.initial_balance + '<br>' +
+    '💰 Final: <span style="color:' + (s.final_balance>=s.initial_balance?'var(--green)':'var(--red)') + ';">$' + s.final_balance + '</span><br>' +
+    '✅ Wins: ' + s.wins + ' | ❌ Losses: ' + s.losses + '<br>' +
+    '📈 Maior Win: <span style="color:var(--green);">$' + s.max_win + '</span><br>' +
+    '📉 Maior Loss: <span style="color:var(--red);">$' + s.max_loss + '</span><br>' +
+    '🔥 Maior sequência wins: ' + (s.max_win_streak||0) + '<br>' +
+    '❄️ Maior sequência losses: ' + (s.max_loss_streak||0) + '<br>' +
+    '📅 Período: ' + (s.period_days||0) + ' dias (' + (s.candles||0) + ' barras)' +
+    '</div></div></div>';
+}
+
+function drawEquity(canvasId, data, initial) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !data || data.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth * 2;
+  canvas.height = 400;
+  ctx.scale(2, 2);
+  const w = canvas.offsetWidth, h = 200;
+  const min = Math.min(...data.map(d => d.equity)) - 100;
+  const max = Math.max(...data.map(d => d.equity)) + 100;
+  const stepX = w / (data.length - 1);
+  // Grid
+  ctx.strokeStyle = '#2A2A2A'; ctx.lineWidth = 0.5;
+  for (let i = 0; i < 5; i++) {
+    const y = 20 + (i/4) * (h-40);
+    ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(w-10, y); ctx.stroke();
+    ctx.fillStyle = '#666'; ctx.font = '9px sans-serif';
+    ctx.fillText('$' + (max - (i/4)*(max-min)).toFixed(0), 2, y+4);
+  }
+  // Line
+  const profit = data[data.length-1].equity >= initial;
+  ctx.beginPath();
+  ctx.strokeStyle = profit ? '#22C55E' : '#EF4444';
+  ctx.lineWidth = 1.5;
+  data.forEach((d, i) => {
+    const x = 40 + i * stepX;
+    const y = 20 + ((max - d.equity) / (max - min)) * (h - 40);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  // Gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, profit ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)');
+  grad.addColorStop(1, 'transparent');
+  ctx.lineTo(40 + (data.length-1)*stepX, h-20);
+  ctx.lineTo(40, h-20);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  // Dot
+  const lx = 40 + (data.length-1)*stepX;
+  const ly = 20 + ((max - data[data.length-1].equity)/(max-min))*(h-40);
+  ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI*2);
+  ctx.fillStyle = profit ? '#22C55E' : '#EF4444'; ctx.fill();
+}
+
+// ═══ CHART ANALYSIS ═══
+async function runChartAnalysis() {
+  const res = document.getElementById('btResult');
+  const symbol = document.getElementById('btSymbol').value;
+  const timeframe = document.getElementById('btTimeframe').value;
+  const modeLabels = {'day': '📊 Day Trade', 'scalp': '⚡ Scalp', 'swing': '📈 Swing Trade'};
+  const modeLabel = modeLabels[analysisMode] || '📊 Day Trade';
+  
+  res.innerHTML = '<div style="background:rgba(59,130,246,0.1);border:1px solid var(--blue);border-radius:8px;padding:16px;">' +
+    '<div style="color:var(--blue);font-weight:600;margin-bottom:8px;">🧠 ' + modeLabel + ' com IA</div>' +
+    '<div style="color:var(--text2);font-size:13px;">📸 Capturando gráfico ' + symbol + ' ' + timeframe + '...</div>' +
+    '<div style="color:var(--text2);font-size:13px;">🤖 Ordem: <b style="color:#A855F7;">MiniMax M3</b> → <b style="color:#22C55E;">Nemotron Omni</b> → <b style="color:#06B6D4;">Free Router</b> → <b style="color:#3B82F6;">Gemma 4</b> → <b style="color:#F59E0B;">Ox Alpha</b> → <b style="color:#D4A843;">Claude</b> → <b style="color:#10B981;">Qwen local</b></div>' +
+    '<div style="color:var(--text2);font-size:13px;">⏳ Aguarde (10-60 segundos)...</div></div>';
+  
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 180000);
+    const r = await fetch('/api/mt5/chart_analysis', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol, timeframe, mode: analysisMode}), signal: controller.signal});
+    clearTimeout(timeoutId);
+    const d = await r.json();
+    
+    if (d.ok && d.analysis) {
+      // Salvar análise para auto-trade
+      lastAnalysis = d.analysis;
+      
+      // Converter markdown para HTML simples
+      let html = d.analysis
+        .replace(/### (.*)/g, '<h4 style="color:var(--gold);margin:12px 0 6px;">$1</h4>')
+        .replace(/## (.*)/g, '<h3 style="color:var(--gold);margin:16px 0 8px;">$1</h3>')
+        .replace(/# (.*)/g, '<h2 style="color:var(--gold);margin:20px 0 10px;">$1</h2>')
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/\*(.*?)\*/g, '<i>$1</i>'  )
+        .replace(/- (.*)/g, '<li style="margin-left:16px;">$1</li>')
+        .replace(/\n/g, '<br>');
+      
+      // Info dos timeframes recomendados
+      const recTfs = d.recommended_timeframes || MODE_TF[analysisMode]?.tfs || [];
+      const tfInfo = recTfs.length ? '<div style="margin-top:8px;font-size:11px;color:var(--text2);">⏱️ Timeframes do modo ' + modeLabel + ': <b style="color:var(--gold);">' + recTfs.join(' / ') + '</b></div>' : '';
+      
+      // Info do modelo usado
+      const modelUsed = d.model || 'Desconhecido';
+      const modelColor = modelUsed.includes('Claude') ? '#D4A843' : 
+                          modelUsed.includes('Gemma') ? '#3B82F6' :
+                          modelUsed.includes('MiniMax') ? '#A855F7' :
+                          modelUsed.includes('Nemotron') ? '#22C55E' :
+                          modelUsed.includes('Ox Alpha') ? '#F59E0B' :
+                          modelUsed.includes('Free Router') ? '#06B6D4' :
+                          modelUsed.includes('Qwen') ? '#10B981' : '#22C55E';
+      const modelBadge = '<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,0,0,0.3);border:1px solid ' + modelColor + ';border-radius:6px;padding:4px 10px;font-size:11px;margin-top:8px;">🤖 Modelo: <b style="color:' + modelColor + ';">' + modelUsed + '</b></div>';
+      
+      res.innerHTML = '<div style="background:var(--bg3);border:1px solid var(--blue);border-radius:10px;padding:20px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+        '<div style="color:var(--blue);font-weight:700;font-size:16px;">🧠 ' + modeLabel + ' - ' + symbol + ' ' + timeframe + '</div>' +
+        '<span style="color:var(--text2);font-size:11px;">' + new Date().toLocaleString('pt-BR') + '</span>' +
+        '</div>' + tfInfo + modelBadge +
+        '<div style="font-size:13px;color:var(--text);line-height:1.7;margin-top:12px;">' + html + '</div>' +
+        (d.screenshot_path ? '<div style="margin-top:12px;font-size:11px;color:var(--text2);">📸 Screenshot: ' + d.screenshot_path + '</div>' : '') +
+        '<div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">' +
+        '<button class="btn-gold" onclick="executeAutoTrade()" style="background:var(--green);color:#0D0D0D;">⚡ Executar Trade Automático</button>' +
+        '<button class="btn-gold" onclick="showTradePositions()" style="background:var(--blue);color:#fff;">📋 Ver Posições Abertas</button>' +
+        '</div>' +
+        '</div>';
+    } else {
+      let errorMsg = d.error || 'Erro desconhecido';
+      let suggestion = '';
+      if (d.suggestion) {
+        suggestion = '<div style="margin-top:8px;padding:8px;background:var(--bg);border-radius:6px;font-size:12px;color:var(--text2);">💡 ' + d.suggestion + '</div>';
+      }
+      if (d.mql5_script) {
+        suggestion += '<div style="margin-top:8px;padding:8px;background:var(--bg);border-radius:6px;font-size:12px;color:var(--text2);">📝 Script MQL5 criado: ' + d.mql5_script.script_path + '</div>';
+      }
+      res.innerHTML = '<div style="background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:8px;padding:16px;">' +
+        '<div style="color:var(--red);font-weight:600;">❌ ' + errorMsg + '</div>' + suggestion + '</div>';
+    }
+  } catch(e) {
+    let errMsg = e.message;
+    if (e.name === 'AbortError') errMsg = 'Tempo esgotado (3 min). Verifique se o MT5 esta aberto e o servidor esta rodando.';
+    else if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) errMsg = 'Servidor offline ou conexao perdida. Verifique se o server_agent.py esta rodando na porta 8765.';
+    res.innerHTML = '<div style="background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:8px;padding:16px;">' +
+      '<div style="color:var(--red);font-weight:600;">❌ Erro na Analise</div>' +
+      '<div style="color:var(--text2);font-size:13px;margin-top:8px;">' + errMsg + '</div>' +
+      '<div style="color:var(--text2);font-size:12px;margin-top:8px;">💡 Verifique: MT5 aberto + Server rodando + API Key configurada</div></div>';
+  }
+}
+
+// ═══ FULL MULTI-LAYER ANALYSIS ═══
+let lastFullAnalysis = null;
+let specialistMode = 'day';
+function setSpecialistMode(mode) {
+  specialistMode = mode;
+  document.getElementById('specPA').style.background = mode==='day' ? '#7c3aed' : 'transparent';
+  document.getElementById('specPA').style.color = mode==='day' ? '#fff' : '#7c3aed';
+  document.getElementById('specSC').style.background = mode==='scalp' ? '#F59E0B' : 'transparent';
+  document.getElementById('specSC').style.color = mode==='scalp' ? '#0D0D0D' : '#F59E0B';
+  document.getElementById('specSW').style.background = mode==='swing' ? '#22C55E' : 'transparent';
+  document.getElementById('specSW').style.color = mode==='swing' ? '#fff' : '#22C55E';
+}
+
+async function runFullAnalysis() {
+  const res = document.getElementById('btResult');
+  const symbol = document.getElementById('btSymbol').value;
+  const modeLabels = {'day': '📊 Day Trade', 'scalp': '⚡ Scalping', 'swing': '📈 Swing Trade'};
+  const modeLabel = modeLabels[specialistMode] || '📊 Day Trade';
+  
+  res.innerHTML = '<div style="background:linear-gradient(135deg,rgba(124,58,237,0.1),rgba(37,99,235,0.1));border:1px solid #7c3aed;border-radius:10px;padding:20px;">' +
+    '<div style="color:#7c3aed;font-weight:700;font-size:16px;margin-bottom:12px;">🔬 ' + modeLabel + ' - Análise Multi-Layer</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px;">' +
+    '<div style="color:var(--text2);font-size:13px;">🌍 Detectando regime de mercado...</div>' +
+    '<div style="color:var(--text2);font-size:13px;">📊 Motor de Estrutura - HH/HL/LH/LL, S/R, Liquidez...</div>' +
+    '<div style="color:var(--text2);font-size:13px;">⏱️ Multi-Timeframe - Análise por timeframe...</div>' +
+    '<div style="color:var(--text2);font-size:13px;">📈 Motor Estatístico - Backtest de setups similares...</div>' +
+    '<div style="color:var(--text2);font-size:13px;">🎯 Scoring + Ranking de setups...</div>' +
+    '<div style="color:var(--text2);font-size:13px;">🧠 IA Raciocinadora - Decisão final...</div>' +
+    '</div>' +
+    '<div style="color:var(--text2);font-size:13px;margin-top:12px;">⏳ Aguarde (15-90 segundos)...</div></div>';
+  
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 180000);
+    const r = await fetch('/api/mt5/full_analysis', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol, mode: specialistMode}),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    const d = await r.json();
+    lastFullAnalysis = d;
+    
+    if (!d.ok) {
+      res.innerHTML = '<div style="background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:8px;padding:16px;">' +
+        '<div style="color:var(--red);font-weight:600;">❌ ' + (d.error || 'Erro desconhecido') + '</div></div>';
+      return;
+    }
+    
+    // Cores por direcao
+    const dirColor = d.direction === 'BUY' ? '#22C55E' : d.direction === 'SELL' ? '#EF4444' : '#6B7280';
+    const dirBg = d.direction === 'BUY' ? 'rgba(34,197,94,0.1)' : d.direction === 'SELL' ? 'rgba(239,68,68,0.1)' : 'rgba(107,114,128,0.1)';
+    const dirIcon = d.direction === 'BUY' ? '📈' : d.direction === 'SELL' ? '📉' : '⏸️';
+    
+    // Cor do score
+    const scoreColor = d.score >= 85 ? '#22C55E' : d.score >= 75 ? '#3B82F6' : d.score >= 65 ? '#F59E0B' : d.score >= 50 ? '#F97316' : '#EF4444';
+    
+    // Montar HTML da analise
+    let html = '';
+    
+    // Header com direcao e score
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">';
+    html += '<div style="display:flex;align-items:center;gap:12px;">';
+    html += '<div style="font-size:28px;">' + dirIcon + '</div>';
+    html += '<div>';
+    html += '<div style="color:' + dirColor + ';font-weight:700;font-size:20px;">' + d.direction + ' ' + symbol + '</div>';
+    html += '<div style="color:var(--text2);font-size:12px;">' + d.confidence.toUpperCase() + ' | ' + d.symbol + ' @ ' + d.current_price + '</div>';
+    html += '</div></div>';
+    html += '<div style="text-align:right;">';
+    html += '<div style="font-size:32px;font-weight:800;color:' + scoreColor + ';">' + d.score + '<span style="font-size:14px;color:var(--text2);">/100</span></div>';
+    html += '<div style="color:' + scoreColor + ';font-size:11px;font-weight:600;">' + d.confidence.toUpperCase() + '</div>';
+    html += '</div></div>';
+    
+    // Entrada/SL/TP
+    html += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;">';
+    const fields = [
+      {label:'Entrada', value:d.entry, color:'#3B82F6'},
+      {label:'Stop Loss', value:d.stop_loss, color:'#EF4444'},
+      {label:'TP1', value:d.take_profit_1, color:'#22C55E'},
+      {label:'TP2', value:d.take_profit_2, color:'#10B981'},
+      {label:'R:R', value:d.risk_reward + 'R', color:'#F59E0B'},
+    ];
+    for (const f of fields) {
+      html += '<div style="background:rgba(0,0,0,0.3);border-radius:8px;padding:10px;text-align:center;border-left:3px solid ' + f.color + ';">';
+      html += '<div style="color:var(--text2);font-size:10px;">' + f.label + '</div>';
+      html += '<div style="color:' + f.color + ';font-weight:700;font-size:14px;">' + f.value + '</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+    
+    // Timeframes
+    html += '<div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:12px;margin-bottom:12px;">';
+    html += '<div style="color:var(--gold);font-weight:600;margin-bottom:8px;">⏱️ Multi-Timeframe</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">';
+    for (const [tf, data] of Object.entries(d.timeframes || {})) {
+      const tfColor = data.trend === 'alta' ? '#22C55E' : data.trend === 'baixa' ? '#EF4444' : '#6B7280';
+      html += '<div style="background:rgba(0,0,0,0.3);border-radius:6px;padding:8px;text-align:center;">';
+      html += '<div style="color:var(--text2);font-size:10px;">' + tf + '</div>';
+      html += '<div style="color:' + tfColor + ';font-weight:700;font-size:13px;">' + data.trend.toUpperCase() + '</div>';
+      html += '<div style="color:var(--text2);font-size:10px;">RSI ' + data.rsi + ' | ADX ' + data.adx + '</div>';
+      html += '</div>';
+    }
+    html += '</div></div>';
+    
+    // Estatisticas
+    const stats = d.statistics || {};
+    if (stats.sufficient_data) {
+      html += '<div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:12px;margin-bottom:12px;">';
+      html += '<div style="color:var(--gold);font-weight:600;margin-bottom:8px;">📊 Backtest (' + stats.sample_size + ' ocorrencias)</div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">';
+      html += '<div style="text-align:center;"><div style="color:var(--text2);font-size:10px;">Win Rate</div><div style="color:#22C55E;font-weight:700;">' + stats.win_rate + '%</div></div>';
+      html += '<div style="text-align:center;"><div style="color:var(--text2);font-size:10px;">Expectancia</div><div style="color:#F59E0B;font-weight:700;">' + stats.expectancy + 'R</div></div>';
+      html += '<div style="text-align:center;"><div style="color:var(--text2);font-size:10px;">TP1 Rate</div><div style="color:#3B82F6;font-weight:700;">' + (stats.tp1_rate||0) + '%</div></div>';
+      html += '<div style="text-align:center;"><div style="color:var(--text2);font-size:10px;">Stop Rate</div><div style="color:#EF4444;font-weight:700;">' + (stats.stop_rate||0) + '%</div></div>';
+      html += '</div></div>';
+    }
+    
+    // Razoes
+    html += '<div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:12px;margin-bottom:12px;">';
+    html += '<div style="color:var(--gold);font-weight:600;margin-bottom:8px;">🎯 Pontuacao</div>';
+    for (const reason of (d.reasons || [])) {
+      const isPositive = reason.includes('+') && !reason.includes('+0/');
+      html += '<div style="color:' + (isPositive ? '#22C55E' : 'var(--text2)') + ';font-size:12px;padding:2px 0;">' + reason + '</div>';
+    }
+    html += '</div>';
+    
+    // Regime de Mercado
+    const reg = d.regime || {};
+    if (reg.type) {
+      const regColor = reg.type === 'trending' ? '#22C55E' : reg.type === 'ranging' ? '#F59E0B' : reg.type === 'volatile' ? '#EF4444' : '#6B7280';
+      const regIcon = reg.type === 'trending' ? '📈' : reg.type === 'ranging' ? '↔️' : reg.type === 'volatile' ? '🌊' : '❓';
+      html += '<div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:12px;margin-bottom:12px;border-left:3px solid ' + regColor + ';">';
+      html += '<div style="color:' + regColor + ';font-weight:600;margin-bottom:8px;">' + regIcon + ' Regime de Mercado</div>';
+      html += '<div style="color:var(--text);font-size:13px;">' + (reg.description||'') + '</div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;">';
+      html += '<div style="text-align:center;"><div style="color:var(--text2);font-size:10px;">Tendencia</div><div style="color:var(--text);font-weight:600;">' + (reg.trend_strength||0) + '%</div></div>';
+      html += '<div style="text-align:center;"><div style="color:var(--text2);font-size:10px;">Lateralizacao</div><div style="color:var(--text);font-weight:600;">' + (reg.range_score||0) + '%</div></div>';
+      html += '<div style="text-align:center;"><div style="color:var(--text2);font-size:10px;">Volatilidade</div><div style="color:var(--text);font-weight:600;">' + (reg.volatility_score||0) + '%</div></div>';
+      html += '</div>';
+      const modes = reg.modes || {};
+      html += '<div style="display:flex;gap:8px;margin-top:8px;">';
+      for (const [m, s] of Object.entries(modes)) {
+        const mc = s === 'OK' ? '#22C55E' : '#EF4444';
+        html += '<span style="color:' + mc + ';font-size:11px;">' + m + ': ' + s + '</span>';
+      }
+      html += '</div></div>';
+    }
+    
+    // Ranking de Setups
+    const ranked = d.ranked_setups || [];
+    if (ranked.length > 0) {
+      html += '<div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:12px;margin-bottom:12px;">';
+      html += '<div style="color:var(--gold);font-weight:600;margin-bottom:8px;">🏆 Setups Encontrados</div>';
+      const medals = ['🥇', '🥈', '🥉'];
+      for (const s of ranked) {
+        const sc = s.status === 'favoravel' ? '#22C55E' : s.status === 'aguardar' ? '#F59E0B' : '#EF4444';
+        const medal = medals[s.rank-1] || '#' + s.rank;
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:rgba(0,0,0,0.2);border-radius:6px;margin-bottom:4px;border-left:3px solid ' + sc + ';">';
+        html += '<div><span style="margin-right:6px;">' + medal + '</span><b style="color:var(--text);">' + s.name + '</b>';
+        html += '<div style="color:var(--text2);font-size:11px;">Score: ' + s.score + ' | WR: ' + s.win_rate + '% | EV: ' + s.expectancy + 'R | Amostra: ' + s.sample_size + '</div></div>';
+        html += '<span style="color:' + sc + ';font-weight:600;font-size:12px;">' + s.status.toUpperCase() + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    
+    // IA Analysis
+    if (d.ai_analysis) {
+      html += '<div style="background:rgba(124,58,237,0.1);border:1px solid #7c3aed;border-radius:8px;padding:12px;margin-bottom:12px;">';
+      html += '<div style="color:#7c3aed;font-weight:600;margin-bottom:8px;">🧠 IA Raciocinadora (' + (d.ai_model||'IA') + ')</div>';
+      html += '<div style="color:var(--text);font-size:13px;line-height:1.6;white-space:pre-wrap;">' + d.ai_analysis.substring(0, 800) + '</div>';
+      html += '</div>';
+    }
+    
+    // Botoes de acao
+    html += '<div style="display:flex;gap:12px;margin-top:16px;">';
+    if (d.direction !== 'NONE') {
+      html += '<button class="btn-gold" onclick="executeFullAnalysisTrade()" style="background:var(--green);color:#0D0D0D;">⚡ Executar Trade</button>';
+    }
+    html += '<button class="btn-gold" onclick="runFullAnalysis()" style="background:var(--blue);color:#fff;">🔄 Nova Análise</button>';
+    html += '</div>';
+    
+    res.innerHTML = '<div style="background:var(--bg3);border:1px solid #7c3aed;border-radius:10px;padding:20px;">' + html + '</div>';
+    
+  } catch(e) {
+    res.innerHTML = '<div style="background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:8px;padding:16px;">' +
+      '<div style="color:var(--red);font-weight:600;">❌ Erro: ' + e.message + '</div>' +
+      '<div style="color:var(--text2);font-size:12px;margin-top:8px;">Verifique: MT5 aberto + Server rodando</div></div>';
+  }
+}
+
+async function executeFullAnalysisTrade() {
+  if (!lastFullAnalysis || lastFullAnalysis.direction === 'NONE') return;
+  const a = lastFullAnalysis;
+  if (!confirm('Executar ' + a.direction + ' ' + a.symbol + '?\nEntrada: MERCADO\nSL: ' + a.stop_loss + '\nTP: ' + a.take_profit_1 + '\nR:R: ' + a.risk_reward)) return;
+  try {
+    // Usar entry=null para entrar a mercado (preco atual)
+    const r = await fetch('/api/mt5/auto_trade', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        symbol: a.symbol,
+        analysis: JSON.stringify({
+          direcao: a.direction,
+          entrada: null,
+          stop_loss: a.stop_loss,
+          take_profit: a.take_profit_1,
+          rr_ratio: a.risk_reward
+        }),
+        auto_execute: true,
+        mode: 'day'
+      })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      alert('Trade executado! Ticket: ' + (d.execution?.ticket || 'N/A'));
+    } else {
+      alert('Erro: ' + (d.execution?.error || d.error || 'Desconhecido'));
+    }
+  } catch(e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+// ═══ AUTO TRADE ═══
+async function executeAutoTrade() {
+  if (!lastAnalysis) { alert('Faça uma análise primeiro!'); return; }
+  const symbol = document.getElementById('btSymbol').value;
+  const res = document.getElementById('btResult');
+  const modeLabels = {'day': 'Day Trade', 'scalp': 'Scalp', 'swing': 'Swing Trade'};
+  const modeLabel = modeLabels[analysisMode] || 'Day Trade';
+  
+  if (!confirm('⚡ Confirmar execução automática?\n\nModo: ' + modeLabel + '\nA IA analisará e executará o trade com SL/TP automaticamente.')) return;
+  
+  res.innerHTML += '<div style="margin-top:12px;background:rgba(34,197,94,0.1);border:1px solid var(--green);border-radius:8px;padding:12px;">' +
+    '<div style="color:var(--green);font-weight:600;">⚡ Executando trade automático (' + modeLabel + ')...</div></div>';
+  
+  try {
+    const r = await fetch('/api/mt5/auto_trade', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      analysis: lastAnalysis,
+      symbol: symbol,
+      auto_execute: true,
+      magic: 99999,
+      mode: analysisMode,
+    })});
+    const d = await r.json();
+    
+    const resultDiv = res.querySelector('div:last-child');
+    if (d.ok) {
+      const tp = d.trade_params || {};
+      resultDiv.innerHTML = '<div style="color:var(--green);font-weight:600;">' + (d.message || '✅ Trade executado!') + '</div>' +
+        '<div style="font-size:12px;color:var(--text);margin-top:8px;">' +
+        '📊 Direção: <b>' + (tp.direction || '?') + '</b> | ' +
+        '💰 Entrada: <b>' + (tp.entry || 'Mercado') + '</b> | ' +
+        '🛡️ SL: <b>' + (tp.sl || '?') + '</b> | ' +
+        '🎯 TP: <b>' + (tp.tp || '?') + '</b> | ' +
+        '⭐ Confiança: <b>' + (tp.confidence || '?') + '</b></div>';
+    } else {
+      resultDiv.innerHTML = '<div style="color:var(--red);font-weight:600;">❌ ' + (d.message || d.error || 'Erro ao executar') + '</div>';
+    }
+  } catch(e) {
+    const resultDiv = res.querySelector('div:last-child');
+    resultDiv.innerHTML = '<div style="color:var(--red);">❌ Erro: ' + e.message + '</div>';
+  }
+}
+
+async function showTradePositions() {
+  const res = document.getElementById('btResult');
+  try {
+    const r = await fetch('/api/mt5/positions', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+    const d = await r.json();
+    
+    if (d.ok && d.positions && d.positions.length > 0) {
+      let html = '<div style="margin-top:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;">';
+      html += '<div style="color:var(--gold);font-weight:600;margin-bottom:8px;">📋 Posições Abertas (' + d.count + ')</div>';
+      d.positions.forEach(p => {
+        const profitColor = p.profit >= 0 ? 'var(--green)' : 'var(--red)';
+        html += '<div style="background:var(--bg);padding:8px;border-radius:6px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div><b>' + p.type + '</b> ' + p.symbol + ' | ' + p.volume + ' lotes | Entrada: ' + p.price_open + '</div>';
+        html += '<div style="display:flex;gap:8px;align-items:center;">';
+        html += '<span style="color:' + profitColor + ';font-weight:600;">$' + p.profit.toFixed(2) + '</span>';
+        html += '<button onclick="closeTradePosition(' + p.ticket + ')" style="background:var(--red);color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Fechar</button>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+      res.innerHTML += html;
+    } else {
+      res.innerHTML += '<div style="margin-top:12px;color:var(--text2);">📋 Nenhuma posição aberta</div>';
+    }
+  } catch(e) {
+    res.innerHTML += '<div style="margin-top:12px;color:var(--red);">❌ Erro ao buscar posições: ' + e.message + '</div>';
+  }
+}
+
+async function closeTradePosition(ticket) {
+  if (!confirm('Fechar posição ' + ticket + '?')) return;
+  try {
+    const r = await fetch('/api/mt5/close_position', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticket})});
+    const d = await r.json();
+    if (d.ok) {
+      alert(d.message);
+      showTradePositions();
+    } else {
+      alert('❌ ' + (d.error || 'Erro ao fechar'));
+    }
+  } catch(e) {
+    alert('❌ Erro: ' + e.message);
+  }
+}
+
+// ═══ POSITION MANAGER - Breakeven + Trailing Stop ═══
+let pmRunning = false;
+
+async function togglePositionManager() {
+  const btn = document.getElementById('pmToggleBtn');
+  try {
+    if (pmRunning) {
+      const r = await fetch('/api/position/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+      const d = await r.json();
+      pmRunning = false;
+      btn.innerHTML = '🛡️ Breakeven+Trailing: OFF';
+      btn.style.background = 'var(--purple)';
+    } else {
+      const r = await fetch('/api/position/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+      const d = await r.json();
+      if (d.ok) {
+        pmRunning = true;
+        btn.innerHTML = '🛡️ Breakeven+Trailing: ON';
+        btn.style.background = 'var(--green)';
+      } else {
+        alert('❌ ' + (d.error || 'Erro ao iniciar'));
+      }
+    }
+    updatePMStatus();
+  } catch(e) {
+    alert('❌ Erro: ' + e.message);
+  }
+}
+
+async function updatePMStatus() {
+  const el = document.getElementById('pmStatus');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/position/status', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await r.json();
+    const c = d.config || {};
+    const running = d.running || false;
+    pmRunning = running;
+    const btn = document.getElementById('pmToggleBtn');
+    if (btn) {
+      btn.innerHTML = '🛡️ Breakeven+Trailing: ' + (running ? 'ON' : 'OFF');
+      btn.style.background = running ? 'var(--green)' : 'var(--purple)';
+    }
+    let html = '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;">';
+    html += '<div style="color:var(--gold);font-weight:600;margin-bottom:8px;">🛡️ Position Manager ' + (running ? '<span style="color:var(--green);">ATIVO</span>' : '<span style="color:var(--text2);">PARADO</span>') + '</div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">';
+    html += '<div style="background:var(--bg);padding:6px;border-radius:4px;"><span style="color:var(--text2);">Breakeven:</span> ' + (c.breakeven_enabled ? '<span style="color:var(--green);">ON</span>' : '<span style="color:var(--red);">OFF</span>') + '<br>';
+    html += 'Trigger: ' + (c.breakeven_trigger_points || 300) + 'p | Lock: ' + (c.breakeven_profit_lock_points || 50) + 'p</div>';
+    html += '<div style="background:var(--bg);padding:6px;border-radius:4px;"><span style="color:var(--text2);">Trailing:</span> ' + (c.trailing_enabled ? '<span style="color:var(--green);">ON</span>' : '<span style="color:var(--red);">OFF</span>') + '<br>';
+    html += 'Trigger: ' + (c.trailing_trigger_points || 200) + 'p | Dist: ' + (c.trailing_distance_points || 150) + 'p</div>';
+    html += '</div>';
+    html += '<div style="margin-top:8px;font-size:11px;color:var(--text2);">Posições monitoradas: ' + (d.positions_managed || 0) + '</div>';
+    // Log recente
+    if (d.last_actions && d.last_actions.length > 0) {
+      html += '<div style="margin-top:8px;color:var(--text2);font-size:11px;max-height:120px;overflow-y:auto;">';
+      d.last_actions.slice(-5).reverse().forEach(a => {
+        const color = a.action === 'BREAKEVEN' ? 'var(--gold)' : a.action === 'TRAILING' ? 'var(--green)' : a.action === 'PARTIAL' ? 'var(--purple)' : 'var(--text2)';
+        html += '<div style="padding:2px 0;">[' + a.time + '] <span style="color:' + color + ';">' + a.action + '</span> #' + a.ticket + ' ' + a.symbol + ' - ' + a.details + '</div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red);font-size:12px;">Erro ao buscar status: ' + e.message + '</div>';
+  }
+}
+
+async function runSimulator() {
+  const el = document.getElementById('pmStatus');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--gold);font-size:13px;">🧪 Rodando simulação com 3000 trades...</div>';
+  try {
+    const r = await fetch('/api/position/simulate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      sl: 300, tp: 600, be_trigger: 200, be_lock: 50,
+      trailing_trigger: 250, trailing_distance: 150, trailing_step: 50,
+      sample_trades: 3000
+    })});
+    const d = await r.json();
+    if (!d.ok) { el.innerHTML = '<div style="color:var(--red);">❌ ' + (d.error || 'Erro') + '</div>'; return; }
+    const sim = d.simulation;
+    const nm = sim.no_management;
+    const be = sim.with_breakeven;
+    const bt = sim.with_be_trailing;
+    let html = '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;">';
+    html += '<div style="color:var(--gold);font-weight:600;margin-bottom:8px;">🧪 Simulação BE + Trailing (' + sim.sample_size + ' trades)</div>';
+    html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+    html += '<tr style="color:var(--text2);"><th style="text-align:left;padding:4px;">Métrica</th><th style="text-align:center;padding:4px;">Sem Gestão</th><th style="text-align:center;padding:4px;">Só BE</th><th style="text-align:center;padding:4px;">BE + Trailing</th></tr>';
+    const rows = [
+      ['Win Rate', nm.win_rate + '%', be.win_rate + '%', bt.win_rate + '%'],
+      ['Total PnL', '$' + nm.total_pnl, '$' + be.total_pnl, '$' + bt.total_pnl],
+      ['Profit Factor', nm.profit_factor, be.profit_factor, bt.profit_factor],
+      ['Avg PnL/Trade', '$' + nm.avg_pnl, '$' + be.avg_pnl, '$' + bt.avg_pnl],
+      ['Trades', nm.trades, be.trades, bt.trades],
+    ];
+    rows.forEach(r => {
+      const improved = parseFloat(String(r[3]).replace('$','')) > parseFloat(String(r[1]).replace('$',''));
+      html += '<tr style="border-top:1px solid var(--border);">';
+      html += '<td style="padding:4px;color:var(--text);">' + r[0] + '</td>';
+      html += '<td style="padding:4px;text-align:center;">' + r[1] + '</td>';
+      html += '<td style="padding:4px;text-align:center;">' + r[2] + '</td>';
+      html += '<td style="padding:4px;text-align:center;color:' + (improved ? 'var(--green)' : 'var(--text)') + ';font-weight:' + (improved ? '600' : '400') + ';">' + r[3] + '</td>';
+      html += '</tr>';
+    });
+    html += '</table>';
+    const pnlDiff = bt.total_pnl - nm.total_pnl;
+    const pnlPct = nm.total_pnl > 0 ? ((pnlDiff / nm.total_pnl) * 100).toFixed(0) : 0;
+    html += '<div style="margin-top:8px;padding:8px;background:' + (pnlDiff > 0 ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)') + ';border-radius:6px;font-size:12px;">';
+    html += '<span style="color:' + (pnlDiff > 0 ? 'var(--green)' : 'var(--red)') + ';font-weight:600;">';
+    html += (pnlDiff > 0 ? '📈' : '📉') + ' BE+Trailing melhora PnL em ' + pnlPct + '% (' + (pnlDiff > 0 ? '+' : '') + '$' + pnlDiff.toFixed(0) + ')</span>';
+    html += '</div>';
+    html += '<div style="margin-top:6px;font-size:11px;color:var(--text2);">' +
+      'Config: SL=' + sim.parameters.sl + 'p TP=' + sim.parameters.tp + 'p | ' +
+      'BE: trigger=' + sim.parameters.be_trigger + 'p lock=' + sim.parameters.be_lock + 'p | ' +
+      'Trail: trigger=' + sim.parameters.trailing_trigger + 'p dist=' + sim.parameters.trailing_distance + 'p step=' + sim.parameters.trailing_step + 'p</div>';
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red);">❌ Erro na simulação: ' + e.message + '</div>';
+  }
+}
+
+// ═══ REAL BACKTEST ═══
+async function runRealBacktest() {
+  const robot = document.getElementById('btRobot').value;
+  if (!robot) { alert('Selecione um robô primeiro!'); return; }
+  const res = document.getElementById('btResult');
+  res.innerHTML = '<div style="background:rgba(34,197,94,0.1);border:1px solid var(--green);border-radius:8px;padding:16px;">' +
+    '<div style="color:var(--green);font-weight:600;margin-bottom:8px;">⚡ Backtest Real no Strategy Tester do MT5</div>' +
+    '<div style="color:var(--text2);font-size:13px;">1️⃣ Compilando EA com parâmetros do ' + robot + '...</div>' +
+    '<div style="color:var(--text2);font-size:13px;">2️⃣ Rodando no Strategy Tester real...</div>' +
+    '<div style="color:var(--text2);font-size:13px;">⏳ Aguarde (pode levar 1-3 minutos)...</div></div>';
+  try {
+    const body = {
+      robot_name: robot,
+      strategy: document.getElementById('btStrategy').value,
+      symbol: document.getElementById('btSymbol').value,
+      timeframe: document.getElementById('btTimeframe').value,
+      sl: parseInt(document.getElementById('btSL').value),
+      tp: parseInt(document.getElementById('btTP').value),
+      lot: parseFloat(document.getElementById('btLot').value),
+      indicator_params: currentRobotParams,
+    };
+    const r = await fetch('/api/mt5/real_backtest', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await r.json();
+    if (d.ok) {
+      res.innerHTML = '<div style="background:rgba(34,197,94,0.1);border:2px solid var(--green);border-radius:10px;padding:20px;">' +
+        '<div style="color:var(--green);font-weight:700;font-size:16px;margin-bottom:12px;">✅ EA Compilado com Sucesso!</div>' +
+        '<div style="font-size:13px;color:var(--text);line-height:1.8;">' +
+        '🤖 <b>Robô:</b> ' + robot + '<br>' +
+        '📊 <b>Estratégia:</b> ' + document.getElementById('btStrategy').value + '<br>' +
+        '💰 <b>Ativo:</b> ' + document.getElementById('btSymbol').value + ' | <b>TF:</b> ' + document.getElementById('btTimeframe').value + '<br>' +
+        '⚙️ <b>SL:</b> ' + document.getElementById('btSL').value + ' | <b>TP:</b> ' + document.getElementById('btTP').value + ' | <b>Lote:</b> ' + document.getElementById('btLot').value + '<br>' +
+        '🤖 <b>EA:</b> ' + (d.ea_name || 'N/A') + '<br>' +
+        '</div>' +
+        '<div style="margin-top:16px;padding:12px;background:var(--bg);border-radius:8px;">' +
+        '<div style="color:var(--gold);font-weight:600;margin-bottom:8px;">📋 Passos para rodar o Backtest Real:</div>' +
+        '<div style="font-size:13px;color:var(--text);line-height:1.8;">' +
+        '1️⃣ O <b>MetaEditor</b> abriu automaticamente com o EA<br>' +
+        '2️⃣ Pressione <b>F7</b> no MetaEditor para compilar o EA<br>' +
+        '3️⃣ Abra o <b>MetaTrader 5</b> e pressione <b>Ctrl+R</b><br>' +
+        '4️⃣ Selecione Expert Advisor: <b>' + (d.ea_name || 'GoldenAI_Backtest_*') + '</b><br>' +
+        '5️⃣ Configure Símbolo, Período e clique em <b>Iniciar</b><br>' +
+        '6️⃣ Veja o gráfico real com equity curve e trades!<br>' +
+        '</div></div>' +
+        '<div style="margin-top:8px;font-size:11px;color:var(--text2);">📁 EA salvo em: MQL5/Experts/' + (d.ea_name || '') + '.mq5</div>' +
+        '</div>';
+    } else {
+      res.innerHTML = '<div style="background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:8px;padding:16px;">' +
+        '<div style="color:var(--red);font-weight:600;">❌ Erro no Backtest Real</div>' +
+        '<div style="color:var(--text2);font-size:13px;margin-top:8px;">' + (d.error || 'Erro desconhecido') + '</div>' +
+        '<div style="color:var(--text2);font-size:11px;margin-top:8px;">💡 Dica: Verifique se o MetaTrader 5 está aberto e conectado.</div></div>';
+    }
+  } catch(e) {
+    res.innerHTML = '<div style="background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:8px;padding:16px;">' +
+      '<div style="color:var(--red);">❌ Erro: ' + e.message + '</div></div>';
+  }
+}
+
+// ═══ SCANNER ═══
+let scannerInterval = null;
+let strategiesLoaded = false;
+let allStrategies = [];
+let strategyFilter = 'all';
+
+// ═══ STRATEGY MANAGER ═══
+async function loadStrategies() {
+  const grid = document.getElementById('strategyGrid');
+  grid.innerHTML = '<div style="color:var(--gold);grid-column:1/-1;">Carregando 47 estrategias...</div>';
+  try {
+    const r = await fetch('/api/strategy_manager/list', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error);
+    allStrategies = d.strategies;
+    renderStrategyStats(d.summary, d.modes);
+    renderStrategies();
+    strategiesLoaded = true;
+  } catch(e) {
+    grid.innerHTML = '<div style="color:var(--red);grid-column:1/-1;">Erro: ' + e.message + '</div>';
+  }
+}
+
+function renderStrategyStats(summary, modes) {
+  var el = document.getElementById('strategyStats');
+  if (!el) return;
+  var scalpOn = allStrategies.filter(function(s){return s.mode==='scalp'&&s.enabled;}).length;
+  var dayOn = allStrategies.filter(function(s){return s.mode==='day'&&s.enabled;}).length;
+  var swingOn = allStrategies.filter(function(s){return s.mode==='swing'&&s.enabled;}).length;
+  var cards = [
+    {v: summary.enabled+'/'+summary.total, l:'Ativas/Total', c:'var(--gold)'},
+    {v: scalpOn, l:'Scalp ON', c:'var(--green)'},
+    {v: dayOn, l:'Day ON', c:'var(--blue)'},
+    {v: swingOn, l:'Swing ON', c:'#a855f7'},
+    {v: summary.disabled, l:'Desativadas', c:'var(--red)'}
+  ];
+  var h = '';
+  cards.forEach(function(c){
+    h += '<div style=\"background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center;\"><div style=\"font-size:22px;font-weight:700;color:'+c.c+';\">'+c.v+'</div><div style=\"font-size:11px;color:var(--text2);margin-top:4px;\">'+c.l+'</div></div>';
+  });
+  el.innerHTML = h;
+  // Update mode buttons
+  document.getElementById('modeScalp').className = 'filter-btn' + (modes.scalp ? ' active' : '');
+  document.getElementById('modeDay').className = 'filter-btn' + (modes.day ? ' active' : '');
+  document.getElementById('modeSwing').className = 'filter-btn' + (modes.swing ? ' active' : '');
+}
+
+function renderStrategies() {
+  var grid = document.getElementById('strategyGrid');
+  var filtered = allStrategies;
+  var q = document.getElementById('strategySearch') ? document.getElementById('strategySearch').value.toLowerCase() : '';
+  if (strategyFilter === 'on') filtered = filtered.filter(function(s){return s.enabled;});
+  else if (strategyFilter === 'off') filtered = filtered.filter(function(s){return !s.enabled;});
+  else if (strategyFilter === 'A') filtered = filtered.filter(function(s){return s.tier==='A';});
+  else if (strategyFilter === 'B') filtered = filtered.filter(function(s){return s.tier==='B';});
+  else if (strategyFilter === 'C') filtered = filtered.filter(function(s){return s.tier==='C';});
+  if (q) filtered = filtered.filter(function(s){return s.name.toLowerCase().indexOf(q)>=0||s.id.toLowerCase().indexOf(q)>=0;});
+  if (filtered.length === 0) {
+    grid.innerHTML = '<div style="color:var(--text2);grid-column:1/-1;text-align:center;padding:40px;">Nenhuma estrategia encontrada</div>';
+    return;
+  }
+  var html = '';
+  var mc = {scalp:'var(--green)', day:'var(--blue)', swing:'#a855f7'};
+  var mi = {scalp:'\u26A1', day:'\uD83D\uDCCA', swing:'\uD83D\uDCC8'};
+  var tc = {A:'var(--gold)', B:'var(--text2)', C:'var(--red)'};
+  filtered.forEach(function(s) {
+    var c1 = mc[s.mode] || 'var(--text)';
+    var icon = mi[s.mode] || '';
+    var c2 = tc[s.tier] || 'var(--text2)';
+    var bg = s.enabled ? 'var(--green)' : 'var(--red)';
+    var op = s.enabled ? '1' : '0.5';
+    var tf = (s.timeframes || []).join('/');
+    var rg = (s.best_regime || []).join(', ');
+    html += '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;border-left:3px solid '+c1+';opacity:'+op+';padding:12px;margin-bottom:8px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+    html += '<div><span style="font-size:11px;color:'+c1+';font-weight:600;">'+icon+' '+s.mode.toUpperCase()+'</span>';
+    html += ' <span style="font-size:10px;color:'+c2+';margin-left:6px;">Tier '+s.tier+'</span></div>';
+    html += '<button onclick="toggleStrategy(\''+s.id+'\','+(!s.enabled)+')" style="background:'+bg+';color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">'+(s.enabled?'ON':'OFF')+'</button>';
+    html += '</div>';
+    html += '<div style="font-size:13px;font-weight:600;margin:6px 0 2px;">'+s.name+'</div>';
+    html += '<div style="font-size:11px;color:var(--text2);line-height:1.3;">'+(s.description||'')+'</div>';
+    html += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">';
+    html += '<span style="font-size:10px;background:var(--bg);padding:2px 6px;border-radius:3px;color:var(--text2);">'+tf+'</span>';
+    html += '<span style="font-size:10px;background:var(--bg);padding:2px 6px;border-radius:3px;color:var(--text2);">R:R '+s.min_rr+'</span>';
+    html += '<span style="font-size:10px;background:var(--bg);padding:2px 6px;border-radius:3px;color:var(--text2);">'+rg+'</span>';
+    html += '</div></div>';
+  });
+  grid.innerHTML = html;
+}
+
+function filterStrategies(filter) {
+  strategyFilter = filter || 'all';
+  ['All','ON','OFF','A','B','C'].forEach(function(f) {
+    var el = document.getElementById('filter' + f);
+    if (el) el.className = 'filter-btn' + (f.toLowerCase() === strategyFilter ? ' active' : '');
+  });
+  renderStrategies();
+}
+
+async function toggleStrategy(id, enabled) {
+  try {
+    var response = await fetch('/api/strategy_manager/toggle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({strategy_id: id, enabled: enabled})});
+    var result = await response.json();
+    if (!result.ok) { if (result.approval_required) alert('Ação aguardando aprovação. Abra Segurança para aprovar.'); else alert(result.error || 'Ação não executada.'); return; }
+    var s = allStrategies.find(function(x){return x.id===id;});
+    if (s) s.enabled = enabled;
+    renderStrategies();
+    // Update stats
+    var onCount = allStrategies.filter(function(s){return s.enabled;}).length;
+    renderStrategyStats({enabled:onCount, total:allStrategies.length, disabled:allStrategies.length - onCount}, {});
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function toggleMode(mode) {
+  var btn = document.getElementById('mode' + mode.charAt(0).toUpperCase() + mode.slice(1));
+  var isOn = btn && btn.classList.contains('active');
+  try {
+    var response = await fetch('/api/strategy_manager/toggle_mode', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode: mode, enabled: !isOn})});
+    var result = await response.json();
+    if (!result.ok) { if (result.approval_required) alert('Ação aguardando aprovação. Abra Segurança para aprovar.'); else alert(result.error || 'Ação não executada.'); return; }
+    loadStrategies();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function applyPreset(preset) {
+  try {
+    var response = await fetch('/api/strategy_manager/preset', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({preset: preset})});
+    var result = await response.json();
+    if (!result.ok) { if (result.approval_required) alert('Ação aguardando aprovação. Abra Segurança para aprovar.'); else alert(result.error || 'Ação não executada.'); return; }
+    loadStrategies();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function loadAutoRank() {
+  var el = document.getElementById('autoRankResult');
+  el.innerHTML = '<div style="color:var(--gold);">Analisando performance...</div>';
+  try {
+    var r = await fetch('/api/strategy_manager/auto_rank', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error);
+    var recs = d.recommendations;
+    var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">';
+    var rc = {'ON':'var(--green)','OFF':'var(--red)','RECOMMEND_ON':'#22c55e','RECOMMEND_OFF':'#ef4444','NEEDS_DATA':'var(--text2)'};
+    var rl = {'ON':'ATIVA','OFF':'DESATIVADA','RECOMMEND_ON':'RECOMENDAR ON','RECOMMEND_OFF':'RECOMENDAR OFF','NEEDS_DATA':'DADOS INSUFICIENTES'};
+    recs.forEach(function(item) {
+      var c = rc[item.recommendation] || 'var(--text2)';
+      html += '<div style="background:var(--bg3);padding:10px;border-radius:8px;border-left:3px solid '+c+';">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+      html += '<span style="font-size:12px;font-weight:600;">'+item.name+'</span>';
+      html += '<span style="font-size:10px;color:'+c+';font-weight:600;">'+rl[item.recommendation]+'</span>';
+      html += '</div>';
+      html += '<div style="font-size:10px;color:var(--text2);margin-top:4px;">Trades: '+item.trades+' | EV: '+(item.expectancy||0).toFixed(3)+'R | Tier '+item.tier+' | '+item.mode.toUpperCase()+'</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red);">Erro: ' + e.message + '</div>';
+  }
+}
+
+async function loadStrategyAudit() {
+  var el = document.getElementById('autoRankResult');
+  el.innerHTML = '<div style="color:var(--gold);">Auditando regras das 47 estratégias...</div>';
+  try {
+    var r = await fetch('/api/strategy_audit', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error);
+    var s = d.summary;
+    var html = '<div style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:12px;font-size:12px;">' +
+      'Total: <b>' + s.total + '</b> | <span style="color:var(--green);">Manter: ' + s.keep + '</span> | ' +
+      '<span style="color:var(--gold);">Observar: ' + s.observe + '</span> | <span style="color:var(--red);">Refazer: ' + s.refactor + '</span>' +
+      '<br><span style="color:var(--text2);">Condições diretas: ' + s.direct_conditions + ' | Aproximadas: ' + s.proxy_conditions + ' | Sem medição fiel: ' + s.unsupported_conditions + '</span></div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">';
+    Object.values(d.strategies).sort(function(a,b){return a.coverage_score-b.coverage_score;}).forEach(function(a) {
+      var color = a.recommendation === 'MANTER' ? 'var(--green)' : (a.recommendation === 'REFAZER' ? 'var(--red)' : 'var(--gold)');
+      var missing = a.conditions.filter(function(c){return c.status === 'UNSUPPORTED';}).map(function(c){return c.condition;}).join(', ');
+      html += '<div style="background:var(--bg3);padding:10px;border-left:3px solid '+color+';border-radius:6px;">' +
+        '<div style="font-size:12px;font-weight:600;">'+a.name+'</div>' +
+        '<div style="font-size:10px;color:'+color+';margin-top:4px;">'+a.recommendation+' | Cobertura '+a.coverage_score+'%</div>' +
+        '<div style="font-size:10px;color:var(--text2);margin-top:3px;">Diretas: '+a.direct_conditions+' | Aproximadas: '+a.proxy_conditions+' | Ausentes: '+a.unsupported_conditions+'</div>' +
+        (missing ? '<div style="font-size:10px;color:var(--red);margin-top:3px;">Refazer: '+missing+'</div>' : '') + '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div style="color:var(--red);">Erro: ' + e.message + '</div>'; }
+}
+
+async function runStrategyMatrix() {
+  var el = document.getElementById('autoRankResult');
+  el.innerHTML = '<div style="color:var(--gold);">Executando matriz dos setups do Radar. Isso pode levar alguns minutos...</div>';
+  try {
+    var r = await fetch('/api/strategy_matrix', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      symbol: document.getElementById('btSymbol').value,
+      timeframe: document.getElementById('btTimeframe').value,
+      sl: parseInt(document.getElementById('btSL').value)||500,
+      tp: parseInt(document.getElementById('btTP').value)||1000,
+      lot: parseFloat(document.getElementById('btLot').value)||0.01,
+      balance: parseFloat(document.getElementById('btBalance').value)||10000,
+      count: parseInt(document.getElementById('btCount').value)||3000
+    })});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error);
+    var html = '<div style="background:var(--bg3);padding:10px;border-radius:8px;margin-bottom:10px;font-size:12px;">Matriz: <b>'+d.tested+'</b> estratégias | '+d.symbol+' '+d.timeframe+'</div>';
+    html += '<div style="overflow:auto;background:var(--bg3);border-radius:8px;"><table style="width:100%;font-size:11px;border-collapse:collapse;min-width:760px;"><tr style="color:var(--gold);border-bottom:1px solid var(--border);"><th style="padding:7px;text-align:left;">#</th><th style="padding:7px;text-align:left;">Estratégia</th><th>Trades</th><th>WR</th><th>PF</th><th>PnL</th><th>DD</th><th>Retorno</th></tr>';
+    d.results.forEach(function(x, i) {
+      if (!x.stats) { html += '<tr><td>'+ (i+1) +'</td><td>'+x.strategy_id+'</td><td colspan="6" style="color:var(--red);">'+x.error+'</td></tr>'; return; }
+      var s=x.stats, color=s.total_pnl>=0?'var(--green)':'var(--red)';
+      html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:7px;">'+(i+1)+'</td><td style="padding:7px;font-weight:600;">'+x.strategy_name+' <span style="color:var(--dim);">('+x.strategy_id+')</span></td><td style="text-align:center;">'+s.total_trades+'</td><td style="text-align:center;">'+s.win_rate+'%</td><td style="text-align:center;">'+s.profit_factor+'</td><td style="text-align:right;color:'+color+';">$'+s.total_pnl+'</td><td style="text-align:center;color:var(--red);">'+s.max_drawdown+'%</td><td style="text-align:center;color:'+color+';">'+s.return_pct+'%</td></tr>';
+    });
+    html += '</table></div><div style="font-size:10px;color:var(--text2);margin-top:8px;">Ranking preliminar por PnL. A aprovação exige validação fora da amostra, custos reais, Monte Carlo e robustez.</div>';
+    el.innerHTML=html;
+  } catch(e) { el.innerHTML='<div style="color:var(--red);">Erro: '+e.message+'</div>'; }
+}
+
+async function loadValidationAll() {
+  var el = document.getElementById('autoRankResult');
+  el.innerHTML = '<div style="color:var(--gold);">Validando 47 estrategias com dados reais do Journal...</div>';
+  try {
+    var r = await fetch('/api/validation/all_real', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error);
+    var strats = d.result.strategies || {};
+    var sum = d.result.summary || {};
+    var html = '<div style="display:flex;gap:10px;margin-bottom:12px;">';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:#22c55e;">' + (sum.validated||0) + '</div><div style="font-size:10px;color:var(--text2);">VALIDADAS</div></div>';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:#eab308;">' + (sum.testing||0) + '</div><div style="font-size:10px;color:var(--text2);">EM TESTE</div></div>';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:#f97316;">' + (sum.weak||0) + '</div><div style="font-size:10px;color:var(--text2);">FRACAS</div></div>';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:#ef4444;">' + (sum.negative||0) + '</div><div style="font-size:10px;color:var(--text2);">NEGATIVAS</div></div>';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:#888;">' + (sum.inconclusive||0) + '</div><div style="font-size:10px;color:var(--text2);">INCONCLUSIVAS</div></div>';
+    html += '</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:8px;">';
+    var keys = Object.keys(strats).sort(function(a,b){
+      var order = {'VALIDADA':0,'EM_TESTE':1,'FRACA':2,'NEGATIVA':3,'INCONCLUSIVO':4,'ERRO':5};
+      return (order[strats[a].status]||5) - (order[strats[b].status]||5);
+    });
+    keys.forEach(function(sid) {
+      var s = strats[sid];
+      var c = s.validation_color || s.status_color || '#888';
+      var conf = s.confidence_level || 0;
+      html += '<div style="background:var(--bg3);padding:10px;border-radius:8px;border-left:3px solid '+c+';">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+      html += '<span style="font-size:12px;font-weight:600;">'+sid.replace('SCALP_','').replace('DAY_','').replace('SWING_','')+'</span>';
+      html += '<span style="font-size:10px;color:'+c+';font-weight:600;background:rgba(0,0,0,0.3);padding:2px 8px;border-radius:4px;">'+s.status+' ('+conf+'%)</span>';
+      html += '</div>';
+      html += '<div style="font-size:10px;color:var(--text2);margin-top:4px;">';
+      html += 'Trades: '+(s.total_trades||0)+' | EV: '+(s.expectancy||0).toFixed(3)+'R | PF: '+(s.profit_factor||0)+' | Sharpe: '+(s.sharpe||0);
+      html += '</div>';
+      if (s.backtest) {
+        html += '<div style="font-size:10px;color:var(--text2);margin-top:2px;">';
+        html += 'BT: '+s.backtest.return_pct+'% | DD: '+s.backtest.max_dd+'% | PF: '+s.backtest.pf;
+        if (s.robustness) html += ' | Robustez: '+s.robustness.score+'% ('+s.robustness.verdict+')';
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red);">Erro: ' + e.message + '</div>';
+  }
+}
+
+async function importMT5History() {
+  var el = document.getElementById('autoRankResult');
+  el.innerHTML = '<div style="color:#0ea5e9;">Importando historico do MT5 (90 dias)...</div>';
+  try {
+    var r = await fetch('/api/mt5/import_history', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:90})});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error);
+    el.innerHTML = '<div style="color:var(--green);">Importados: ' + d.imported + ' trades do MT5 (' + d.total_deals + ' deals no total, ' + d.period + ')</div>';
+    setTimeout(loadValidationAll, 1000);
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red);">Erro ao importar: ' + e.message + '</div>';
+  }
+}
+
+async function scannerScanAll() {
+  const res = document.getElementById('scannerResults');
+  const sym = document.getElementById('scannerSymbol').value;
+  document.getElementById('scannerStatus').innerHTML = '📡 Scannear mercados...';
+  res.innerHTML = '<div style="color:var(--text2);padding:20px;">⏳ Scannear 28 setups em todos os ativos...</div>';
+  try {
+    const body = sym ? {symbol: sym} : {};
+    const r = await fetch('/api/scanner/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const d = await r.json();
+    if (!d.ok) { res.innerHTML = '<div style="color:var(--red);">❌ ' + (d.error || 'Erro') + '</div>'; return; }
+    
+    if (d.scan) {
+      // Ativo unico
+      document.getElementById('scannerStatus').innerHTML = '🟢 ' + d.scan.symbol + ' | Preco: ' + d.scan.price + ' | Regime: ' + d.scan.regime + ' (' + d.scan.regime_score + '/100) | ' + d.scan.scan_time;
+      res.innerHTML = renderSingleScan(d.scan);
+    } else if (d.scans) {
+      // Multiplos ativos
+      let html = '<div class="stats-grid" style="margin-bottom:15px;">';
+      d.scans.forEach(s => {
+        const color = (s.best_setup && s.best_setup.level_label) ? (s.best_setup.level_label === 'OPORTUNIDADE' ? 'var(--green)' : s.best_setup.level_label === 'PRE_ENTRADA' ? 'var(--gold)' : 'var(--dim)') : 'var(--red)';
+        html += '<div class="stat-card" style="border-left:3px solid ' + color + ';">'; html += '<div style="font-size:14px;font-weight:600;">' + s.symbol + '</div>'; html += '<div class="stat-value" style="font-size:18px;color:' + color + ';">' + (s.best_setup ? s.best_setup.readiness + '%' : '0%') + '</div>'; html += '<div class="stat-label">' + (s.best_setup ? s.best_setup.name : 'Nenhum setup') + '</div>';        html += '<div style="font-size:11px;color:var(--dim);">' + s.regime + ' | ' + (s.best_setup ? s.best_setup.level_label : 'N/A') + '</div>'; html += '</div>';
+      });
+      html += '</div>';
+      
+      // Detalhes por ativo
+      d.scans.forEach(s => {
+        html += renderRadarSymbol(s);
+      });
+      
+      document.getElementById('scannerStatus').innerHTML = '🟢 ' + d.scans.length + ' ativos scannados | ' + new Date().toLocaleTimeString();
+      res.innerHTML = html;
+    }
+  } catch(e) { res.innerHTML = '<div style="color:var(--red);">❌ ' + e.message + '</div>'; }
+}
+
+// ═══ RISK ENGINE STATUS ═══
+async function loadRiskStatus() {
+  var el = document.getElementById('riskStatus');
+  if (!el) return;
+  try {
+    var r = await fetch('/api/risk/status', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var d = await r.json();
+    if (!d.ok) { el.innerHTML = ''; return; }
+    var color = d.allowed ? 'var(--green)' : 'var(--red)';
+    var icon = d.allowed ? '🟢' : '🔴';
+    var html = '<div style="background:var(--bg2);border:1px solid ' + color + ';border-radius:10px;padding:10px 14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">';
+    html += '<div style="font-size:13px;font-weight:700;color:' + color + ';">' + icon + ' RISK: ' + (d.allowed ? 'OK' : d.reason) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Balance: $' + (d.account_balance||0).toFixed(2) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Risk/Trade: ' + d.risk_per_trade_pct + '%</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Daily PnL: ' + d.daily_pnl_r + 'R</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Positions: ' + d.positions_count + '/' + d.max_positions + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Losses: ' + d.consecutive_losses + '</div>';
+    if (d.news_status && d.news_status.near_news) {
+      html += '<div style="font-size:11px;color:var(--red);font-weight:600;">NEWS: ' + d.news_status.event_name + ' em ' + d.news_status.minutes_until + 'min</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = ''; }
+}
+loadRiskStatus();
+
+// Auto-trade state
+let autoTradeEnabled = false;
+let autoTradeInterval = null;
+let autoTradeMinScore = 75;
+let autoTradeMinReadiness = 70;
+
+// ═══ SCANNER PERFORMANCE POR ESTRATEGIA ═══
+async function scannerPerformance() {
+  var el = document.getElementById('scannerResults');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--gold);font-size:13px;padding:10px;">📡 Escaneando todos os ativos para montar performance por estratégia...</div>';
+  try {
+    var r = await fetch('/api/scanner/performance', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var d = await r.json();
+    if (!d.ok || !d.strategies) { el.innerHTML = '<div style="color:var(--red)">Erro ao buscar performance</div>'; return; }
+    var strategies = d.strategies;
+    var totalSetups = d.total_setups || 0;
+    var totalPairs = d.total_pairs || 0;
+
+    // Sort by avg_score descending
+    strategies.sort(function(a,b) { return b.avg_score - a.avg_score; });
+
+    var html = '<div style="margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap;">';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;"><span style="font-size:11px;color:var(--dim);">Total Setups</span><div style="font-size:18px;font-weight:700;color:var(--gold);">' + totalSetups + '</div></div>';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;"><span style="font-size:11px;color:var(--dim);">Ativos Monitorados</span><div style="font-size:18px;font-weight:700;color:var(--green);">' + totalPairs + '</div></div>';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;"><span style="font-size:11px;color:var(--dim);">Estratégias Ativas</span><div style="font-size:18px;font-weight:700;color:var(--purple);">' + strategies.length + '</div></div>';
+    html += '</div>';
+
+    // Tier labels
+    var tierA = strategies.filter(function(s){return s.tier==='A';});
+    var tierB = strategies.filter(function(s){return s.tier==='B';});
+    var tierC = strategies.filter(function(s){return s.tier==='C';});
+    var tierOther = strategies.filter(function(s){return s.tier!=='A'&&s.tier!=='B'&&s.tier!=='C';});
+
+    function renderTier(title, color, icon, strats) {
+      if (!strats.length) return '';
+      var h = '<div style="margin-top:16px;">';
+      h += '<div style="font-size:13px;font-weight:700;color:' + color + ';margin-bottom:8px;display:flex;align-items:center;gap:6px;">' + icon + ' ' + title + ' (' + strats.length + ')</div>';
+      strats.forEach(function(s) {
+        var modeIcon = s.mode==='scalp'?'⚡':s.mode==='day'?'📊':'📈';
+        var modeColor = s.mode==='scalp'?'var(--green)':s.mode==='day'?'var(--purple)':'var(--gold)';
+        var scoreColor = s.avg_score>=60?'var(--green)':s.avg_score>=40?'var(--gold)':'var(--text3)';
+        var rrColor = s.avg_rr>=2?'var(--green)':s.avg_rr>=1?'var(--gold)':'var(--red)';
+        h += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+        h += '<div style="display:flex;align-items:center;gap:8px;">';
+        h += '<span style="font-size:14px;">' + modeIcon + '</span>';
+        h += '<div><div style="font-size:13px;font-weight:700;color:var(--text);">' + s.name + '</div>';
+        h += '<div style="font-size:11px;color:' + modeColor + ';">' + s.mode.toUpperCase() + '</div></div>';
+        h += '</div>';
+        h += '<div style="text-align:right;"><div style="font-size:18px;font-weight:700;color:' + scoreColor + ';">' + s.avg_score + '</div>';
+        h += '<div style="font-size:10px;color:var(--dim);">score médio</div></div>';
+        h += '</div>';
+        // Stats row
+        h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px;">';
+        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:' + rrColor + ';">' + s.avg_rr.toFixed(1) + '</div><div style="font-size:9px;color:var(--dim);">R:R médio</div></div>';
+        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:var(--text);">' + s.pairs_active + '/' + totalPairs + '</div><div style="font-size:9px;color:var(--dim);">pares ativos</div></div>';
+        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:var(--text);">' + s.avg_confluence + '%</div><div style="font-size:9px;color:var(--dim);">confluência</div></div>';
+        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:' + (s.conditions_avg>=3?'var(--green)':'var(--gold)') + ';">' + s.conditions_avg.toFixed(1) + '/4</div><div style="font-size:9px;color:var(--dim);">condições</div></div>';
+        h += '</div>';
+        // Pairs with direction
+        h += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
+        s.pairs_detail.forEach(function(p) {
+          var dirColor = p.direction==='BUY'?'var(--green)':p.direction==='SELL'?'var(--red)':'var(--dim)';
+          var dirIcon = p.direction==='BUY'?'▲':p.direction==='SELL'?'▼':'—';
+          h += '<span style="background:var(--bg3);padding:2px 8px;border-radius:4px;font-size:11px;color:' + dirColor + ';">' + p.symbol + ' ' + dirIcon + ' ' + p.score + '</span>';
+        });
+        h += '</div>';
+        h += '</div>';
+      });
+      h += '</div>';
+      return h;
+    }
+
+    html += renderTier('Tier A — Principais', 'var(--green)', '🥇', tierA);
+    html += renderTier('Tier B — Condições Específicas', 'var(--gold)', '🥈', tierB);
+    html += renderTier('Tier C — Oportunidade Especial', 'var(--purple)', '🥉', tierC);
+    html += renderTier('Outros', 'var(--dim)', '📋', tierOther);
+
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red)">Erro: ' + e.message + '</div>';
+  }
+}
+
+async function scannerStatistics() {
+  var el = document.getElementById('scannerResults');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--gold);font-size:13px;padding:10px;">📊 Carregando estatisticas detalhadas...</div>';
+  try {
+    var r = await fetch('/api/statistics/full', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var d = await r.json();
+    if (!d.ok) { el.innerHTML = '<div style="color:var(--red)">Erro: ' + (d.error||'') + '</div>'; return; }
+    
+    var html = '';
+    
+    // === Confidence Status ===
+    var conf = d.confidence_status || {};
+    var dist = conf.status_distribution || {};
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:8px;">Status de Confianca das Estrategias</div>';
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+    var statusColors = {'VALIDADA':'var(--green)','EM_TESTE':'var(--gold)','FRACA':'var(--red)','NEGATIVA':'var(--red)','INCONCLUSIVO':'var(--dim)'};
+    var statusIcons = {'VALIDADA':'[OK]','EM_TESTE':'[~]','FRACA':'[!]','NEGATIVA':'[X]','INCONCLUSIVO':'[?]'};
+    for (var st in dist) {
+      html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;border-left:3px solid ' + (statusColors[st]||'var(--dim)') + ';">';
+      html += '<div style="font-size:16px;font-weight:700;color:' + (statusColors[st]||'var(--dim)') + ';">' + dist[st] + '</div>';
+      html += '<div style="font-size:11px;color:var(--dim);">' + (statusIcons[st]||'') + ' ' + st + '</div>';
+      html += '</div>';
+    }
+    html += '</div></div>';
+    
+    // === Strategy Performance ===
+    var strats = d.strategy_performance || {};
+    var stratList = Object.keys(strats).map(function(k) { return Object.assign({id:k}, strats[k]); });
+    stratList.sort(function(a,b) { return (b.expectancy_r||0) - (a.expectancy_r||0); });
+    
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:8px;">Performance por Estrategia (Historico)</div>';
+    html += '<div style="overflow-x:auto;">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+    html += '<tr style="background:var(--bg3);"><th style="padding:6px 8px;text-align:left;color:var(--dim);">Status</th><th style="padding:6px 8px;text-align:left;color:var(--dim);">Estrategia</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">Trades</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">WR%</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">EV(R)</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">PF</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">Max DD</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">Sharpe</th></tr>';
+    stratList.forEach(function(s) {
+      var evColor = s.expectancy_r > 0.1 ? 'var(--green)' : s.expectancy_r > 0 ? 'var(--gold)' : 'var(--red)';
+      html += '<tr style="border-bottom:1px solid var(--border);">';
+      html += '<td style="padding:5px 8px;">' + (s.status_icon||'?') + '</td>';
+      html += '<td style="padding:5px 8px;font-weight:600;">' + (s.id||'') + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;">' + (s.total||0) + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;">' + (s.win_rate||0).toFixed(1) + '%</td>';
+      html += '<td style="padding:5px 8px;text-align:right;color:' + evColor + ';font-weight:700;">' + (s.expectancy_r>0?'+':'') + (s.expectancy_r||0).toFixed(3) + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;">' + (s.profit_factor||0).toFixed(2) + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;color:var(--red);">' + (s.max_drawdown_r||0).toFixed(1) + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;">' + (s.sharpe||0).toFixed(2) + '</td>';
+      html += '</tr>';
+    });
+    html += '</table></div></div>';
+    
+    // === Score Calibration ===
+    var cal = d.score_calibration || {};
+    if (cal.calibrated && cal.buckets) {
+      html += '<div style="margin-bottom:16px;">';
+      html += '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:8px;">Calibracao do Score (Score -> Expectancy Real)</div>';
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+      for (var bucket in cal.buckets) {
+        var bd = cal.buckets[bucket];
+        var bColor = bd.expectancy_r > 0 ? 'var(--green)' : 'var(--red)';
+        html += '<div style="background:var(--bg3);padding:8px 12px;border-radius:8px;text-align:center;border-bottom:3px solid ' + bColor + ';">';
+        html += '<div style="font-size:11px;color:var(--dim);">Score ' + bucket + '</div>';
+        html += '<div style="font-size:14px;font-weight:700;color:' + bColor + ';">' + (bd.expectancy_r>0?'+':'') + bd.expectancy_r.toFixed(3) + 'R</div>';
+        html += '<div style="font-size:10px;color:var(--dim);">WR:' + bd.win_rate.toFixed(0) + '% | ' + bd.trades + ' trades</div>';
+        html += '</div>';
+      }
+      html += '</div></div>';
+    }
+    
+    // === Hourly Performance ===
+    var hourly = d.hourly_performance || {};
+    var hourKeys = Object.keys(hourly).filter(function(k){return k>=0;}).sort(function(a,b){return a-b;});
+    if (hourKeys.length > 0) {
+      html += '<div style="margin-bottom:16px;">';
+      html += '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:8px;">Performance por Horario</div>';
+      html += '<div style="display:flex;gap:4px;flex-wrap:wrap;">';
+      hourKeys.forEach(function(h) {
+        var hd = hourly[h];
+        var hColor = hd.expectancy_r > 0 ? 'var(--green)' : 'var(--red)';
+        html += '<div style="background:var(--bg3);padding:6px 8px;border-radius:6px;text-align:center;min-width:50px;">';
+        html += '<div style="font-size:11px;font-weight:600;">' + h + 'h</div>';
+        html += '<div style="font-size:10px;color:' + hColor + ';">' + (hd.expectancy_r>0?'+':'') + hd.expectancy_r.toFixed(2) + 'R</div>';
+        html += '<div style="font-size:9px;color:var(--dim);">' + (hd.session||'') + '</div>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    }
+    
+    // === Mode Performance ===
+    var modes = d.mode_performance || {};
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:8px;">Performance por Modalidade</div>';
+    html += '<div style="display:flex;gap:10px;">';
+    var modeLabels = {'scalp':'⚡ SCALP','day':'📊 DAY','swing':'📈 SWING','unknown':'❓'};
+    var modeColors = {'scalp':'var(--green)','day':'var(--purple)','swing':'var(--gold)'};
+    for (var m in modes) {
+      var md = modes[m];
+      var mColor = modeColors[m] || 'var(--dim)';
+      html += '<div style="background:var(--bg3);padding:12px 16px;border-radius:10px;border-left:3px solid ' + mColor + ';flex:1;min-width:150px;">';
+      html += '<div style="font-size:13px;font-weight:700;color:' + mColor + ';margin-bottom:6px;">' + (modeLabels[m]||m) + '</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;">';
+      html += '<div>Trades: <b>' + (md.total||0) + '</b></div>';
+      html += '<div>WR: <b>' + (md.win_rate||0).toFixed(1) + '%</b></div>';
+      html += '<div>EV: <b style="color:' + ((md.expectancy_r||0)>0?'var(--green)':'var(--red)') + ';">' + ((md.expectancy_r||0)>0?'+':'') + (md.expectancy_r||0).toFixed(3) + 'R</b></div>';
+      html += '<div>PF: <b>' + (md.profit_factor||0).toFixed(2) + '</b></div>';
+      html += '</div></div>';
+    }
+    html += '</div></div>';
+    
+    // === Walk Forward ===
+    var wf = d.walk_forward || {};
+    if (wf.sufficient_data && wf.periods) {
+      html += '<div style="margin-bottom:16px;">';
+      html += '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:8px;">Walk-Forward Analysis</div>';
+      wf.periods.forEach(function(p) {
+        var stabColor = p.stability ? 'var(--green)' : 'var(--red)';
+        html += '<div style="background:var(--bg3);padding:8px 12px;border-radius:8px;margin-bottom:6px;border-left:3px solid ' + stabColor + ';">';
+        html += '<div style="font-size:12px;"><b>Periodo ' + p.period + '</b> ';
+        html += '<span style="color:' + stabColor + ';">' + (p.stability ? 'ESTAVEL' : 'INSTAVEL') + '</span></div>';
+        html += '<div style="font-size:11px;color:var(--dim);">Train: ' + p.train_trades + ' trades, WR=' + p.train_win_rate.toFixed(1) + '%, EV=' + p.train_expectancy.toFixed(3) + 'R | ';
+        html += 'Test: ' + p.test_trades + ' trades, WR=' + p.test_win_rate.toFixed(1) + '%, EV=' + p.test_expectancy.toFixed(3) + 'R</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+    
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red)">Erro: ' + e.message + '</div>';
+  }
+}
+
+// VALIDATION FUNCTIONS
+function getValParams() {
+  return {
+    strategy_id: (document.getElementById('valStrategy') || {}).value || '',
+    symbol: document.getElementById('btSymbol').value,
+    timeframe: document.getElementById('btTimeframe').value,
+    sl: parseInt(document.getElementById('btSL').value)||500,
+    tp: parseInt(document.getElementById('btTP').value)||1000,
+    lot: parseFloat(document.getElementById('btLot').value)||0.01,
+    count: parseInt(document.getElementById('btCount').value)||3000,
+    win_rate: (parseFloat(document.getElementById('valWR').value)||50)/100,
+    avg_win_r: parseFloat(document.getElementById('valAvgWin').value)||1.5,
+    avg_loss_r: parseFloat(document.getElementById('valAvgLoss').value)||1.0,
+    num_trades: parseInt(document.getElementById('valTrades').value)||200,
+    initial_balance: parseFloat(document.getElementById('valBalance').value)||10000,
+  };
+}
+
+async function runValidation() {
+  var el = document.getElementById('valResult');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--gold);padding:10px;">Rodando suite completa de validacao...</div>';
+  try {
+    var params = getValParams();
+    var r = await fetch('/api/validation/full', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(params)});
+    var d = await r.json();
+    if (!d.ok) { el.innerHTML = '<div style="color:var(--red)">Erro: ' + (d.error||'') + '</div>'; return; }
+    var html = '';
+    // Backtest
+    var bt = d.backtest.results;
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">';
+    html += '<div style="background:var(--bg3);padding:12px;border-radius:10px;border-left:3px solid var(--green);">';
+    html += '<div style="font-size:11px;color:var(--dim);">Backtest (' + bt.total_trades + ' trades)</div>';
+    html += '<div style="font-size:20px;font-weight:700;color:var(--green);">' + (bt.return_pct>0?'+':'') + bt.return_pct + '%</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">PF: ' + bt.profit_factor + ' | Sharpe: ' + bt.sharpe + ' | MaxDD: ' + bt.max_drawdown_pct + '%</div>';
+    html += '</div>';
+    // Monte Carlo
+    var mc = d.monte_carlo;
+    html += '<div style="background:var(--bg3);padding:12px;border-radius:10px;border-left:3px solid var(--gold);">';
+    html += '<div style="font-size:11px;color:var(--dim);">Monte Carlo (' + mc.simulations + ' sims)</div>';
+    html += '<div style="font-size:20px;font-weight:700;color:' + (mc.ruin_probability < 5 ? 'var(--green)' : 'var(--red)') + ';">Ruin: ' + mc.ruin_probability + '%</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Return P5-P95: ' + mc.return_p5 + '% to ' + mc.return_p95 + '%</div>';
+    html += '</div>';
+    // Robustness
+    var rob = d.robustness;
+    var robColor = rob.verdict === 'ROBUST' ? 'var(--green)' : (rob.verdict === 'MODERATE' ? 'var(--gold)' : 'var(--red)');
+    html += '<div style="background:var(--bg3);padding:12px;border-radius:10px;border-left:3px solid ' + robColor + ';">';
+    html += '<div style="font-size:11px;color:var(--dim);">Robustez</div>';
+    html += '<div style="font-size:20px;font-weight:700;color:' + robColor + ';">' + rob.robustness_score + '%</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">' + rob.verdict + ' | ' + rob.positive_variations + '/' + rob.variations_tested + ' positivas</div>';
+    html += '</div>';
+    html += '</div>';
+    // Walk-Forward
+    var wf = d.walk_forward;
+    var wfColor = wf.verdict === 'ROBUST' ? 'var(--green)' : (wf.verdict === 'MODERATE' ? 'var(--gold)' : 'var(--red)');
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:8px;">Walk-Forward (' + wf.verdict + ')</div>';
+    wf.results.forEach(function(w) {
+      var wColor = w.stability === 'STABLE' ? 'var(--green)' : (w.stability === 'MODERATE' ? 'var(--gold)' : 'var(--red)');
+      html += '<div style="background:var(--bg3);padding:8px 12px;border-radius:8px;margin-bottom:4px;border-left:3px solid ' + wColor + ';display:flex;justify-content:space-between;">';
+      html += '<span>Window ' + w.window + ': Train WR=' + w.train_win_rate + '% -> Test WR=' + w.test_win_rate + '%</span>';
+      html += '<span style="color:' + wColor + ';font-weight:600;">' + w.stability + '</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+    // Mode comparison
+    var modes = d.mode_comparison;
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:8px;">Comparacao de Modos (Best: ' + modes.best_mode + ')</div>';
+    html += '<div style="display:flex;gap:10px;">';
+    var modeLabels = {scalp:'SCALP', day:'DAY', swing:'SWING'};
+    var modeColors = {scalp:'var(--green)', day:'var(--purple)', swing:'var(--gold)'};
+    modes.ranking.forEach(function(r) {
+      var mc2 = modeColors[r.mode] || 'var(--dim)';
+      html += '<div style="background:var(--bg3);padding:12px 16px;border-radius:10px;border-left:3px solid ' + mc2 + ';flex:1;text-align:center;">';
+      html += '<div style="font-size:13px;font-weight:700;color:' + mc2 + ';">' + (modeLabels[r.mode]||r.mode) + '</div>';
+      html += '<div style="font-size:18px;font-weight:700;">Sharpe: ' + r.sharpe.toFixed(2) + '</div>';
+      html += '<div style="font-size:11px;color:var(--dim);">Return: ' + r.return_pct.toFixed(1) + '%</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div style="color:var(--red)">Erro: ' + e.message + '</div>'; }
+}
+
+async function runMonteCarlo() {
+  var el = document.getElementById('valResult');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--gold);padding:10px;">Rodando 1000 simulacoes Monte Carlo...</div>';
+  try {
+    var params = getValParams();
+    params.num_simulations = 1000;
+    var r = await fetch('/api/validation/monte_carlo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(params)});
+    var d = await r.json();
+    if (!d.ok) { el.innerHTML = '<div style="color:var(--red)">Erro</div>'; return; }
+    var mc = d.monte_carlo;
+    var html = '<div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:12px;">Monte Carlo — ' + mc.simulations + ' Simulacoes</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">';
+    var items = [
+      {label:'Ruin Prob', value:mc.ruin_probability+'%', color:mc.ruin_probability<5?'var(--green)':'var(--red)'},
+      {label:'Return Median', value:mc.return_median+'%', color:'var(--gold)'},
+      {label:'Return P5', value:mc.return_p5+'%', color:'var(--red)'},
+      {label:'Return P95', value:mc.return_p95+'%', color:'var(--green)'},
+      {label:'Max DD P95', value:mc.drawdown_p95+'%', color:'var(--red)'},
+      {label:'Max Consec Loss P95', value:mc.max_consec_losses_p95, color:'var(--gold)'},
+      {label:'Positive Sims', value:mc.positive_sims_pct+'%', color:'var(--green)'},
+      {label:'Return StdDev', value:mc.return_std+'%', color:'var(--dim)'},
+    ];
+    items.forEach(function(item) {
+      html += '<div style="background:var(--bg3);padding:10px;border-radius:8px;text-align:center;border-bottom:3px solid ' + item.color + ';">';
+      html += '<div style="font-size:18px;font-weight:700;color:' + item.color + ';">' + item.value + '</div>';
+      html += '<div style="font-size:10px;color:var(--dim);">' + item.label + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div style="color:var(--red)">Erro: ' + e.message + '</div>'; }
+}
+
+async function runRobustness() {
+  var el = document.getElementById('valResult');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--gold);padding:10px;">Testando robustez com 9 variacoes...</div>';
+  try {
+    var params = getValParams();
+    var r = await fetch('/api/validation/robustness', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(params)});
+    var d = await r.json();
+    if (!d.ok) { el.innerHTML = '<div style="color:var(--red)">Erro</div>'; return; }
+    var rob = d.robustness;
+    var robColor = rob.verdict === 'ROBUST' ? 'var(--green)' : (rob.verdict === 'MODERATE' ? 'var(--gold)' : 'var(--red)');
+    var html = '<div style="font-size:14px;font-weight:700;color:' + robColor + ';margin-bottom:12px;">Robustez: ' + rob.robustness_score + '% — ' + rob.verdict + '</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+    html += '<tr style="background:var(--bg3);"><th style="padding:6px 8px;text-align:left;color:var(--dim);">Variacao</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">WR%</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">Return%</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">PF</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">MaxDD%</th><th style="padding:6px 8px;text-align:right;color:var(--dim);">Sharpe</th><th style="padding:6px 8px;text-align:center;color:var(--dim);">Status</th></tr>';
+    rob.results.forEach(function(r) {
+      var rowColor = r.positive ? 'var(--green)' : 'var(--red)';
+      html += '<tr style="border-bottom:1px solid var(--border);">';
+      html += '<td style="padding:5px 8px;font-weight:600;">' + r.variation + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;">' + r.win_rate.toFixed(1) + '%</td>';
+      html += '<td style="padding:5px 8px;text-align:right;color:' + rowColor + ';font-weight:700;">' + (r.return_pct>0?'+':'') + r.return_pct.toFixed(1) + '%</td>';
+      html += '<td style="padding:5px 8px;text-align:right;">' + r.profit_factor.toFixed(2) + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;color:var(--red);">' + r.max_drawdown_pct.toFixed(1) + '%</td>';
+      html += '<td style="padding:5px 8px;text-align:right;">' + r.sharpe.toFixed(2) + '</td>';
+      html += '<td style="padding:5px 8px;text-align:center;color:' + rowColor + ';">' + (r.positive ? 'PASS' : 'FAIL') + '</td>';
+      html += '</tr>';
+    });
+    html += '</table>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div style="color:var(--red)">Erro: ' + e.message + '</div>'; }
+}
+
+function toggleAutoTrade() {
+  autoTradeEnabled = !autoTradeEnabled;
+  var btn = document.getElementById('autoTradeBtn');
+  if (!btn) return;
+  if (autoTradeEnabled) {
+    btn.style.background = 'var(--green)';
+    btn.style.color = '#000';
+    btn.innerHTML = '🤖 AUTO-TRADE: ON (Score>' + autoTradeMinScore + ')';
+    startAutoTrade();
+  } else {
+    btn.style.background = 'var(--bg3)';
+    btn.style.color = 'var(--text2)';
+    btn.innerHTML = '🤖 AUTO-TRADE: OFF';
+    if (autoTradeInterval) { clearInterval(autoTradeInterval); autoTradeInterval = null; }
+  }
+}
+
+function startAutoTrade() {
+  if (autoTradeInterval) clearInterval(autoTradeInterval);
+  autoTradeInterval = setInterval(async function() {
+    if (!autoTradeEnabled) return;
+    try {
+      var r = await fetch('/api/scanner/radar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+      var d = await r.json();
+      if (!d.ok) return;
+      d.radar.forEach(async function(s) {
+        var validationOk = s.validation && s.validation.status === 'VALIDADA';
+        var auditOk = s.audit && s.audit.auto_trade_eligible === true;
+        if (s.score_total >= autoTradeMinScore && s.best_readiness >= autoTradeMinReadiness && s.best_level === 'OPORTUNIDADE' && s.best_direction !== 'NEUTRO' && validationOk && auditOk) {
+          // Executar trade automatico
+          var bestSetupObj = (typeof s.best_setup === 'object' && s.best_setup) ? s.best_setup : null;
+          var bestSetupName = s.best_setup_name || (bestSetupObj ? bestSetupObj.name : (s.best_setup || ''));
+          var bestSetupId = s.best_setup_id || (bestSetupObj ? bestSetupObj.setup_id : '');
+          var analysis = {
+            direcao: s.best_direction,
+            direction: s.best_direction,
+            entrada: null,
+            entry: null,
+            stop_loss: null,
+            take_profit: null,
+            take_profit_1: null,
+            symbol: s.symbol,
+            mode: s.best_mode,
+            setup: bestSetupName,
+            setup_name: bestSetupName,
+            strategy_id: bestSetupId
+          };
+          var tr = await fetch('/api/mt5/auto_trade', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({analysis:JSON.stringify(analysis), symbol:s.symbol, auto_execute:true, mode:s.best_mode})});
+          var td = await tr.json();
+          if (td.ok) {
+            var log = document.getElementById('autoTradeLog');
+            if (log) log.innerHTML = '<div style="color:var(--green);font-size:12px;padding:4px 0;">🤖 ' + new Date().toLocaleTimeString() + ' | ' + s.symbol + ' ' + s.best_direction + ' ' + bestSetupName + ' Score:' + s.score_total + '</div>' + log.innerHTML;
+          }
+        }
+      });
+    } catch(e) {}
+  }, 30000); // Scan a cada 30 segundos
+}
+
+async function scannerRadar() {
+  const res = document.getElementById('scannerResults');
+  document.getElementById('scannerStatus').innerHTML = '📡 Radar multi-ativo (22 ativos)...';
+  res.innerHTML = '<div style="color:var(--text2);padding:20px;">⏳ Varrendo 22 ativos em 28 setups...</div>';
+  try {
+    const r = await fetch('/api/scanner/radar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) });
+    const d = await r.json();
+    if (!d.ok) { res.innerHTML = '<div style="color:var(--red);">❌ ' + (d.error || 'Erro') + '</div>'; return; }
+    
+    // Header
+    document.getElementById('scannerStatus').innerHTML = '\uD83D\uDFE2 Radar atualizado | ' + d.radar.length + ' ativos | ' + new Date().toLocaleTimeString();
+    window._radarData = d.radar;
+    renderRadarTable(d.radar, window._radarFilter || 'all');
+  } catch(e) { res.innerHTML = '<div style="color:var(--red);">❌ ' + e.message + '</div>'; }
+}
+
+function openAssetDetail(idx) {
+  var data = window._radarData;
+  if (!data || idx > data.length) return;
+  var s = data[idx - 1];
+  
+  var modeIcons = {scalp:'\u26A1', day:'\uD83D\uDCCA', swing:'\uD83D\uDCC8', scalping:'\u26A1', price_action:'\uD83D\uDCCA'};
+  var modeNames = {scalp:'SCALP', day:'DAY TRADE', swing:'SWING', scalping:'SCALPING', price_action:'PRICE ACTION'};
+  var modeDesc = {
+    scalp:'Entradas rapidas em M1-M5. SL/TP apertados. 5-30 min. Foco em momentum e spread baixo.',
+    day:'Analise estrutural H1-M15-M5. Rompimento, pullback, FVG, BOS, CHoCH. Horas a dias.',
+    scalping:'Entradas rapidas em M1-M5. SL/TP apertados. 5-30 min. Foco em momentum e spread baixo.',
+    price_action:'Analise estrutural H1-M15-M5. Rompimento, pullback, FVG, BOS, CHoCH. Horas a dias.',
+    swing:'Tendencia macro D1-H4-H1. Pullback fibonacci, breakout diario. Dias a semanas.'
+  };
+  var bestSetupObj = (typeof s.best_setup === 'object' && s.best_setup) ? s.best_setup : null;
+  var bestSetupId = s.best_setup_id || (bestSetupObj ? bestSetupObj.setup_id : '');
+  var bestSetupName = s.best_setup_name || (bestSetupObj ? bestSetupObj.name : (s.best_setup || ''));
+  var trendIcon = function(t) { return t === 'alta' ? '<span style="color:var(--green);">▲ ALTA</span>' : t === 'baixa' ? '<span style="color:var(--red);">▼ BAIXA</span>' : '<span style="color:var(--dim);">— LATERAL</span>'; };
+  
+  var modal = '<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)this.remove()">';
+  modal += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:700px;width:95%;max-height:90vh;overflow-y:auto;">';
+  
+  // Header
+  var alertColor = s.alert_level === 'OPORTUNIDADE' ? 'var(--green)' : s.alert_level === 'PRE_ENTRADA' ? 'var(--gold)' : 'var(--dim)';
+  modal += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">';
+  modal += '<div><span style="font-size:20px;font-weight:700;">' + s.symbol + '</span>';
+  modal += ' <span style="background:' + (s.best_mode==='scalp'?'#FF6B00':s.best_mode==='day'?'var(--blue)':'var(--purple)') + ';color:#fff;padding:3px 10px;border-radius:8px;font-size:12px;font-weight:600;">' + (modeIcons[s.best_mode]||'') + ' ' + (modeNames[s.best_mode]||s.best_mode||'N/A') + '</span></div>';
+  modal += '<span onclick="this.closest(\'[style*=fixed]\').remove()" style="cursor:pointer;font-size:20px;color:var(--dim);">✕</span>';
+  modal += '</div>';
+  
+  // Modo description
+  if (s.best_mode && modeDesc[s.best_mode]) {
+    modal += '<div style="background:var(--bg3);padding:8px 12px;border-radius:8px;font-size:11px;color:var(--text2);margin-bottom:12px;">' + modeDesc[s.best_mode] + '</div>';
+  }
+  
+  // Info grid
+  var biasColor = s.bias === 'BULLISH' ? 'var(--green)' : s.bias === 'BEARISH' ? 'var(--red)' : 'var(--dim)';
+  var adxColor = (s.adx||0) > 25 ? 'var(--green)' : (s.adx||0) > 15 ? 'var(--gold)' : 'var(--dim)';
+  modal += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:15px;">';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">Preco</div><div style="font-size:16px;font-weight:700;">' + (s.price > 100 ? s.price.toFixed(1) : s.price.toFixed(4)) + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">Spread</div><div style="font-size:16px;font-weight:700;">' + s.spread + 'p ($' + s.spread_usd.toFixed(2) + ')</div></div>';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">Score</div><div style="font-size:16px;font-weight:700;color:' + alertColor + ';">' + s.score_total + '/100</div></div>';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">Regime</div><div style="font-size:14px;">' + s.regime + ' (' + Math.round(s.regime_score) + ')</div></div>';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">Volatilidade</div><div style="font-size:14px;">' + s.volatility + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">Sessao</div><div style="font-size:14px;">' + s.session + (s.session_active ? ' (ATIVA)' : '') + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">ADX (Forca)</div><div style="font-size:14px;font-weight:600;color:' + adxColor + ';">' + (s.adx||0).toFixed(1) + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">Bias HTF</div><div style="font-size:14px;font-weight:600;color:' + biasColor + ';">' + (s.bias||'NEUTRAL') + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:8px;border-radius:8px;"><div style="font-size:10px;color:var(--dim);">Zonas S/R</div><div style="font-size:14px;font-weight:600;">' + (s.key_zones||0) + '</div></div>';
+  modal += '</div>';
+  
+  // Timeframes
+  modal += '<div style="margin-bottom:15px;"><div style="font-size:12px;font-weight:600;color:var(--gold);margin-bottom:8px;">\uD83D\uDDFA\uFE0F TENDENCIAS</div>';
+  modal += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">';
+  modal += '<div style="text-align:center;padding:8px;background:var(--bg3);border-radius:8px;"><div style="font-size:10px;color:var(--dim);">H4</div>' + trendIcon(s.trend_h4) + '</div>';
+  modal += '<div style="text-align:center;padding:8px;background:var(--bg3);border-radius:8px;"><div style="font-size:10px;color:var(--dim);">H1</div>' + trendIcon(s.trend_h1) + '</div>';
+  modal += '<div style="text-align:center;padding:8px;background:var(--bg3);border-radius:8px;"><div style="font-size:10px;color:var(--dim);">M15</div>' + trendIcon(s.trend_m15) + '</div>';
+  modal += '<div style="text-align:center;padding:8px;background:var(--bg3);border-radius:8px;"><div style="font-size:10px;color:var(--dim);">M5</div>' + trendIcon(s.trend_m5) + '</div>';
+  modal += '</div></div>';
+  
+  // Setup info
+  if (s.best_setup) {
+    var rrVal = s.best_rr || 0;
+    var rrColor = rrVal >= 2 ? 'var(--green)' : rrVal >= 1.5 ? 'var(--gold)' : 'var(--red)';
+    var confVal = s.best_confluence || 0;
+    var confColor = confVal >= 70 ? 'var(--green)' : confVal >= 50 ? 'var(--gold)' : 'var(--dim)';
+    modal += '<div style="margin-bottom:15px;"><div style="font-size:12px;font-weight:600;color:var(--gold);margin-bottom:8px;">\uD83C\uDFAF SETUP: ' + bestSetupName + '</div>';
+    modal += '<div style="background:var(--bg3);padding:10px;border-radius:8px;font-size:12px;">';
+    modal += '<div>Direcao: <b style="color:' + (s.best_direction==='BUY'?'var(--green)':'var(--red)') + ';">' + s.best_direction + '</b> | Readiness: <b>' + s.best_readiness + '%</b> | Nivel: <b>' + s.best_level + '</b></div>';
+    modal += '<div style="margin-top:6px;display:flex;gap:15px;">';
+    modal += '<span>R:R: <b style="color:' + rrColor + ';">' + (rrVal > 0 ? rrVal.toFixed(1) : '-') + '</b></span>';
+    modal += '<span>Confluencia: <b style="color:' + confColor + ';">' + (confVal > 0 ? confVal.toFixed(0) + '%' : '-') + '</b></span>';
+    modal += '</div>';
+    if (s.best_conditions_met && s.best_conditions_met.length > 0) {
+      modal += '<div style="margin-top:6px;font-size:11px;color:var(--green);">✓ ' + s.best_conditions_met.join(', ') + '</div>';
+    }
+    if (s.best_conditions_missing && s.best_conditions_missing.length > 0) {
+      modal += '<div style="margin-top:3px;font-size:11px;color:var(--red);">✗ ' + s.best_conditions_missing.join(', ') + '</div>';
+    }
+    if (s.top_setups_list && s.top_setups_list.length > 1) {
+      modal += '<div style="margin-top:8px;font-size:11px;color:var(--dim);">Outros setups:</div>';
+      s.top_setups_list.slice(1, 4).forEach(function(x) {
+        var xRr = x.rr || 0;
+        modal += '<div style="font-size:11px;">- ' + x.name + ' (' + x.mode + ') ' + x.readiness + '% ' + x.direction + ' R:R:' + (xRr > 0 ? xRr.toFixed(1) : '-') + '</div>';
+      });
+    }
+    modal += '</div></div>';
+  }
+  
+  // Indicadores
+  modal += '<div style="margin-bottom:15px;"><div style="font-size:12px;font-weight:600;color:var(--gold);margin-bottom:8px;">\uD83D\uDCCA INDICADORES</div>';
+  modal += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">';
+  modal += '<div style="background:var(--bg3);padding:6px;border-radius:6px;text-align:center;"><div style="font-size:10px;color:var(--dim);">RSI H1</div><div style="font-weight:600;">' + s.rsi_h1.toFixed(0) + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:6px;border-radius:6px;text-align:center;"><div style="font-size:10px;color:var(--dim);">RSI M15</div><div style="font-weight:600;">' + s.rsi_m15.toFixed(0) + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:6px;border-radius:6px;text-align:center;"><div style="font-size:10px;color:var(--dim);">ATR H1</div><div style="font-weight:600;">' + (s.atr_h1 > 0 ? s.atr_h1.toFixed(s.atr_h1 > 1 ? 1 : 4) : '-') + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:6px;border-radius:6px;text-align:center;"><div style="font-size:10px;color:var(--dim);">ATR M15</div><div style="font-weight:600;">' + (s.atr_m15 > 0 ? s.atr_m15.toFixed(s.atr_m15 > 1 ? 1 : 4) : '-') + '</div></div>';
+  modal += '</div>';
+  modal += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px;">';
+  modal += '<div style="background:var(--bg3);padding:6px;border-radius:6px;text-align:center;"><div style="font-size:10px;color:var(--dim);">Pips Hoje</div><div style="font-weight:600;color:' + (s.pips_today > 0 ? 'var(--green)' : 'var(--red)') + ';">' + (s.pips_today > 0 ? '+' : '') + s.pips_today + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:6px;border-radius:6px;text-align:center;"><div style="font-size:10px;color:var(--dim);">Range Dia</div><div style="font-weight:600;">' + s.daily_range_pct.toFixed(2) + '%</div></div>';
+  modal += '<div style="background:var(--bg3);padding:6px;border-radius:6px;text-align:center;"><div style="font-size:10px;color:var(--dim);">Setups Ativos</div><div style="font-weight:600;">' + (s.setup_count || 0) + '</div></div>';
+  modal += '<div style="background:var(--bg3);padding:6px;border-radius:6px;text-align:center;"><div style="font-size:10px;color:var(--dim);">BB Width</div><div style="font-weight:600;">' + (s.bb_width||0).toFixed(2) + '%</div></div>';
+  modal += '</div></div>';
+  
+  // Action buttons
+  var canTrade = s.alert_level === 'OPORTUNIDADE' || s.alert_level === 'PRE_ENTRADA';
+  modal += '<div style="display:flex;gap:10px;margin-top:15px;">';
+  if (canTrade) {
+    modal += '<button onclick="executeTradeFromModal(\'' + s.symbol + '\',\'' + s.best_direction + '\',\'' + (s.best_mode||'') + '\',\'' + bestSetupName + '\',\'' + bestSetupId + '\')" style="flex:1;background:var(--green);color:#000;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">\u26A1 ENTRAR NO TRADE</button>';
+  }
+  modal += '<button onclick="runDeepAnalysis(\'' + s.symbol + '\',\'' + (s.best_mode||'day') + '\')" style="flex:1;background:var(--blue);color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">\uD83D\uDD2C Analise Profunda (Multi-Layer)</button>';
+  modal += '</div>';
+  
+  // Trade result
+  modal += '<div id="tradeResult" style="margin-top:10px;"></div>';
+  
+  modal += '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', modal);
+}
+
+async function executeTradeFromModal(symbol, direction, mode, setup, strategyId) {
+  var el = document.getElementById('tradeResult');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--gold);font-size:13px;">⏳ Executando ' + direction + ' ' + symbol + '...</div>';
+  try {
+    // Pegar dados reais do radar para calcular SL/TP
+    var data = window._radarData || [];
+    var asset = null;
+    for (var i = 0; i < data.length; i++) { if (data[i].symbol === symbol) { asset = data[i]; break; } }
+    var price = asset ? asset.price : 0;
+    var atr = asset ? (asset.atr_h1 || 1) : 1;
+    var entry = price;
+    var sl = 0, tp = 0;
+    if (direction === 'BUY') {
+      sl = entry - atr * 1.5;
+      tp = entry + atr * 2.5;
+    } else if (direction === 'SELL') {
+      sl = entry + atr * 1.5;
+      tp = entry - atr * 2.5;
+    }
+    var analysis = {direcao:direction, direction:direction, entrada:entry, entry:entry, stop_loss:sl, take_profit:tp, take_profit_1:tp, symbol:symbol, mode:mode, setup:setup, setup_name:setup, strategy_id:strategyId || ''};
+    el.innerHTML = '<div style="color:var(--gold);font-size:13px;">⏳ ' + direction + ' ' + symbol + ' @ ' + entry.toFixed(2) + ' | SL: ' + sl.toFixed(2) + ' | TP: ' + tp.toFixed(2) + '</div>';
+    var r = await fetch('/api/mt5/auto_trade', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({analysis:JSON.stringify(analysis), symbol:symbol, auto_execute:true, mode:mode})});
+    var d = await r.json();
+    if (d.ok) {
+      el.innerHTML = '<div style="color:var(--green);font-size:13px;background:var(--green);color:#000;padding:8px;border-radius:6px;">✅ ' + d.message + '</div>';
+    } else {
+      el.innerHTML = '<div style="color:var(--red);font-size:13px;">❌ ' + (d.error || 'Erro ao executar') + '</div>';
+    }
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red);font-size:13px;">❌ ' + e.message + '</div>';
+  }
+}
+
+async function runDeepAnalysis(symbol, mode) {
+  var el = document.getElementById('tradeResult');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--gold);font-size:13px;">\uD83D\uDD2C Executando analise Multi-Layer para ' + symbol + ' (' + mode + ')...</div>';
+  try {
+    var r = await fetch('/api/mt5/full_analysis', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol:symbol, mode:mode})});
+    var d = await r.json();
+    if (d.ok !== false && !d.error) {
+      // Extrair dados da resposta
+      var direction = 'N/A';
+      var score = 0;
+      var entry = null;
+      var sl = null;
+      var tp = null;
+      var setups = d.ranked_setups || [];
+      if (setups.length > 0) {
+        var best = setups[0];
+        direction = best.direction || 'N/A';
+        score = best.score || 0;
+        entry = best.entry;
+        sl = best.stop_loss;
+        tp = best.take_profit;
+      }
+      var regime = d.regime ? d.regime.type : 'desconhecido';
+      var regimeConf = d.regime ? d.regime.confidence : 0;
+      var html = '<div style="background:var(--bg3);padding:10px;border-radius:8px;margin-top:8px;font-size:12px;">';
+      html += '<div style="font-weight:600;color:var(--gold);margin-bottom:5px;">\uD83D\uDD2C Analise Multi-Layer: ' + symbol + '</div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">';
+      html += '<div><div style="font-size:10px;color:var(--dim);">Regime</div><div style="font-weight:600;">' + regime + ' (' + regimeConf + '%)</div></div>';
+      html += '<div><div style="font-size:10px;color:var(--dim);">Direcao</div><div style="font-weight:700;color:' + (direction==='BUY'?'var(--green)':direction==='SELL'?'var(--red)':'var(--dim)') + ';">' + direction + '</div></div>';
+      html += '<div><div style="font-size:10px;color:var(--dim);">Score</div><div style="font-weight:700;">' + score + '/100</div></div>';
+      html += '</div>';
+      if (entry) html += '<div>Entrada: <b>' + entry + '</b></div>';
+      if (sl) html += '<div>Stop Loss: <b>' + sl + '</b></div>';
+      if (tp) html += '<div>Take Profit: <b>' + tp + '</b></div>';
+      // Listar outros setups
+      if (setups.length > 1) {
+        html += '<div style="margin-top:6px;font-size:11px;color:var(--dim);">Outros setups:</div>';
+        setups.slice(1, 3).forEach(function(x) {
+          html += '<div style="font-size:11px;">- ' + x.name + ' (' + x.direction + ') Score:' + x.score + '</div>';
+        });
+      }
+      // IA analysis
+      if (d.ai_analysis) {
+        var aiText = typeof d.ai_analysis === 'string' ? d.ai_analysis : JSON.stringify(d.ai_analysis);
+        html += '<div style="margin-top:6px;padding:6px;background:var(--bg);border-radius:4px;font-size:11px;color:var(--text2);max-height:150px;overflow-y:auto;"><b>IA:</b> ' + aiText.substring(0, 500) + '</div>';
+      }
+      html += '<div style="font-size:10px;color:var(--dim);margin-top:4px;">Modelo: ' + (d.ai_model || 'N/A') + '</div>';
+      if (direction && direction !== 'NONE' && direction !== 'N/A') {
+        html += '<button onclick="executeTradeFromModal(\'' + symbol + '\',\'' + direction + '\',\'' + mode + '\',\'multi_layer\')" style="margin-top:8px;background:var(--green);color:#000;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;">\u26A1 ENTRAR NO TRADE</button>';
+      }
+      html += '</div>';
+      el.innerHTML = html;
+    } else {
+      el.innerHTML = '<div style="color:var(--red);">❌ ' + (d.error || JSON.stringify(d).substring(0, 200)) + '</div>';
+    }
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--red);">❌ Erro: ' + e.message + '</div>';
+  }
+}
+
+function filterRadar(cat) {
+  document.querySelectorAll('#scannerResults .filter-btn').forEach(function(b) { b.className = 'filter-btn'; });
+  var el = document.getElementById('rf' + cat);
+  if (el) el.className = 'filter-btn active';
+  window._radarFilter = cat;
+  renderRadarTable(window._radarData, cat);
+}
+
+function renderRadarTable(data, filter) {
+  if (!data) return;
+  var filtered = data;
+  if (filter && filter !== 'all' && filter !== 'hot') {
+    filtered = data.filter(function(s) { return s.category === filter; });
+  } else if (filter === 'hot') {
+    filtered = data.filter(function(s) { return s.score_total > 50; });
+  }
+  var html = '<div style="text-align:center;margin-bottom:12px;"><span style="font-size:14px;font-weight:600;color:var(--gold);">🎯 RADAR GLOBAL - ' + filtered.length + ' ATIVOS</span>';
+  if (filter && filter !== 'all') html += ' <span style="color:var(--text2);font-size:12px;">(filtro: ' + filter + ')</span>';
+  html += '</div>';
+  
+  var cats = {};
+  data.forEach(function(s) { if (!cats[s.category]) cats[s.category] = []; cats[s.category].push(s); });
+  var catNames = {forex:'💱 FOREX', metal:'🥇 METAIS', index:'📈 INDICES', crypto:'₿ CRYPTO'};
+  
+  html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
+  html += '<button data-filter="all" class="filter-btn' + ((!filter || filter==='all') ? ' active' : '') + '" id="rfAll">Todos (' + data.length + ')</button>';
+  Object.keys(cats).forEach(function(c) {
+    html += '<button data-filter="' + c + '" class="filter-btn' + (filter===c ? ' active' : '') + '" id="rf' + c + '">' + (catNames[c]||c) + ' (' + cats[c].length + ')</button>';
+  });
+  var hotCount = data.filter(function(s){return s.score_total>50;}).length;
+  html += '<button data-filter="hot" class="filter-btn' + (filter==='hot' ? ' active' : '') + '" id="rfhot" style="border-color:var(--green);color:var(--green);">🔥 Com Setup (' + hotCount + ')</button>';
+  html += '</div>';
+  
+  html += '<div style="background:var(--card);border-radius:10px;padding:12px;margin-bottom:12px;overflow-x:auto;">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:11px;">';   html += '<tr style="color:var(--dim);border-bottom:1px solid var(--border);">';
+   html += '<td style="padding:6px;">#</td><td>Ativo</td><td>Modo/Dir</td><td>Preco</td><td>Spread</td>';
+   html += '<td>H4</td><td>H1</td><td>M15</td><td>M5</td>';
+   html += '<td>ADX</td><td>Bias</td>';
+   html += '<td>Setup</td><td>R:R</td><td>Conf</td><td>Score</td><td>Alerta</td>';
+  html += '</tr>';
+  
+  var idx = 0;
+  filtered.forEach(function(s) {
+    idx++;
+    var dataIdx = data.indexOf(s) + 1;
+    var sc = s.score_total;
+    var scoreColor = sc > 80 ? 'var(--green)' : sc > 50 ? 'var(--gold)' : sc > 20 ? 'var(--text2)' : 'var(--dim)';
+    var modeIcons = {scalp:'\u26A1', day:'\uD83D\uDCCA', swing:'\uD83D\uDCC8', scalping:'\u26A1', price_action:'\uD83D\uDCCA'};
+    var modeNames = {scalp:'SCALP', day:'DAY', swing:'SWING', scalping:'SCALP', price_action:'PA'};
+    var modeColor = s.best_mode === 'scalp' ? '#FF6B00' : s.best_mode === 'day' ? 'var(--blue)' : 'var(--purple)';
+    var trendIcon = function(t) { return t === 'alta' ? '<span style="color:var(--green);">▲</span>' : t === 'baixa' ? '<span style="color:var(--red);">▼</span>' : '<span style="color:var(--dim);">—</span>'; };
+    var volColor = s.volatility === 'EXTREME' ? 'var(--red)' : s.volatility === 'HIGH' ? 'var(--gold)' : s.volatility === 'LOW' ? 'var(--dim)' : 'var(--text2)';
+    var pipsColor = s.pips_today > 0 ? 'var(--green)' : s.pips_today < 0 ? 'var(--red)' : 'var(--dim)';
+    var sessBg = s.session_active ? 'background:var(--green);color:#000;padding:1px 6px;border-radius:8px;' : '';
+    var spreadColor = s.spread_usd > 5 ? 'var(--red)' : s.spread_usd > 2 ? 'var(--gold)' : 'var(--text2)';
+    var canTrade = s.alert_level === 'OPORTUNIDADE' || s.alert_level === 'PRE_ENTRADA';
+    var rowBg = canTrade ? 'cursor:pointer;' : '';
+    // Direcao BUY/SELL com cor
+    var dir = s.best_direction || 'NEUTRO';
+    var dirColor = dir === 'BUY' ? 'var(--green)' : dir === 'SELL' ? 'var(--red)' : 'var(--dim)';
+    var dirBg = dir === 'BUY' ? 'rgba(0,200,83,0.15)' : dir === 'SELL' ? 'rgba(255,82,82,0.15)' : 'transparent';
+    var dirIcon = dir === 'BUY' ? '▲ BUY' : dir === 'SELL' ? '▼ SELL' : '— NEUTRO';
+    var setupReady = s.best_readiness > 75 && s.best_level === 'OPORTUNIDADE';
+    var readyBg = setupReady ? 'background:var(--green);color:#000;padding:1px 6px;border-radius:8px;font-weight:700;' : '';
+    
+    html += '<tr style="border-top:1px solid var(--border);' + rowBg + '" onclick="openAssetDetail(' + dataIdx + ')">';
+    html += '<td style="padding:6px;font-weight:600;color:' + scoreColor + ';">' + idx + '</td>';
+    html += '<td style="font-weight:600;">' + s.symbol + '</td>';
+    // Coluna Modo + Direcao
+    html += '<td style="padding:4px;">';
+    html += '<span style="background:' + modeColor + ';color:#fff;padding:1px 5px;border-radius:6px;font-size:9px;font-weight:600;">' + (modeIcons[s.best_mode]||'') + ' ' + (modeNames[s.best_mode]||s.best_mode||'-') + '</span>';
+    if (dir !== 'NEUTRO') {
+      html += '<br><span style="color:' + dirColor + ';font-weight:700;font-size:11px;' + readyBg + '">' + dirIcon + '</span>';
+    }
+    html += '</td>';
+    html += '<td>' + (s.price > 100 ? s.price.toFixed(1) : s.price > 1 ? s.price.toFixed(4) : s.price.toFixed(2)) + '</td>';
+    html += '<td style="color:' + spreadColor + ';">' + s.spread + 'p</td>';
+    html += '<td>' + trendIcon(s.trend_h4) + '</td>';
+    html += '<td>' + trendIcon(s.trend_h1) + '</td>';
+    html += '<td>' + trendIcon(s.trend_m15) + '</td>';
+    html += '<td>' + trendIcon(s.trend_m5) + '</td>';
+    html += '<td style="color:' + volColor + ';">' + s.volatility + '</td>';
+    html += '<td style="color:' + (s.adx > 25 ? 'var(--green)' : s.adx > 15 ? 'var(--gold)' : 'var(--dim)') + ';font-weight:600;">' + (s.adx||0).toFixed(0) + '</td>';
+    var biasIcon = s.bias === 'BULLISH' ? '<span style="color:var(--green);">BULL</span>' : s.bias === 'BEARISH' ? '<span style="color:var(--red);">BEAR</span>' : '<span style="color:var(--dim);">NEU</span>';
+    html += '<td style="font-size:10px;">' + biasIcon + '</td>';
+    var bestSetupObj = (typeof s.best_setup === 'object' && s.best_setup) ? s.best_setup : null;
+    var bestSetupName = s.best_setup_name || (bestSetupObj ? bestSetupObj.name : (s.best_setup || ''));
+    html += '<td style="font-size:10px;">' + (bestSetupName || '<span style="color:var(--dim);">-</span>') + '</td>';
+    var rrVal = s.best_rr || 0;
+    var rrColor = rrVal >= 2 ? 'var(--green)' : rrVal >= 1.5 ? 'var(--gold)' : 'var(--dim)';
+    html += '<td style="color:' + rrColor + ';font-weight:600;font-size:11px;">' + (rrVal > 0 ? rrVal.toFixed(1) : '-') + '</td>';
+    var confVal = s.best_confluence || 0;
+    var confColor = confVal >= 70 ? 'var(--green)' : confVal >= 50 ? 'var(--gold)' : 'var(--dim)';
+    html += '<td style="color:' + confColor + ';font-size:11px;">' + (confVal > 0 ? confVal.toFixed(0) + '%' : '-') + '</td>';
+    html += '<td style="color:' + scoreColor + ';font-weight:700;font-size:13px;">' + sc + '</td>';
+    // Coluna Alerta com indicador visual
+    var alertBadge = '';
+    if (s.alert_level === 'OPORTUNIDADE') {
+      alertBadge = '<span style="background:var(--green);color:#000;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">🟢 OPORTUNIDADE</span>';
+    } else if (s.alert_level === 'PRE_ENTRADA') {
+      alertBadge = '<span style="background:var(--gold);color:#000;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">🟡 PRE-ENTRADA</span>';
+    } else if (s.alert_level === 'MONITORANDO') {
+      alertBadge = '<span style="color:var(--dim);font-size:10px;">⚪ Monitorando</span>';
+    } else {
+      alertBadge = '<span style="color:var(--dim);font-size:10px;">—</span>';
+    }
+    html += '<td>' + alertBadge + '</td>';
+    html += '</tr>';
+  });
+  html += '</table></div>';
+  html += '<div id="autoTradeLog" style="max-height:100px;overflow-y:auto;margin-bottom:10px;"></div>';
+  html += '<div style="display:flex;gap:12px;font-size:10px;color:var(--dim);flex-wrap:wrap;margin-bottom:10px;">';
+  html += '<span><span style="color:#FF6B00;">\u26A1 SCALP</span> | <span style="color:var(--blue);">\uD83D\uDCCA PA</span> | <span style="color:var(--purple);">\uD83D\uDCC8 SWING</span></span>';
+  html += '<span>▲ Alta | ▼ Baixa | — Lateral</span>';
+  html += '<span>Clique no ativo para ver analise completa</span>';
+  html += '</div>';
+  document.getElementById('scannerResults').innerHTML = html;
+}
+
+function renderSingleScan(scan) {
+  let html = '<div style="background:var(--card);border-radius:10px;padding:15px;margin-bottom:15px;">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+  html += '<span style="font-size:16px;font-weight:600;color:var(--gold);">' + scan.symbol + ' - ' + scan.price + '</span>';
+  html += '<span style="background:var(--bg2);padding:4px 12px;border-radius:20px;font-size:12px;">Regime: ' + scan.regime + ' (' + scan.regime_score + '/100)</span>';
+  html += '</div>';
+  
+  // Melhor setup
+  if (scan.best_setup) {
+    const lvl = scan.best_setup.level_label;
+    const color = lvl === 'OPORTUNIDADE' ? 'var(--green)' : lvl === 'PRE_ENTRADA' ? 'var(--gold)' : 'var(--dim)';
+    html += '<div style="background:' + color + '22;border:1px solid ' + color + ';border-radius:8px;padding:12px;margin-bottom:10px;">';
+    html += '<div style="font-size:14px;font-weight:600;color:' + color + ';">🏆 Melhor Setup: ' + scan.best_setup.name + '</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px;">';
+    html += '<div><div style="font-size:11px;color:var(--dim);">Readiness</div><div style="font-size:18px;font-weight:700;color:' + color + ';">' + scan.best_setup.readiness + '%</div></div>';
+    html += '<div><div style="font-size:11px;color:var(--dim);">Nivel</div><div style="font-size:13px;font-weight:600;color:' + color + ';">' + scan.best_setup.level_label + '</div></div>';
+    html += '<div><div style="font-size:11px;color:var(--dim);">Direcao</div><div style="font-size:13px;font-weight:600;">' + scan.best_setup.direction + '</div></div>';
+    html += '<div><div style="font-size:11px;color:var(--dim);">Condicoes</div><div style="font-size:13px;">' + scan.best_setup.conditions_met.length + '/' + (scan.best_setup.conditions_met.length + scan.best_setup.conditions_missing.length) + '</div></div>';
+    html += '</div>';
+    html += '</div>';
+  }
+  
+  // Top 5 setups
+  html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;">📋 Top Setups:</div>';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+  html += '<tr style="color:var(--dim);"><td style="padding:4px;">Setup</td><td>Modo</td><td>Readiness</td><td>Nivel</td><td>Direcao</td></tr>';
+  scan.setups.slice(0, 8).forEach(s => {
+    const c = s.readiness > 80 ? 'var(--green)' : s.readiness > 50 ? 'var(--gold)' : 'var(--dim)';
+    html += '<tr style="border-top:1px solid var(--border);"><td style="padding:4px;">' + s.name + '</td><td>' + s.mode + '</td><td style="color:' + c + ';font-weight:600;">' + s.readiness + '%</td><td>' + s.level_label + '</td><td>' + s.direction + '</td></tr>';
+  });
+  html += '</table>';
+  html += '</div>';
+  return html;
+}
+
+function renderRadarSymbol(s) {
+  if (!s.best_setup && s.readiness < 10) return '';
+  let html = '<div style="background:var(--card);border-radius:8px;padding:10px;margin-bottom:8px;">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+  html += '<span style="font-weight:600;">' + s.symbol + '</span>';
+  html += '<span style="font-size:12px;color:var(--dim);">Regime: ' + s.regime + '</span>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+// ═══ COMPARE ═══
+async function runCompare() {
+  const res = document.getElementById('cmpResult');
+  res.innerHTML = '<div style="color:var(--text2);padding:20px;">⏳ Comparando estratégias no mesmo período...</div>';
+  try {
+    const selected = Array.from(document.querySelectorAll('input[name="cmpStrategy"]:checked')).map(o => o.value);
+    const r = await fetch('/api/mt5/compare', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      symbol: document.getElementById('cmpSymbol').value,
+      timeframe: document.getElementById('cmpTimeframe').value,
+      strategies: selected.length ? selected : undefined,
+    })});
+    const d = await r.json();
+    if (d.ok && d.comparison) { res.innerHTML = renderCompare(d.comparison); }
+    else { res.innerHTML = '<div style="color:var(--red);">❌ ' + ((d && d.error) || 'Erro') + '</div>'; }
+  } catch(e) { res.innerHTML = '<div style="color:var(--red);">❌ ' + e.message + '</div>'; }
+}
+
+function renderCompare(results) {
+  if (!results.length) return '<div style="color:var(--text2);">Nenhum resultado</div>';
+  const sorted = [...results].sort((a,b) => b.stats.total_pnl - a.stats.total_pnl);
+  let h = '<div style="display:grid;grid-template-columns:repeat(' + Math.min(sorted.length, 5) + ',1fr);gap:12px;margin-bottom:16px;">';
+  sorted.forEach((r, i) => {
+    const s = r.stats;
+    const pc = s.total_pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    const border = i === 0 ? '2px solid var(--gold)' : '1px solid var(--border)';
+    h += '<div style="background:var(--bg3);padding:16px;border-radius:10px;border:' + border + ';text-align:center;">' +
+      '<div style="font-weight:600;color:' + (i===0?'var(--gold)':'var(--text)') + ';margin-bottom:8px;">' + (i===0?'🏆 ':'') + s.strategy + '</div>' +
+      '<div style="font-size:22px;font-weight:700;color:' + pc + ';margin-bottom:4px;">' + (s.total_pnl>=0?'+':'') + '$' + s.total_pnl + '</div>' +
+      '<div style="font-size:11px;color:var(--text2);">WR: ' + s.win_rate + '% | ' + s.total_trades + ' trades</div>' +
+      '<div style="font-size:11px;color:var(--text2);">PF: ' + s.profit_factor + ' | DD: ' + s.max_drawdown + '%</div>' +
+      '<div style="font-size:10px;color:' + (s.return_pct>=0?'var(--green)':'var(--red)') + ';margin-top:4px;">Retorno: ' + s.return_pct + '%</div></div>';
+  });
+  h += '</div>';
+  // Table
+  h += '<div style="background:var(--bg3);padding:16px;border-radius:8px;overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;">';
+  h += '<tr style="color:var(--gold);border-bottom:1px solid var(--border);"><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Estratégia</th><th style="padding:8px;">PnL</th><th style="padding:8px;">Win Rate</th><th style="padding:8px;">Trades</th><th style="padding:8px;">PF</th><th style="padding:8px;">Max DD</th><th style="padding:8px;">Retorno</th></tr>';
+  sorted.forEach((r, i) => {
+    const s = r.stats;
+    const pc = s.total_pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    h += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:8px;">' + (i+1) + '</td><td style="padding:8px;font-weight:600;">' + (i===0?'🏆 ':'') + s.strategy + '</td><td style="padding:8px;color:' + pc + ';text-align:right;">' + (s.total_pnl>=0?'+':'') + '$' + s.total_pnl + '</td><td style="padding:8px;text-align:center;">' + s.win_rate + '%</td><td style="padding:8px;text-align:center;">' + s.total_trades + '</td><td style="padding:8px;text-align:center;">' + s.profit_factor + '</td><td style="padding:8px;text-align:center;color:var(--red);">' + s.max_drawdown + '%</td><td style="padding:8px;text-align:center;color:' + (s.return_pct>=0?'var(--green)':'var(--red)') + ';">' + s.return_pct + '%</td></tr>';
+  });
+  h += '</table></div>';
+  return h;
+}
+
+// ═══ INIT ═══
+async function loadStrategyCatalog() {
+  try {
+    const r = await fetch('/api/strategy_catalog', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await r.json();
+    if (!d.ok || !d.strategies) return;
+    const backtest = document.getElementById('btStrategy');
+    const compare = document.getElementById('cmpStrategies');
+    const validation = document.getElementById('valStrategy');
+    const radar = d.strategies.filter(s => s.kind === 'radar');
+    if (radar.length) {
+      const group = document.createElement('optgroup');
+      group.label = 'Radar (47 setups)';
+      radar.forEach(s => {
+        const o = document.createElement('option');
+        o.value = s.id;
+        o.textContent = '[' + s.mode.toUpperCase() + '] ' + s.name;
+        group.appendChild(o);
+      });
+      backtest.appendChild(group);
+    }
+    if (validation) {
+      radar.forEach(s => {
+        const o = document.createElement('option');
+        o.value = s.id;
+        o.textContent = '[' + s.mode.toUpperCase() + '] ' + s.name;
+        validation.appendChild(o);
+      });
+    }
+    compare.innerHTML = '';
+    d.strategies.forEach(s => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block;padding:3px 4px;font-size:11px;cursor:pointer;white-space:nowrap;';
+      const o = document.createElement('input');
+      o.type = 'checkbox';
+      o.name = 'cmpStrategy';
+      o.value = s.id;
+      o.style.marginRight = '6px';
+      label.appendChild(o);
+      label.appendChild(document.createTextNode((s.origin_label || (s.kind === 'robot' ? 'Robô MT5' : s.kind === 'radar' ? 'Radar' : 'Base')) + ' | ' + s.name + (s.kind === 'robot' ? ' | Score ' + (s.quality_score || 0) : '')));
+      compare.appendChild(label);
+    });
+    Array.from(compare.querySelectorAll('input[name="cmpStrategy"]')).slice(0, 5).forEach(o => o.checked = true);
+  } catch(e) { console.log('Catálogo de estratégias indisponível:', e); }
+}
+
+loadRobots();
+loadRobotsForBacktest();
+loadStrategyCatalog();
+if(location.hash==='#backtest'){showTab('backtest');const raw=localStorage.getItem('gai_backtest_action');if(raw){localStorage.removeItem('gai_backtest_action');try{const action=JSON.parse(raw);const box=document.getElementById('btResult');box.innerHTML='<div style="padding:12px;border:1px solid var(--gold);background:#18150e;color:var(--text);font-size:12px"><b style="color:var(--gold)">Ação selecionada: /'+action.command+'</b><br>Ativo: '+action.asset+'<br><span style="color:var(--dim)">Configure o período e a estratégia abaixo. A validação deve incluir custos, amostra, robustez, fora da amostra e Monte Carlo quando aplicável.</span></div>'}catch(e){}}}
+
+// Event delegation for filter buttons
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-filter]');
+  if (btn) { filterRadar(btn.getAttribute('data-filter')); }
+});
+
+
+// Event delegation for filter buttons
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-filter]');
+  if (btn) { filterRadar(btn.getAttribute('data-filter')); }
+});
+
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "attachment_id": "fafbb072-4a13-4664-9b48-fa8d16b61168",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-14T20:50:17.940973+00:00",
+  "source_type": "file",
+  "original_name": "doc.pdf",
+  "mime_type": "application/pdf",
+  "extension": ".pdf",
+  "size_bytes": 18,
+  "sha256": "43E0820F3D05F427F6F6880E114AEA9BD7CA1D0AE6FC707DB9A286F4E9FBECE1",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\fafbb072-4a13-4664-9b48-fa8d16b61168_doc.pdf",
+  "processing_status": "PARSER_NOT_AVAILABLE",
+  "metadata": {
+    "category": "pdf",
+    "status": "STORED",
+    "pdf_parser": "PARSER_NOT_AVAILABLE"
+  }
+}

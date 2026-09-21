@@ -1,0 +1,20 @@
+{
+  "attachment_id": "7e1d8773-b786-4b90-b555-b9ad51a1d098",
+  "session_id": "attachment-test",
+  "message_id": "",
+  "created_at": "2026-08-13T23:59:56.237613+00:00",
+  "source_type": "file",
+  "original_name": "events.log",
+  "mime_type": "application/octet-stream",
+  "extension": ".log",
+  "size_bytes": 14,
+  "sha256": "6B844B99DACF03337C5F1280D6AFF6391999A4A38AB3A55B5E8F06FF6A8CCD2C",
+  "storage_path": "C:\\GoldenAI\\data\\attachments\\attachment-test\\7e1d8773-b786-4b90-b555-b9ad51a1d098_events.log",
+  "processing_status": "STORED",
+  "metadata": {
+    "category": "text",
+    "status": "STORED",
+    "line_count": 1,
+    "preview_chars": 13
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "model": "base",
+  "compute_type": "int8",
+  "beam_size": 1,
+  "best_of": 1,
+  "load_ms": 834,
+  "avg_stt_ms": 696.4,
+  "p50_ms": 603,
+  "p95_ms": 1206,
+  "errors": 1,
+  "routing_success": 6,
+  "sample_count": 10,
+  "rss_delta_mb": 132.7,
+  "samples": [
+    {
+      "expected": "Jarvis, que horas são?",
+      "transcript": "Jarvis, Que Ora São",
+      "stt_ms": 572,
+      "similarity": 0.927,
+      "expected_route": "SYSTEM",
+      "route": "CONVERSATION",
+      "route_ok": false,
+      "avg_logprob": -0.486,
+      "no_speech_prob": 0.001
+    },
+    {
+      "expected": "Jarvis, abra a calculadora.",
+      "transcript": "Jarvis, Abra a calculadora.",
+      "stt_ms": 718,
+      "similarity": 1.0,
+      "expected_route": "WINDOWS",
+      "route": "WINDOWS",
+      "route_ok": true,
+      "avg_logprob": -0.24,
+      "no_speech_prob": 0.0
+    },
+    {
+      "expected": "Jarvis, abra o gerenciador de tarefas.",
+      "transcript": "Jarvis, Abrao Gerenciador de Tarefas.",
+      "stt_ms": 825,
+      "similarity": 0.987,
+      "expected_route": "WINDOWS",
+      "route": "CONVERSATION",
+      "route_ok": false,
+      "avg_logprob": -0.312,
+      "no_speech_prob": 0.001
+    },
+    {
+      "expected": "Jarvis, qual é a cotação do dólar?",
+      "transcript": "Jarvis, qual é a cotação do dólar?",
+      "stt_ms": 609,
+      "similarity": 1.0,
+      "expected_route": "MARKET_DATA",
+      "route": "MARKET_DATA",
+      "route_ok": true,
+      "avg_logprob": -0.243,
+      "no_speech_prob": 0.001
+    },
+    {
+      "expected": "Jarvis, feche a calculadora.",
+      "transcript": "Jarvis, Feche a Calculadora.",
+      "stt_ms": 583,
+      "similarity": 1.0,
+      "expected_route": "CONVERSATION",
+      "route": "CONVERSATION",
+      "route_ok": true,
+      "avg_logprob": -0.56,
+      "no_speech_prob": 0.0
+    },
+    {
+      "expected": "Jarvis, explique o que é inflação.",
+      "transcript": "Jarvis, explique o que é a inflação.",
+      "stt_ms": 583,
+      "similarity": 0.971,
+      "expected_route": "CONVERSATION",
+      "route": "CONVERSATION",
+      "route_ok": true,
+      "avg_logprob": -0.333,
+      "no_speech_prob": 0.0
+    },
+    {
+      "expected": "Jarvis, abra ele.",
+      "transcript": "Jarvis, Abra ele.",
+      "stt_ms": 603,
+      "similarity": 1.0,
+      "expected_route": "CLARIFY",
+      "route": "CLARIFY",
+      "route_ok": true,
+      "avg_logprob": -0.336,
+      "no_speech_prob": 0.001
+    },
+    {
+      "expected": "Jarvis.",
+      "transcript": "Jarvis.",
+      "stt_ms": 526,
+      "similarity": 1.0,
+      "expected_route": "WAKE_ONLY",
+      "route": "WAKE_ONLY",
+      "route_ok": true,
+      "avg_logprob": -0.34,
+      "no_speech_prob": 0.004
+    },
+    {
+      "expected": "Qual é a cotação do ouro?",
+      "transcript": "Qual é a cotação do ouro?",
+      "stt_ms": 739,
+      "similarity": 1.0,
+      "expected_route": "IGNORED",
+      "route": "MARKET_DATA",
+      "route_ok": false,
+      "avg_logprob": -0.104,
+      "no_speech_prob": 0.001
+    },
+    {
+      "expected": "Pare.",
+      "transcript": "Buddy...",
+      "stt_ms": 1206,
+      "similarity": 0.154,
+      "expected_route": "IGNORED",
+      "route": "CONVERSATION",
+      "route_ok": false,
+      "avg_logprob": -1.12,
+      "no_speech_prob": 0.007
+    }
+  ]
+}
