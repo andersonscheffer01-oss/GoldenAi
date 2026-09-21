@@ -4,6 +4,7 @@ import os
 import re
 import time
 import uuid
+from datetime import date
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from enum import Enum
 from .orchestrator import CentralOrchestrator
@@ -219,6 +220,7 @@ class JarvisBrain:
         messages = [
             {"role": "system", "content": (
                 "Você está no modo FINAL_SYNTHESIS. Responda em português do Brasil, "
+                "A data atual do runtime é " + date.today().isoformat() + ". "
                 "em texto natural e conciso, usando somente os resultados fornecidos. "
                 "Não proponha ferramentas, não retorne JSON e não invente valores. "
                 "Para perguntas de versão/estado factual, trate cada linha ou registro "
@@ -227,6 +229,10 @@ class JarvisBrain:
                 "último patch estável e prerelease/future branch. Dê prioridade a fontes "
                 "oficiais com trust A e à evidência mais recente; se houver conflito, "
                 "preserve a divergência e declare a incerteza. "
+                "Diferencie sempre status atual de uma data de transição futura: "
+                "EOL, security ou mudança com data posterior a hoje não é um evento já ocorrido. "
+                "Não infira EOL atual apenas porque existe um campo EOL; use o status explícito "
+                "da fonte e só declare uma transição quando a data já tiver passado. "
                 "Se uma etapa falhou, diga claramente que essa parte não pôde ser obtida. "
                 "Separe fatos observados por tools locais, fatos de fontes web e sua "
                 "interpretação. CPU_TIME acumulado não é CPU instantânea; percentual de "

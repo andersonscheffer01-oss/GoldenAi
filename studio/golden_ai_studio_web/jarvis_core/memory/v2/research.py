@@ -86,6 +86,13 @@ _SECRET_QUERY = re.compile(
 _HTML_SCRIPT = re.compile(r"(?is)<(script|style|noscript).*?</\1>")
 _HTML_TAG = re.compile(r"(?s)<[^>]+>")
 _WS = re.compile(r"\s+")
+_RESEARCH_STOPWORDS = frozenset({
+    "qual", "quais", "versao", "versão", "atual", "atualmente", "current",
+    "latest", "stable", "estavel", "estável", "existe", "alguma", "algum",
+    "versoes", "versões", "para", "sobre", "com", "uma", "the", "and",
+    "official", "oficial", "release", "releases", "status", "pre", "lancamento",
+    "lançamento", "prerelease", "pré-lançamento",
+})
 
 
 def sanitize_research_query(query: str, max_chars: int = 240) -> str:
@@ -857,7 +864,7 @@ def research_provider_health_from_env() -> Dict[str, Any]:
 class SourceTrustEvaluator:
     """Separates source trust from content confidence."""
 
-    official_domains = ("microsoft.com", "amd.com", "python.org", "openai.com")
+    official_domains = ("microsoft.com", "amd.com", "python.org", "nodejs.org", "openai.com")
 
     def evaluate(self, source: FetchedSource | ResearchResult) -> SourceTrustLevel:
         explicit = str(getattr(source, "source_type", "") or "").lower()
@@ -1024,6 +1031,9 @@ class ResearchReport:
     fallback_used: bool = False
     failure_reason: str = ""
     provider_failures: List[Dict[str, str]] = field(default_factory=list)
+    official_retry_count: int = 0
+    raw_query: str = ""
+    provider_query: str = ""
 
 
 class ResearchEngine:
@@ -1034,12 +1044,12 @@ class ResearchEngine:
 
     def research(self, query: str, limit: int = 5,
                  privacy: DataClassification = DataClassification.PUBLIC,
-                 project: str = "", topic: str = "") -> ResearchReport:
+                 project: str = "", topic: str = "", _official_retry: bool = True) -> ResearchReport:
         if privacy == DataClassification.SECRET:
             raise MemorySecurityError("SECRET não pode sair para pesquisa web")
         started = time.perf_counter()
         sanitized_query = sanitize_research_query(query)
-        report = ResearchReport(query=sanitized_query,
+        report = ResearchReport(query=sanitized_query, raw_query=str(query or ""),
                                 provider=type(self.provider).__name__
                                 if self.provider else "")
         if self.provider is None:
@@ -1048,6 +1058,16 @@ class ResearchEngine:
         try:
             search_started = time.perf_counter()
             results = self.provider.search(sanitized_query, limit=limit)
+            report.provider_query = sanitized_query
+            # One bounded rescue search for time-sensitive queries when the
+            # first response is irrelevant or lacks a trustworthy source.
+            if self._needs_official_rescue(sanitized_query, results):
+                rescue_query = sanitized_query + " official authoritative source"
+                rescued = self.provider.search(rescue_query, limit=limit)
+                report.official_retry_count = 1
+                report.provider_query = rescue_query
+                if rescued:
+                    results = rescued
             report.search_ms = int((time.perf_counter() - search_started) * 1000)
         except Exception as exc:
             reason = classify_provider_error(exc)
@@ -1072,6 +1092,10 @@ class ResearchEngine:
             ref = safe_source_ref(result.url)
             if not ref or ref in seen_results:
                 continue
+            if (self._is_time_sensitive(sanitized_query) and
+                    self._relevance_score(sanitized_query, result) <= 0):
+                report.errors.append("irrelevant_result:%s" % source_domain(result.url))
+                continue
             seen_results.add(ref)
             try:
                 fetch_started = time.perf_counter()
@@ -1083,6 +1107,26 @@ class ResearchEngine:
                 report.errors.append("provider_fetch_failed:%s" % reason)
                 report.failure_reason = report.failure_reason or reason
                 report.failed += 1
+                # If the search result itself is an authoritative source, keep
+                # its bounded provider snippet as provenance instead of losing
+                # the official source only because its page is oversized.
+                if (self._relevance_score(sanitized_query, result) > 0 and
+                        self.trust_evaluator.evaluate(result) == SourceTrustLevel.A and
+                        str(result.snippet or "").strip()):
+                    evidence = EvidenceRecord(
+                        url=result.url, title=result.title,
+                        source_type=result.source_type or "web",
+                        timestamp=result.timestamp or time.time(),
+                        domain=source_domain(result.url), trust=SourceTrustLevel.A,
+                        confidence=self._evidence_confidence(SourceTrustLevel.A),
+                        basis="official_search_result_snippet",
+                        quote=str(result.snippet)[:800])
+                    candidate = by_claim.setdefault(
+                        content_hash(evidence.quote),
+                        KnowledgeCandidate(claim=evidence.quote, topic=topic or query,
+                                           privacy=privacy, project=project))
+                    candidate.add_evidence(evidence)
+                    report.evidences.append(evidence)
                 continue
             trust = self.trust_evaluator.evaluate(source)
             flags = self._prompt_injection_flags(source.content)
@@ -1107,8 +1151,48 @@ class ResearchEngine:
         report.candidates_created = len(report.candidates)
         report.disputed = sum(1 for c in report.candidates
                               if c.state == LearningState.DISPUTED)
+        if (_official_retry and report.official_retry_count == 0 and
+                self._is_time_sensitive(sanitized_query) and
+                not any(e.trust in (SourceTrustLevel.A, SourceTrustLevel.B)
+                        for e in report.evidences)):
+            rescue_query = sanitized_query + " official authoritative source"
+            rescued = self.research(rescue_query, limit=limit, privacy=privacy,
+                                    project=project, topic=topic,
+                                    _official_retry=False)
+            report.candidates.extend(rescued.candidates)
+            report.evidences.extend(rescued.evidences)
+            report.results_count += rescued.results_count
+            report.pages_fetched += rescued.pages_fetched
+            report.fetch_ms += rescued.fetch_ms
+            report.search_ms += rescued.search_ms
+            report.errors.extend(rescued.errors)
+            report.provider_failures.extend(rescued.provider_failures)
+            report.official_retry_count = 1
+            report.provider_query = rescue_query
         report.elapsed_ms = int((time.perf_counter() - started) * 1000)
         return report
+
+    def _needs_official_rescue(self, query: str, results: Iterable[ResearchResult]) -> bool:
+        if not self._is_time_sensitive(query):
+            return False
+        usable = [item for item in results if self._relevance_score(query, item) > 0]
+        return not usable or not any(self.trust_evaluator.evaluate(item) in (
+            SourceTrustLevel.A, SourceTrustLevel.B) for item in usable)
+
+    @staticmethod
+    def _is_time_sensitive(query: str) -> bool:
+        return bool(re.search(
+            r"\b(atual|atualmente|current|latest|stable|est[aá]vel|release|vers[aã]o|status)\b",
+            str(query or ""), re.I))
+
+    @staticmethod
+    def _relevance_score(query: str, result: ResearchResult) -> int:
+        terms = [term for term in re.findall(r"[a-z0-9]{3,}", str(query or "").lower())
+                 if term not in _RESEARCH_STOPWORDS]
+        if not terms:
+            return 1
+        haystack = " ".join((result.title, result.url, result.snippet)).lower()
+        return sum(1 for term in set(terms) if term in haystack)
 
     @staticmethod
     def _extract_claims(content: str) -> List[str]:

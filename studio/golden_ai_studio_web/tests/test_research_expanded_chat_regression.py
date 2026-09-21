@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 from jarvis_core.memory.v2.research import (
     EvidenceRecord,
+    FetchedSource,
     KnowledgeCandidate,
+    ResearchEngine,
+    ResearchProvider,
+    ResearchResult,
     ResearchReport,
     SourceTrustLevel,
 )
@@ -89,3 +93,46 @@ def test_cache_bust_covers_modified_ui_assets():
         assert asset in html
     for asset in ("brain.js?v=", "golden.js?v=", "search.js?v="):
         assert asset in app
+
+
+class _RescueProvider(ResearchProvider):
+    def __init__(self, first, rescue):
+        self.first, self.rescue, self.queries = first, rescue, []
+
+    def search(self, query, limit=5):
+        self.queries.append(query)
+        return (self.rescue if len(self.queries) > 1 else self.first)[:limit]
+
+    def fetch(self, result):
+        return FetchedSource(result.title, result.url, result.snippet, "web", fetched_at=200)
+
+
+def _result(title, url, snippet):
+    return ResearchResult(title, url, snippet, "web", url.split("/")[2], 200, "fake")
+
+
+def test_irrelevant_entity_result_is_rejected_and_official_rescue_is_single():
+    unrelated = _result("Demons of Asteborg", "https://game.example.com/asteborg", "platform game releases")
+    official = _result("Node.js Releases", "https://nodejs.org/en/about/previous-releases", "Current and LTS release lines")
+    provider = _RescueProvider([unrelated], [official])
+    report = ResearchEngine(provider).research("Node.js stable version", limit=5)
+    assert report.official_retry_count == 1
+    assert provider.queries == ["Node.js stable version", "Node.js stable version official authoritative source"]
+    assert report.results_count == 1
+    assert report.evidences[0].url == official.url
+
+
+def test_official_rescue_stops_after_one_attempt_when_no_match():
+    unrelated = _result("Demons of Asteborg", "https://game.example.com/asteborg", "platform game releases")
+    provider = _RescueProvider([unrelated], [unrelated])
+    report = ResearchEngine(provider).research("Node.js stable version", limit=5)
+    assert report.official_retry_count == 1
+    assert len(provider.queries) == 2
+    assert report.results_count == 0
+
+
+def test_future_eol_date_is_not_current_status():
+    evidence = _evidence("https://official.example.com/versions", SourceTrustLevel.A, 200, "status security; EOL 2099-10")
+    assert "security" in evidence.quote
+    assert "2099-10" in evidence.quote
+    assert evidence.timestamp < 2099
