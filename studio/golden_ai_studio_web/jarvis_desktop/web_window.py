@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -13,6 +16,7 @@ from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile,
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from .settings import ui_url
+from .boot_diagnostics import boot_log
 from .tray import JarvisTray
 
 
@@ -47,6 +51,7 @@ class DesktopMainWindow(QMainWindow):
 
     def _load_ui(self):
         target = ui_url(self.core_origin)
+        boot_log(f"BOOT_13_UI_URL {target}")
         print(f"[JARVIS-DESKTOP] UI URL: {target}", flush=True)
         self.web_view.load(QUrl(target))
 
@@ -152,6 +157,19 @@ class DesktopMainWindow(QMainWindow):
         self._explicit_exit = True
         self.cleanup()
         self.close()
+        QApplication.instance().quit()
+
+    def restart_application(self):
+        """Restart only this Desktop shell and any Core it owns."""
+        self._explicit_exit = True
+        self.cleanup()
+        if getattr(sys, "frozen", False):
+            command = [sys.executable, "--hidden"]
+        else:
+            command = [sys.executable, "-m", "jarvis_desktop.web_app", "--hidden"]
+        subprocess.Popen(command, cwd=str(self.core_launcher.root),
+                         env=os.environ.copy(),
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         QApplication.instance().quit()
 
     def cleanup(self):

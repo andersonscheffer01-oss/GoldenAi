@@ -27,7 +27,8 @@ class CoreLauncher:
     def __init__(self, root=None, python_executable=None, popen=subprocess.Popen,
                  timeout=45.0, probe=None, ui_probe=None, host_provider=None):
         self.root = Path(root or studio_root()).resolve()
-        self.python_executable = str(python_executable or sys.executable)
+        self.python_executable = str(
+            python_executable or self._default_python_executable())
         self._popen = popen
         self.timeout = float(timeout)
         self._probe_override = probe
@@ -35,6 +36,23 @@ class CoreLauncher:
         self._host_provider = host_provider
         self.process = None
         self.origin = None
+
+    def _default_python_executable(self):
+        if not getattr(sys, "frozen", False):
+            return Path(sys.executable)
+
+        configured = os.environ.get("GOLDEN_PYTHON", "").strip()
+        candidates = ([Path(configured)] if configured else [])
+        candidates.extend([
+            self.root.parent.parent / ".venv" / "Scripts" / "python.exe",
+            Path(sys.executable).with_name("python.exe"),
+        ])
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        raise CoreLaunchError(
+            "O Python do Golden não foi encontrado para iniciar o Core. "
+            "Configure GOLDEN_PYTHON com o caminho do interpretador.")
 
     @property
     def owns_core(self):
@@ -169,7 +187,8 @@ class CoreLauncher:
             [self.python_executable, str(server), "--port", "8765"],
             cwd=str(self.root), env=child_env, creationflags=flags,
         )
-        print(f"[JARVIS-DESKTOP] Core PID={self.process.pid}", flush=True)
+        print(f"[JARVIS-DESKTOP] Core PID={getattr(self.process, 'pid', 'unknown')}",
+              flush=True)
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
             if self.process.poll() is not None:

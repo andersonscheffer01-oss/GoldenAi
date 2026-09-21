@@ -110,6 +110,14 @@ def test_offline_core_starts_exactly_one_existing_runtime():
     assert launcher.owns_core is True
 
 
+def test_frozen_desktop_uses_external_python_for_core(monkeypatch):
+    python_path = ROOT.parents[1] / ".venv" / "Scripts" / "python.exe"
+    monkeypatch.setattr("jarvis_desktop.core_launcher.sys.frozen", True,
+                        raising=False)
+    launcher = CoreLauncher(ROOT, popen=MagicMock())
+    assert launcher.python_executable == str(python_path)
+
+
 def test_owned_core_is_stopped_but_reused_core_is_not():
     owned = CoreLauncher(ROOT, probe=lambda origin: False)
     process = FakeProcess()
@@ -436,3 +444,38 @@ def test_desktop_has_no_direct_core_or_tool_bypass():
 def test_start_hidden_argument_is_supported():
     from jarvis_desktop.web_app import build_parser
     assert build_parser().parse_args(["--hidden"]).hidden is True
+
+
+def test_tray_exposes_required_lifecycle_actions():
+    app = QApplication.instance() or QApplication([])
+    launcher = MagicMock()
+    launcher.origin = "https://127.0.0.1:8765"
+    window = DesktopMainWindow(launcher)
+    try:
+        labels = [action.text() for action in window.tray.contextMenu().actions()]
+        assert "Abrir Jarvis" in labels
+        assert "Minimizar Jarvis" in labels
+        assert "Reiniciar Jarvis" in labels
+        assert "Iniciar com Windows" in labels
+        assert "Encerrar Jarvis" in labels
+    finally:
+        window._explicit_exit = True
+        window.cleanup()
+        window.close()
+
+
+def test_restart_spawns_same_desktop_entrypoint_without_touching_reused_core():
+    app = QApplication.instance() or QApplication([])
+    launcher = MagicMock()
+    launcher.origin = "https://127.0.0.1:8765"
+    launcher.root = ROOT
+    window = DesktopMainWindow(launcher)
+    try:
+        with patch("jarvis_desktop.web_window.subprocess.Popen") as popen, \
+                patch.object(app, "quit"):
+            window.restart_application()
+        popen.assert_called_once()
+        assert popen.call_args.args[0][-3:] == ["-m", "jarvis_desktop.web_app", "--hidden"]
+        launcher.stop_owned_core.assert_called_once()
+    finally:
+        window.close()
