@@ -276,11 +276,22 @@ class CentralOrchestrator:
             step = PlanStep("step-1", tool, Route.COMPUTER_USE, tool, {})
             return self._decision(tool, Route.COMPUTER_USE, .96, "computer_use",
                                   ModelProfile.FAST, classification, ai=False, steps=(step,))
-        vision_request = re.search(r"\b(?:onde est[aá]|o que (?:voc[eê]|v[êe])|descreva|analise)\b.*\b(?:tela|bot[aã]o|screen)\b", low)
-        if vision_request:
-            step = PlanStep("step-1", "vision_analyze_screen", Route.COMPUTER_USE,
-                            "vision_analyze_screen", {"prompt": text})
-            return self._decision("vision_analyze_screen", Route.COMPUTER_USE, .95,
+        find_request = re.search(
+            r"\bonde\s+est[aá]\b.*\b(?:bot[aã]o|menu|elemento|campo|input|janela)\b",
+            low)
+        if find_request:
+            step = PlanStep("step-1", "vision_find_element", Route.COMPUTER_USE,
+                            "vision_find_element", {"target": text, "context": ""})
+            return self._decision("vision_find_element", Route.COMPUTER_USE, .95,
+                                  "computer_use", ModelProfile.VISION, classification,
+                                  ai=False, steps=(step,))
+        describe_request = re.search(
+            r"\b(?:descreva|o que (?:voc[eê]|v[êe])\s+v[eê]|o que tem)\b.*"
+            r"\b(?:tela|screen)\b|\banali[sz]e\s+(?:a\s+)?tela\b", low)
+        if describe_request:
+            step = PlanStep("step-1", "vision_describe_screen", Route.COMPUTER_USE,
+                            "vision_describe_screen", {"prompt": text})
+            return self._decision("vision_describe_screen", Route.COMPUTER_USE, .95,
                                   "computer_use", ModelProfile.VISION, classification,
                                   ai=False, steps=(step,))
         if re.search(r"\b(?:screenshot|captura(?:r)?\s+(?:a\s+)?tela|tir(?:e|ar)\s+(?:um\s+)?print)\b", low):

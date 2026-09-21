@@ -82,14 +82,15 @@ def test_clipboard_adapter_is_mockable_without_printing_content(monkeypatch):
 
 
 def test_gpu_status_is_vendor_neutral_and_does_not_fabricate_dynamic_metrics(monkeypatch):
-    payload = json.dumps({
-        "Name": "AMD Radeon RX 9060 XT",
-        "AdapterRAM": 16 * 1024 ** 3,
-        "DriverVersion": "1.0",
-        "PNPDeviceID": "PCI\\VEN_1002",
-    })
-    monkeypatch.setattr(tools.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout=payload, stderr=""))
+    monkeypatch.setattr(tools, "_windows_gpu_records", lambda: [{
+        "index": 0,
+        "name": "AMD Radeon RX 9060 XT",
+        "vendor": "AMD",
+        "vram_total": None,
+        "usage_percent": None,
+        "temperature": None,
+        "source": "windows_wmi",
+    }])
     result = tools.gpu_status()
     assert result["available"] is True
     assert result["vendor"] == "AMD"
@@ -97,6 +98,8 @@ def test_gpu_status_is_vendor_neutral_and_does_not_fabricate_dynamic_metrics(mon
     assert result["usage_percent"] is None
     assert result["temperature"] is None
     assert result["source"] == "windows_wmi"
+    assert result["status"] == "PARTIAL"
+    assert result["reason"] == "dynamic_metrics_unavailable"
 
 
 def test_hotkey_safety_blocks_high_impact_combination():
@@ -142,7 +145,7 @@ def test_computer_use_intent_routes_through_existing_skills_router():
         ("copie 'Golden AI' para clipboard", "clipboard_set"),
         ("qual o uso da GPU?", "gpu_status"),
         ("tire um screenshot", "screenshot"),
-        ("onde está o botão Salvar na tela?", "vision_analyze_screen"),
+        ("onde está o botão Salvar na tela?", "vision_find_element"),
     )
     for query, expected_tool in cases:
         decision = router.decide(query)

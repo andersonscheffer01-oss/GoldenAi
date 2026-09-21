@@ -17,7 +17,8 @@ class SkillsRouter:
                 "mouse_position", "mouse_move", "mouse_click", "screenshot",
                 "keyboard_type", "keyboard_press", "keyboard_hotkey",
                 "clipboard_get", "clipboard_set", "gpu_status", "gpu_list",
-                "vision_analyze_screen",
+                "vision_analyze_screen", "vision_describe_screen",
+                "vision_find_element", "vision_list_elements",
             ), "LOW", ModelProfile.GENERAL),
             "market_data": (Route.MARKET_DATA, ("get_exchange_rate",), "LOW", ModelProfile.FAST),
             "market_analysis": (Route.MARKET_ANALYSIS, (
