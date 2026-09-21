@@ -1035,6 +1035,13 @@ class ResearchReport:
     raw_query: str = ""
     provider_query: str = ""
 
+    @property
+    def final_status(self) -> str:
+        """Aggregate source-level failures without hiding usable evidence."""
+        if not self.evidences:
+            return "FAILED"
+        return "DEGRADED" if self.errors else "SUCCESS"
+
 
 class ResearchEngine:
     def __init__(self, provider: Optional[ResearchProvider] = None,

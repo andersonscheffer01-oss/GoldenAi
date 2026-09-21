@@ -8,10 +8,13 @@ from jarvis_core.memory.v2.research import (
     EvidenceRecord,
     FetchedSource,
     KnowledgeCandidate,
+    AutoResearchProvider,
     ResearchEngine,
     ResearchProvider,
+    ResearchProviderError,
     ResearchResult,
     ResearchReport,
+    StaticResearchProvider,
     SourceTrustLevel,
 )
 from jarvis_core.service import JarvisService
@@ -136,3 +139,71 @@ def test_future_eol_date_is_not_current_status():
     assert "security" in evidence.quote
     assert "2099-10" in evidence.quote
     assert evidence.timestamp < 2099
+
+
+class _SelectiveFetchProvider(ResearchProvider):
+    def __init__(self, oversized_indexes):
+        self.results = [
+            _result(f"Result {index}", f"https://source{index}.example.com/page",
+                    f"valid evidence {index}")
+            for index in range(5)
+        ]
+        self.oversized_indexes = set(oversized_indexes)
+
+    def search(self, query, limit=5):
+        return self.results[:limit]
+
+    def fetch(self, result):
+        index = int(result.title.rsplit(" ", 1)[1])
+        if index in self.oversized_indexes:
+            raise ResearchProviderError("oversized_page")
+        return FetchedSource(result.title, result.url, result.snippet,
+                             "web", fetched_at=200 + index)
+
+
+def test_oversized_page_degrades_but_does_not_abort_other_sources():
+    report = ResearchEngine(_SelectiveFetchProvider({0})).research("facts", limit=5)
+    assert report.final_status == "DEGRADED"
+    assert len(report.evidences) == 4
+    assert "provider_fetch_failed:oversized_page" in report.errors
+
+
+def test_one_trusted_source_is_enough_when_other_pages_are_oversized():
+    provider = _SelectiveFetchProvider({0, 1, 2, 3})
+    provider.results[4] = _result(
+        "Official Python facts", "https://python.org/downloads/",
+        "current python stable release")
+    report = ResearchEngine(provider).research("current python", limit=5)
+    assert report.final_status == "DEGRADED"
+    assert len(report.evidences) == 1
+    assert report.evidences[0].url == "https://python.org/downloads/"
+
+
+def test_all_oversized_pages_fail_with_specific_reason():
+    report = ResearchEngine(_SelectiveFetchProvider(set(range(5)))).research(
+        "facts", limit=5)
+    assert report.final_status == "FAILED"
+    assert not report.evidences
+    assert report.failure_reason == "oversized_page"
+
+
+def test_tavily_evidence_remains_available_without_brave():
+    tavily = StaticResearchProvider([
+        FetchedSource("Tavily result", "https://example.com/facts",
+                      "usable evidence", "web", fetched_at=200)])
+    provider = AutoResearchProvider((("tavily", tavily), ("brave", None)))
+    report = ResearchEngine(provider).research("facts", limit=5)
+    result = JarvisService._run_web_research(
+        _service_for_report(report), "facts", limit=5)
+    assert result["ok"] is True
+    assert result["telemetry"]["final_status"] == "SUCCESS"
+    assert result["telemetry"]["provider_selected"] == "tavily"
+
+
+def test_partial_evidence_is_safe_for_downstream_synthesis():
+    report = ResearchEngine(_SelectiveFetchProvider({0})).research("facts", limit=5)
+    result = JarvisService._run_web_research(
+        _service_for_report(report), "facts", limit=5)
+    assert result["ok"] is True
+    assert result["telemetry"]["final_status"] == "DEGRADED"
+    assert result["evidence_records"]

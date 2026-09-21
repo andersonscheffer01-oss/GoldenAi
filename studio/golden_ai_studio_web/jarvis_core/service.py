@@ -595,8 +595,7 @@ class JarvisService:
             "cooldown_active": any(
                 item.get("cooldown_active", False)
                 for item in provider_status.get("providers", {}).values()),
-            "final_status": ("SUCCESS" if report.pages_fetched else
-                             provider_status.get("final_status", "UNAVAILABLE")),
+            "final_status": report.final_status,
         })
         print("[JARVIS-SEARCH] SEARCH_REQUEST=YES SEARCH_PROVIDER=%s "
               "RAW_RESPONSE_TYPE=research_report PARSE_RESULT=%s "
@@ -606,13 +605,14 @@ class JarvisService:
                   report.failure_reason or "none",
                   bool(report.fallback_used or report.provider_failures),
                   bool(report.errors and not report.pages_fetched)), flush=True)
-        if report.errors and not report.pages_fetched:
+        if report.errors and not report.evidences:
             reason = report.failure_reason or "provider_down"
             friendly = {
                 "missing_key": "A pesquisa externa não está configurada neste ambiente.",
                 "rate_limit": "O provedor de pesquisa atingiu o limite temporário.",
                 "timeout": "A pesquisa externa excedeu o tempo limite.",
                 "auth_error": "A autenticação do provedor de pesquisa falhou.",
+                "oversized_page": "As fontes encontradas excederam o limite seguro de conteúdo.",
             }.get(reason, "Não consegui consultar fontes externas agora.")
             return {"ok": False,
                     "error": friendly + " Posso usar apenas os dados locais disponíveis.",
