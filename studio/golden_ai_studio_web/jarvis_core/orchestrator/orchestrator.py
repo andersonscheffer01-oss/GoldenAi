@@ -280,9 +280,9 @@ class CentralOrchestrator:
             r"\bonde\s+est[aá]\b.*\b(?:bot[aã]o|menu|elemento|campo|input|janela)\b",
             low)
         if find_request:
-            step = PlanStep("step-1", "vision_find_element", Route.COMPUTER_USE,
-                            "vision_find_element", {"target": text, "context": ""})
-            return self._decision("vision_find_element", Route.COMPUTER_USE, .95,
+            step = PlanStep("step-1", "hybrid_find_ui_target", Route.COMPUTER_USE,
+                            "hybrid_find_ui_target", {"target": text})
+            return self._decision("hybrid_find_ui_target", Route.COMPUTER_USE, .95,
                                   "computer_use", ModelProfile.VISION, classification,
                                   ai=False, steps=(step,))
         describe_request = re.search(

@@ -145,7 +145,7 @@ def test_computer_use_intent_routes_through_existing_skills_router():
         ("copie 'Golden AI' para clipboard", "clipboard_set"),
         ("qual o uso da GPU?", "gpu_status"),
         ("tire um screenshot", "screenshot"),
-        ("onde está o botão Salvar na tela?", "vision_find_element"),
+        ("onde está o botão Salvar na tela?", "hybrid_find_ui_target"),
     )
     for query, expected_tool in cases:
         decision = router.decide(query)

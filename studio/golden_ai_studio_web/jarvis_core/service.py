@@ -314,6 +314,7 @@ class JarvisService:
     # ═══════════════════════════════════════════════════════════════
     def _register_tools(self):
         from .tools.computer_use_tools import COMPUTER_USE_TOOLS
+        from .tools.ui_automation import UI_AUTOMATION_TOOLS
         from .tools.market_readonly import (
             golden_risk_status, golden_scanner_results, golden_scanner_status,
             golden_status, mt5_account_info, mt5_orders, mt5_positions,
@@ -484,6 +485,7 @@ class JarvisService:
                  category="research"),
             # --- COMPUTER USE ---
             *COMPUTER_USE_TOOLS,
+            *UI_AUTOMATION_TOOLS,
 
             # --- BROWSER (Playwright V1) ---
             Tool("browser_open", "Inicia o navegador Playwright (headless)", self._browser_open,

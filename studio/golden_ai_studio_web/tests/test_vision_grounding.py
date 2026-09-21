@@ -243,6 +243,6 @@ def test_vision_grounding_routes_are_explicit_and_use_computer_use():
     describe = router.decide("descreva o que está na tela")
 
     assert find.route == Route.COMPUTER_USE
-    assert find.steps[0].tool == "vision_find_element"
+    assert find.steps[0].tool == "hybrid_find_ui_target"
     assert describe.route == Route.COMPUTER_USE
     assert describe.steps[0].tool == "vision_describe_screen"
