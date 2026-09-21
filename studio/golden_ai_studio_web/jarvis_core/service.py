@@ -173,7 +173,109 @@ class JarvisService:
                                                 task_manager=self.task_manager)
         self._closed = False
         self._conversation_lock = threading.RLock()
+        self._ai_status_lock = threading.RLock()
+        self._last_request_telemetry = {}
         self._conversation_histories = {}
+
+    def ai_core_status(self):
+        """Return the canonical, secret-free status consumed by the UI."""
+        from .orchestrator.models import ModelProfile
+        from .orchestrator.policies import DEFAULT_MODELS, PROVIDER_ORDER, PROVIDER_MODELS
+
+        def state_name(value):
+            return str(getattr(value, "value", value or "OFFLINE")).upper()
+
+        def display_state(value, configured=True):
+            state = state_name(value)
+            if not configured:
+                return "NOT_CONFIGURED"
+            return {
+                "AVAILABLE": "ONLINE", "RATE_LIMITED": "COOLDOWN",
+                "AUTH_ERROR": "AUTH_ERROR", "TIMEOUT": "TIMEOUT",
+                "DEGRADED": "DEGRADED", "OFFLINE": "OFFLINE",
+            }.get(state, state)
+
+        models = self.orchestrator.models
+        registered = dict(getattr(models, "providers", {}) or {})
+        health = dict(getattr(models, "last_health", {}) or {})
+        model_status = models.status() if hasattr(models, "status") else {}
+        providers = []
+        for name in PROVIDER_ORDER:
+            adapter = registered.get(name)
+            configured = adapter is not None
+            item = dict(model_status.get(name, {}))
+            item.update({"name": name, "configured": configured,
+                         "registered": configured,
+                         "status": display_state(health.get(name, getattr(adapter, "state", None)), configured)})
+            if not item.get("model"):
+                item["model"] = ""
+            providers.append(item)
+
+        preferred_provider, preferred_model = DEFAULT_MODELS[ModelProfile.GENERAL]
+        active = next((item for item in providers if item["status"] == "ONLINE"), None)
+        research_status = {"provider": "", "status": "NOT_CONFIGURED", "configured": False,
+                           "last_success": 0.0, "last_error": "", "latency_ms": None,
+                           "cooldown_active": False, "sources": 0, "providers": {}}
+        research = self.research_provider
+        if research is not None:
+            configured = True
+            raw = research.status() if hasattr(research, "status") else {}
+            selected = raw.get("selected", "")
+            child = (raw.get("providers", {}).get(selected, {})
+                     if selected else {})
+            status = str(child.get("status") or raw.get("final_status") or "NOT_CHECKED").upper()
+            if status in {"AVAILABLE", "ONLINE"}:
+                status = "ONLINE"
+            elif status in {"RATE_LIMIT", "RATE_LIMITED"}:
+                status = "COOLDOWN"
+            elif status == "CONFIGURED":
+                status = "NOT_CHECKED"
+            research_status.update({"provider": selected, "status": status,
+                                    "configured": configured,
+                                    "last_success": child.get("last_success", 0.0),
+                                    "last_error": child.get("last_error", ""),
+                                    "cooldown_active": bool(child.get("cooldown_active")),
+                                    "fallback_count": int(raw.get("fallback_count") or 0)})
+            for name, item in (raw.get("providers") or {}).items():
+                child_state = str(item.get("status") or "NOT_CHECKED").upper()
+                if child_state in {"AVAILABLE", "ONLINE"}:
+                    child_state = "ONLINE"
+                elif child_state in {"RATE_LIMIT", "RATE_LIMITED"}:
+                    child_state = "COOLDOWN"
+                research_status["providers"][name] = {
+                    "status": child_state,
+                    "configured": bool(item.get("configured")),
+                    "last_success": item.get("last_success", 0.0),
+                    "last_error": item.get("last_error", ""),
+                    "cooldown_active": bool(item.get("cooldown_active")),
+                }
+        with self._ai_status_lock:
+            last_request = dict(self._last_request_telemetry)
+
+        states = [item["status"] for item in providers]
+        online = sum(state == "ONLINE" for state in states)
+        configured_states = [state for state in states if state != "NOT_CONFIGURED"]
+        if research_status["status"] == "COOLDOWN":
+            overall = "DEGRADED" if online else "COOLDOWN"
+        elif online == 0:
+            overall = "NOT_CONFIGURED" if not configured_states else "OFFLINE"
+        elif any(state not in {"ONLINE", "NOT_CONFIGURED"} for state in states):
+            overall = "DEGRADED"
+        else:
+            overall = "ONLINE"
+        return {
+            "overall_status": overall,
+            "llm": {"active_provider": active["name"] if active else "",
+                    "active_model": (active.get("model") or
+                                     PROVIDER_MODELS.get(active["name"], {}).get(ModelProfile.GENERAL, "")) if active else "",
+                    "preferred_provider": str(preferred_provider),
+                    "preferred_model": preferred_model},
+            "local_ai": next((item for item in providers if item["name"] == "ollama"),
+                              {"name": "ollama", "status": "NOT_CONFIGURED"}),
+            "research": research_status,
+            "providers": providers,
+            "last_request": last_request or None,
+        }
 
     def close(self):
         """Release background resources owned by this JarvisService instance."""
@@ -515,8 +617,20 @@ class JarvisService:
             return {"ok": False,
                     "error": friendly + " Posso usar apenas os dados locais disponíveis.",
                     "telemetry": telemetry}
+        temporal_query = bool(re.search(
+            r"\b(atual|atualmente|current|latest|stable|estável|vers[aã]o)\b",
+            report.query, re.I))
+        trust_rank = {"A": 4, "B": 3, "C": 2, "D": 1, "E": 0}
+        candidates = sorted(
+            report.candidates,
+            key=lambda candidate: (
+                trust_rank.get(candidate.trust.value, 0),
+                max((e.timestamp for e in candidate.evidences), default=0)
+                if temporal_query else 0,
+                candidate.confidence),
+            reverse=True)
         lines = []
-        for candidate in report.candidates[:6]:
+        for candidate in candidates[:6]:
             source = candidate.evidences[0] if candidate.evidences else None
             label = "oficial" if candidate.trust.value == "A" else (
                 "benchmark/técnica" if candidate.trust.value == "B" else
@@ -524,7 +638,7 @@ class JarvisService:
                 else "fontes independentes")
             url = source.url if source else ""
             lines.append("- %s [%s, trust %s]%s" % (
-                candidate.claim[:220], label, candidate.trust.value,
+                candidate.claim[:800], label, candidate.trust.value,
                 (" — " + url) if url else ""))
         action = "Pesquisei e aprendi" if learn and report.promoted else (
             "Pesquisei, mas não promovi memória" if learn else "Pesquisei")
@@ -535,9 +649,34 @@ class JarvisService:
             message += "\n" + "\n".join(lines)
         if report.errors:
             message += "\nAvisos: " + "; ".join(report.errors[:3])
+        # A page may yield many chunks. Keep the strongest, freshest claims
+        # per URL so secondary pages cannot outvote a recent official source.
+        grouped = {}
+        for candidate in candidates:
+            for evidence in candidate.evidences:
+                key = evidence.to_metadata().get("url") or evidence.url
+                grouped.setdefault(key, []).append((candidate, evidence))
+        evidence_records = []
+        for url, items in grouped.items():
+            items.sort(key=lambda pair: (
+                trust_rank.get(pair[1].trust.value, 0),
+                pair[1].timestamp if temporal_query else 0,
+                pair[1].confidence), reverse=True)
+            for candidate, evidence in items[:2]:
+                evidence_records.append({
+                    "claim": candidate.claim[:800],
+                    "quote": evidence.quote[:800],
+                    "source": evidence.to_metadata(),
+                })
+        evidence_records.sort(key=lambda item: (
+            trust_rank.get(item["source"].get("trust", "E"), 0),
+            item["source"].get("timestamp", 0) if temporal_query else 0,
+            item["source"].get("confidence", 0)), reverse=True)
+        evidence_records = evidence_records[:24]
         return {"ok": True, "message": message, "query": report.query,
                 "learn": bool(learn), "telemetry": telemetry,
-                "sources": [e.to_metadata() for e in report.evidences[:12]]}
+                "sources": [e.to_metadata() for e in report.evidences[:12]],
+                "evidence_records": evidence_records}
 
     # ═══════════════════════════════════════════════════════════════
     # DADOS ONLINE (Fase 8.1) — cotações
@@ -667,25 +806,43 @@ class JarvisService:
         answer_route = getattr(decision, "answer_route", "TOOL_ONLY" if local_tools else "DIRECT")
         provider = result.get("synthesis_provider") or result.get("provider") or ""
         metadata = {
-            "request_id": request_id, "session_id": session_id,
+            "request_id": request_id, "response_id": request_id,
+            "session_id": session_id,
+            "timestamp": time.time(),
+            "route": answer_route, "status": "SUCCESS" if result.get("ok", True) else "ERROR",
             "answer_route": answer_route,
             "research_decision": "YES" if level != "NO_RESEARCH" else "NO",
             "research_level": level, "research_reason": reason,
             "router_decision_ms": getattr(decision, "router_decision_ms", 0),
             "local_tools_used": local_tools,
             "research_providers_used": providers,
+            "research_provider": providers[0] if providers else "",
+            "research_used": bool(research_runs),
+            "tools_used": local_tools,
             "source_count": source_count,
             "official_source_count": official_count,
             "community_source_count": community_count,
             "source_conflict": source_conflict,
             "active_provider": provider,
             "active_model": result.get("model", ""),
+            "llm_provider": provider,
+            "llm_model": result.get("model", ""),
             "fallback_used": fallback_used,
+            "fallback_from": result.get("fallback_from", ""),
+            "fallback_to": result.get("fallback_to", ""),
+            "fallback_reason": result.get("fallback_reason", ""),
             "search_ms": search_ms, "fetch_ms": fetch_ms,
             "synthesis_ms": int(result.get("synthesis_ms") or 0),
             "total_ms": int((time.perf_counter() - started) * 1000),
+            "llm_latency_ms": int(result.get("llm_latency_ms") or result.get("latency_ms") or 0),
+            "research_latency_ms": search_ms + fetch_ms,
+            "total_latency_ms": int((time.perf_counter() - started) * 1000),
+            "error_type": str(result.get("error_type") or ""),
         }
         result["routing_metadata"] = metadata
+        result.setdefault("response_id", request_id)
+        with self._ai_status_lock:
+            self._last_request_telemetry = dict(metadata)
         print("[JARVIS-RESEARCH-ROUTE] " + json.dumps(
             metadata, ensure_ascii=True, default=str), flush=True)
         return result

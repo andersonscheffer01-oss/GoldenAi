@@ -92,12 +92,13 @@
         renderer.link = function(href, title, text) {
           if (typeof href === 'object') {
             // marked v12 object format
-            href = href.href || '';
-            title = href.title || '';
-            text = href.text || '';
+            const token = href;
+            href = token.href || '';
+            title = token.title || '';
+            text = token.text || '';
           }
-          // Check for javascript: URLs
-          if (JS_URL_REGEX.test(String(href))) {
+          // Links are intentionally restricted to ordinary web URLs.
+          if (JS_URL_REGEX.test(String(href)) || !/^https?:\/\//i.test(String(href))) {
             href = 'about:blank';
           }
           const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
@@ -108,11 +109,12 @@
         const origImage = renderer.image;
         renderer.image = function(href, title, text) {
           if (typeof href === 'object') {
-            href = href.href || '';
-            title = href.title || '';
-            text = href.text || '';
+            const token = href;
+            href = token.href || '';
+            title = token.title || '';
+            text = token.text || '';
           }
-          if (JS_URL_REGEX.test(String(href))) {
+          if (JS_URL_REGEX.test(String(href)) || !/^https?:\/\//i.test(String(href))) {
             href = 'about:blank';
           }
           const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';

@@ -308,11 +308,17 @@ export function createBrain(ctx) {
         const q = String(raw || t).replace(/^.*?\b(pesquisar|pesquise|procure|buscar|busque|google)\b/i, "").replace(/^[:\s-]+/, "").replace(/\b(no|na|por|sobre)\b\s*/gi, "").trim();
         if (!q) return { reply: "O que devo pesquisar?", speak: true };
         if (ctx.webSearch) {
-          const r = await ctx.webSearch(q);
+          const sourceOnly = /\b(mostre|liste|quais|links?|fontes?|sites?)\b/.test(q.toLowerCase()) &&
+            /\b(fontes?|links?|sites?)\b/.test(q.toLowerCase());
+          const r = await ctx.webSearch(q, { background: true });
           if (r?.ok) {
             const n = r.results.length;
             const src = (r.sources || []).join(", ");
             const top = r.results[0];
+            if (!sourceOnly && String(r.response || "").trim()) {
+              return { reply: r.response, speak: r.spoken_response || r.response,
+                response_id: r.response_id || "", routing_metadata: r.routing_metadata || {} };
+            }
             return {
               reply: `Pesquisei «${q}» na internet agora: ${n} fonte${n === 1 ? "" : "s"} ${n === 1 ? "real" : "reais"}${src ? " (" + src + ")" : ""}.\n${top ? "Mais relevante: " + top.title + " — " + (top.host || "") : ""}`,
               speak: `Encontrei ${n} fontes sobre ${q}.`,

@@ -148,7 +148,14 @@ export function createGolden(api) {
     mktAt: $("#gMktAt"), market: $("#gMarket"),
     quickSlot: $("#gQuickSlot"), logSlot: $("#gLogSlot"), modulesSlot: $("#gModulesSlot"),
     controls: $("#gControls"), ctrlConn: $("#gCtrlConn"),
+    expandChatBtn: $("#gExpandChatBtn"), expanded: $("#chatExpanded"),
+    expandedHistory: $("#chatExpandedHistory"), expandedThinking: $("#chatExpandedThinking"),
+    expandedInput: $("#chatExpandedInput"), expandedClose: $("#chatExpandedClose"),
+    expandedLatest: $("#chatExpandedLatest"), expandedStatus: $("#chatExpandedStatus"),
+    expandedTime: $("#chatExpandedTime"),
     flowState: $("#gFlowState"), models: $("#gModels"), flow: $("#gFlow"),
+    aiCoreSummary: $("#gAiCoreSummary"), aiCoreProviders: $("#gAiCoreProviders"),
+    aiCoreLast: $("#gAiCoreLast"),
     memCount: $("#gMemCount"), memStats: $("#gMemStats"), memExport: $("#gMemExport"),
     memClear: $("#gMemClear"), memNotes: $("#gMemNotes"),
     foot: $("#gFoot"), ver: $("#gVer"),
@@ -157,7 +164,8 @@ export function createGolden(api) {
   const st = {
     mounted: false, view: "conversa", shadow: false, focus: false,
     raf: 0, timers: [], moved: [], lastT: 0, lastDraw: 0, amp: 0, ampTarget: 0,
-    state: "idle", flowPulse: 0, ollama: null, ollamaAt: 0, diagData: null,
+    state: "idle", flowPulse: 0, ollama: null, ollamaAt: 0, aiCore: null, aiCoreAt: 0, diagData: null,
+    expanded: false, expandedAtBottom: true, expandedWired: false,
     taskText: "", market: null, marketAt: 0, agents: [],
     search: { last: null, busy: false, summary: "" },
   };
@@ -202,6 +210,55 @@ export function createGolden(api) {
     if (v === "pesquisa") renderHist();
     relayout();
     if (!silent) api.log?.(`painel → ${v}`, "ok");
+  }
+
+  function expandedAtBottom() {
+    if (!el.expandedHistory) return true;
+    return el.expandedHistory.scrollHeight - el.expandedHistory.scrollTop - el.expandedHistory.clientHeight < 32;
+  }
+
+  function scrollExpandedToLatest() {
+    if (!el.expandedHistory) return;
+    el.expandedHistory.scrollTop = el.expandedHistory.scrollHeight;
+    st.expandedAtBottom = true;
+    if (el.expandedLatest) el.expandedLatest.hidden = true;
+  }
+
+  function openExpandedChat() {
+    if (st.expanded || !el.expanded) return;
+    st.expanded = true;
+    el.expanded.hidden = false;
+    document.body.classList.add("chat-expanded-open");
+    el.expandedStatus.textContent = api.getBridgeStatus?.() === "online" ? "ONLINE" : "LOCAL";
+    el.expandedTime.textContent = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    el.expandedHistory.appendChild(el.chatSlot.querySelector("#conversation"));
+    const thinking = el.chatSlot.querySelector("#thinkingBar");
+    if (thinking) el.expandedThinking.appendChild(thinking);
+    const input = el.inputSlot.querySelector("#inputRow");
+    if (input) el.expandedInput.appendChild(input);
+    requestAnimationFrame(scrollExpandedToLatest);
+  }
+
+  function closeExpandedChat() {
+    if (!st.expanded) return;
+    const conversation = el.expandedHistory.querySelector("#conversation");
+    if (conversation) el.chatSlot.appendChild(conversation);
+    const thinking = el.expandedThinking.querySelector("#thinkingBar");
+    if (thinking) el.chatSlot.appendChild(thinking);
+    const input = el.expandedInput.querySelector("#inputRow");
+    if (input) el.inputSlot.appendChild(input);
+    el.expanded.hidden = true;
+    document.body.classList.remove("chat-expanded-open");
+    st.expanded = false;
+  }
+
+  function handleNewMessage() {
+    if (!st.expanded || !el.expandedHistory) return;
+    const shouldFollow = st.expandedAtBottom || expandedAtBottom();
+    requestAnimationFrame(() => {
+      if (shouldFollow) scrollExpandedToLatest();
+      else if (el.expandedLatest) el.expandedLatest.hidden = false;
+    });
   }
 
   // ----------------------------------------------------------- menu lateral --
@@ -499,8 +556,10 @@ export function createGolden(api) {
     if (window.Gateway && window.Gateway.isAuthenticated) {
       try {
         const data = await window.Gateway.httpGet('/api/jarvis/providers/status');
-        if (data && data.models) {
-          st.ollama = { on: true, list: data.models.map(m => m.name || m.id).slice(0, 4) };
+        if (data && data.ai_core) {
+          st.aiCore = data.ai_core;
+          const local = data.ai_core.local_ai || {};
+          st.ollama = { on: local.status === "ONLINE", list: local.model ? [local.model] : [] };
           return st.ollama;
         }
       } catch(e) {}
@@ -513,18 +572,64 @@ export function createGolden(api) {
     const models = s.models;
     const oll = st.ollama;
     const rows = [];
-    if (Array.isArray(models) && models.length) {
+    const canonical = Array.isArray(st.aiCore?.providers) ? st.aiCore.providers : [];
+    if (canonical.length) {
+      for (const p of canonical) {
+        if (p.name === "tavily" || p.name === "brave") continue;
+        rows.push({ name: String(p.name || "").toUpperCase(), on: p.status === "ONLINE", detail: p.status + (p.model ? ` · ${p.model}` : "") });
+      }
+    } else if (Array.isArray(models) && models.length) {
       for (const m of models) rows.push({ name: m.name || m.id, on: !!m.on, detail: m.detail || (m.model || "") });
     } else {
-      rows.push({ name: "Groq", on: false, detail: "sem chave" });
-      rows.push({ name: "OpenRouter", on: false, detail: "sem chave" });
-      rows.push({ name: "Gemini", on: false, detail: "sem chave" });
-      rows.push({ name: "Ollama", on: !!(oll && oll.on), detail: oll && oll.on ? (oll.list[0] || "local") : "off" });
+      rows.push({ name: "PROVIDERS", on: false, detail: "STATUS INDISPONÍVEL" });
     }
     el.models.innerHTML = rows.map((m) => `
       <div class="gModel" data-on="${m.on ? 1 : 0}">
         <i></i><span>${esc(m.name)}</span><b>${esc(m.detail || (m.on ? "ATIVO" : "OFF"))}</b>
       </div>`).join("");
+    paintAiCore();
+  }
+
+  function paintAiCore() {
+    const core = st.aiCore;
+    if (!core) {
+      if (el.aiCoreSummary) el.aiCoreSummary.textContent = "STATUS GERAL · N/D";
+      if (el.aiCoreProviders) el.aiCoreProviders.innerHTML = "";
+      if (el.aiCoreLast) el.aiCoreLast.textContent = "ÚLTIMA EXECUÇÃO · N/D";
+      return;
+    }
+    const llm = core.llm || {};
+    const research = core.research || {};
+    const last = core.last_request;
+    const status = String(core.overall_status || "N/D");
+    if (el.aiCoreSummary) el.aiCoreSummary.innerHTML = `<b>STATUS GERAL</b><span data-status="${esc(status)}">${esc(status)}</span><em>ATIVO: ${esc(llm.active_provider || "N/D")} / ${esc(llm.active_model || "N/D")}</em>`;
+    if (el.aiCoreProviders) {
+      const items = (core.providers || []).map((p) => `<span class="gAiProvider" data-status="${esc(p.status || "N/D")}"><b>${esc(String(p.name || "").toUpperCase())}</b><i>${esc(p.status || "N/D")}</i></span>`);
+      const researchProviders = Object.entries(research.providers || {});
+      if (researchProviders.length) {
+        researchProviders.forEach(([name, item]) => items.push(`<span class="gAiProvider" data-status="${esc(item.status || "N/D")}"><b>PESQUISA · ${esc(name.toUpperCase())}</b><i>${esc(item.status || "N/D")}</i></span>`));
+      } else {
+        items.push(`<span class="gAiProvider" data-status="${esc(research.status || "N/D")}"><b>PESQUISA</b><i>${esc(research.status || "N/D")}</i></span>`);
+      }
+      el.aiCoreProviders.innerHTML = items.join("");
+    }
+    if (el.aiCoreLast) {
+      if (!last) { el.aiCoreLast.textContent = "ÚLTIMA EXECUÇÃO · N/D"; return; }
+      const tools = Array.isArray(last.tools_used) && last.tools_used.length ? last.tools_used.join(", ") : "nenhuma";
+      const researchText = last.research_used ? `${last.research_provider || "web"} · ${last.source_count ?? 0} fontes` : "não";
+      const latency = last.total_latency_ms == null ? "N/D" : `${last.total_latency_ms} ms`;
+      el.aiCoreLast.innerHTML = `<b>ÚLTIMA EXECUÇÃO</b><span>ROTA: ${esc(last.route || last.answer_route || "N/D")}</span><span>TOOLS: ${esc(tools)}</span><span>LLM: ${esc(last.llm_provider || "nenhum")} / ${esc(last.llm_model || "N/D")}</span><span>PESQUISA: ${esc(researchText)} · FALLBACK: ${last.fallback_used ? "SIM" : "NÃO"} · ${esc(latency)}</span>`;
+    }
+  }
+
+  async function refreshAiCore() {
+    if (!window.Gateway || !window.Gateway.isAuthenticated) return;
+    if (Date.now() - st.aiCoreAt < 2500) return;
+    st.aiCoreAt = Date.now();
+    try {
+      const data = await window.Gateway.httpGet('/api/jarvis/providers/status');
+      if (data?.ai_core) { st.aiCore = data.ai_core; paintModels(); }
+    } catch (e) { /* connection state is rendered by the existing Gateway UI */ }
   }
 
   // --------------------------------------------------------------- relógio ---
@@ -811,12 +916,30 @@ export function createGolden(api) {
       el.searchResults.innerHTML = `<p class="gEmpty">${esc(res?.error || "Sem resultados.")}<br><span class="gDim">${res?.query ? `Você pode abrir a busca direto no navegador: <a class="gLink" href="https://duckduckgo.com/?q=${encodeURIComponent(res.query)}" target="_blank" rel="noopener">DuckDuckGo · ${esc(res.query)}</a>` : ""}</span></p>`;
       return;
     }
-    el.searchResults.innerHTML = res.results.map((r, i) => `
-      <a class="gRes" data-kind="${esc(r.kind || "")}" href="${esc(r.url)}" target="_blank" rel="noopener">
+    el.searchResults.innerHTML = res.results.map((r, i) => {
+      const url = String(r.url || "").trim();
+      const safe = /^https?:\/\//i.test(url);
+      const tag = safe ? "a" : "div";
+      return `
+      <${tag} class="gRes" data-kind="${esc(r.kind || "")}"${safe ? ` href="${esc(url)}" target="_blank" rel="noopener noreferrer"` : ""}>
         <div class="gResTop"><i>${String(i + 1).padStart(2, "0")}</i><b>${esc(r.title)}</b></div>
         <span class="gResHost">${r.kind ? `<em class="gResKind">${esc(KIND_LABEL[r.kind] || r.kind)}</em>` : ""}${esc(r.host || "")}</span>
         ${r.snippet ? `<p>${esc(r.snippet)}</p>` : ""}
-      </a>`).join("");
+      </${tag}>`;
+    }).join("");
+    if (el.searchResults && api.openUrl) {
+      el.searchResults.querySelectorAll("a.gRes").forEach((card) => {
+        card.addEventListener("click", (event) => {
+          const url = String(card.getAttribute("href") || "").trim();
+          if (!/^https?:\/\//i.test(url)) {
+            event.preventDefault();
+            return;
+          }
+          event.preventDefault();
+          api.openUrl(url, card.querySelector(".gResTop b")?.textContent || url);
+        });
+      });
+    }
   }
   function renderHist() {
     const hist = api.getSearchHistory?.() || [];
@@ -827,14 +950,15 @@ export function createGolden(api) {
       b.onclick = () => { el.searchInput.value = b.dataset.q; el.searchForm.requestSubmit(); };
     });
   }
-  async function runSearch(q) {
+  async function runSearch(q, options = {}) {
     if (st.search.busy) return;
     const query = String(q || "").trim();
     if (!query) return;
-    setView("pesquisa");
+    if (!options.background) setView("pesquisa");
     st.search.busy = true;
     el.searchSrc.textContent = "CONSULTANDO";
     el.searchResults.innerHTML = `<p class="gEmpty">Lendo a web agora…</p>`;
+    if (el.summary) el.summary.textContent = "Lendo a resposta sintetizada…";
     renderSteps([{ label: `iniciando busca por "${query}"`, state: "run" }]);
     paintNet();
     const res = await api.webSearch?.(query, {
@@ -844,7 +968,17 @@ export function createGolden(api) {
     st.search.last = res && res.ok ? res : null;
     el.searchSrc.textContent = res?.source ? String(res.source).toUpperCase() : res?.ok ? "WEB" : "FALHA";
     renderResults(res);
+    if (el.summary) {
+      const answer = res?.response || res?.final_response || res?.answer || res?.summary || "";
+      el.summary.textContent = answer || (res?.ok ? "A pesquisa retornou fontes, mas não trouxe uma síntese final." : "");
+      if (el.sumSrc) el.sumSrc.textContent = answer ? "GEMINI" : "N/D";
+    }
     if (res?.ok) {
+      // Chat-originated research is rendered by brain.js -> renderResponse.
+      // Direct research-panel searches still need their own conversation entry.
+      if (!options.background && res.response && api.addMessage) {
+        api.addMessage("jarvis", res.response, { typing: false });
+      }
       api.addSearchHistory?.(query);
       renderHist();
       api.toast?.("PESQUISA", `${res.results.length} fontes encontradas.`);
@@ -977,6 +1111,24 @@ export function createGolden(api) {
       if (t != null) api.setObjective?.(t.trim());
     };
     el.clearBtn.onclick = () => { api.clearConversation?.(); api.toast?.("CONVERSA", "Histórico limpo."); renderMemoria(); };
+    if (!st.expandedWired) {
+      el.expandChatBtn.onclick = openExpandedChat;
+      el.expandedClose.onclick = closeExpandedChat;
+      el.expandedLatest.onclick = scrollExpandedToLatest;
+      el.expandedHistory.addEventListener("scroll", () => {
+        st.expandedAtBottom = expandedAtBottom();
+        if (st.expandedAtBottom && el.expandedLatest) el.expandedLatest.hidden = true;
+      }, { passive: true });
+      window.addEventListener("jarvis:message-added", handleNewMessage);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && st.expanded) closeExpandedChat();
+        if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "f") {
+          event.preventDefault();
+          st.expanded ? closeExpandedChat() : openExpandedChat();
+        }
+      });
+      st.expandedWired = true;
+    }
     el.recentAll.onclick = () => setView("projetos");
 
     // tarefas: clique conclui/reabre um projeto
@@ -1070,10 +1222,12 @@ export function createGolden(api) {
     st.timers.push(setInterval(() => { renderTasks(); }, 1000));
     st.timers.push(setInterval(() => { paintAgents(); paintMemory(); renderDiag(); renderMemoria(); }, 3000));
     st.timers.push(setInterval(paintModels, 4000));
+    st.timers.push(setInterval(refreshAiCore, 3000));
     st.timers.push(setInterval(() => { paintNet(); }, 6000));
     st.timers.push(setInterval(() => { probeOllama().then(paintModels); }, 15000));
     tickClock();
     paintModels();
+    refreshAiCore();
     probeOllama().then(paintModels);
     setShadow(st.shadow, false);
     api.log?.("painel golden online", "ok");

@@ -79,6 +79,11 @@ async function searchViaGateway(query, { onStep, budgetMs = 22000 } = {}) {
   return {
     ok: results.length > 0,
     query,
+    response: result.response || result.message || result.reply || result.text || "",
+    response_id: result.response_id || result.routing_metadata?.response_id || result.routing_metadata?.request_id || "",
+    session_id: result.routing_metadata?.session_id || "",
+    routing_metadata: result.routing_metadata || {},
+    spoken_response: result.spoken_response || "",
     results: dedupe(results).sort((a, b) => ((RANK[a.kind] ?? 5) - (RANK[b.kind] ?? 5)) || ((b.at || 0) - (a.at || 0))).slice(0, 20),
     sources: ["Gateway web_research"],
     source: "GATEWAY",

@@ -3,11 +3,11 @@ import { createHud } from "./hud.js";
 import { createVoice, voiceSupported, ttsSupported } from "./voice.js";
 import { createDesktopVoiceClient } from "./desktop-voice.js";
 import { createBridge } from "./bridge.js";
-import { createBrain } from "./brain.js";
+import { createBrain } from "./brain.js?v=20260921-4";
 import { sfx, setMuted, tone } from "./audio.js";
 import { createMetrics } from "./metrics.js";
-import { createGolden } from "./golden.js";
-import { createSearch } from "./search.js";
+import { createGolden } from "./golden.js?v=20260921-4";
+import { createSearch } from "./search.js?v=20260921-4";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -295,11 +295,8 @@ function logLine(msg, kind = "") {
 }
 
 function formatRich(text) {
-  let h = esc(text);
-  h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
-  h = h.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-  h = h.replace(/(https?:\/\/[^\s<]+)/g, (m) => `<a href="${m}" target="_blank" rel="noopener">${m.length > 52 ? m.slice(0, 52) + "…" : m}</a>`);
-  return h;
+  if (window.SafeMarkdown) return window.SafeMarkdown(String(text || ""));
+  return esc(text).replace(/\n/g, "<br>");
 }
 
 function addMessage(role, text, opts = {}) {
@@ -334,6 +331,7 @@ function addMessage(role, text, opts = {}) {
   wrap.appendChild(bubble);
   conversationEl.appendChild(wrap);
   conversationEl.scrollTop = conversationEl.scrollHeight;
+  window.dispatchEvent(new CustomEvent("jarvis:message-added", { detail: { role, text: String(text || "") } }));
   return {
     wrap, body,
     setText(t) { body.innerHTML = formatRich(t); conversationEl.scrollTop = conversationEl.scrollHeight; },
@@ -560,9 +558,9 @@ const brain = createBrain({
   toast, log: logLine,
   // "pesquisar X" roda a busca real dentro do painel GOLDEN (quando ele está aberto);
   // em outros temas devolve null e o cérebro abre a busca no navegador.
-  webSearch: async (q) => {
+  webSearch: async (q, opts = {}) => {
     if (app.dataset.theme !== "golden" || !golden) return null;
-    return await golden.runSearch(q);
+    return await golden.runSearch(q, opts);
   },
   setTheme: (id) => applyTheme(id),
   setState,
@@ -1022,6 +1020,17 @@ golden = createGolden({
   setAgent: (v) => { settings.agent = v; persist(); },
   setAdvanced: (b) => { settings.advanced = !!b; persist(); },
   getConversation,
+  addMessage,
+  openUrl: (url, label) => {
+    const value = String(url || "").trim();
+    if (!/^https?:\/\//i.test(value)) return false;
+    const a = document.createElement("a");
+    a.href = value; a.target = "_blank"; a.rel = "noopener noreferrer";
+    document.body.appendChild(a); a.click(); a.remove();
+    logLine("navegador → " + (label || value), "ok");
+    sfx.ok();
+    return true;
+  },
   exportMemory,
   getMarket: () => lastMarket,
 });

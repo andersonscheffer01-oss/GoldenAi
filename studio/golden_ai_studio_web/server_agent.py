@@ -5930,10 +5930,13 @@ void OnTick()
     def _api_jarvis_chat(self, data):
         """Chat completo: texto → LLM → plano → executa → resposta."""
         try:
+            request_started = time.perf_counter()
+            request_id = uuid.uuid4().hex
             from jarvis_core.brain import get_brain
             from desktop_center import DESKTOP_CENTER
 
             text = str((data or {}).get("text") or "").strip()
+            session_id = str((data or {}).get("session_id") or "desktop")[:120]
             if not text:
                 return {"ok": False, "error": "Texto vazio"}
             from jarvis_core.output_mode import get_output_mode_manager, to_spoken_text
@@ -5964,6 +5967,7 @@ void OnTick()
 
             # 1. Brain interpreta
             brain_result = brain.interpret(text, source="text", voice_capture=False)
+            llm_info = getattr(brain, "last_llm", {}) or {}
             if not brain_result.get("ok"):
                 brain_result["shadow_task"] = shadow_task
                 brain_result["route"] = preview.route.value
@@ -5978,6 +5982,10 @@ void OnTick()
                     "llm": getattr(brain, "last_llm", {}) or {},
                     "telemetry": brain.request_metrics()}
             if set(plan) == {"response"}:
+                canonical = jarvis._attach_research_telemetry(
+                    {"ok": True, "provider": llm_info.get("provider", ""),
+                     "model": llm_info.get("model", brain_result.get("model", ""))},
+                    request_id, session_id, request_started)
                 jarvis.record_response_metrics(preview.route.value, preview.preferred_skill,
                     "", brain.request_metrics(), {"ok": True,
                     "response_policy": "NEEDS_SYNTHESIS"})
@@ -5988,13 +5996,18 @@ void OnTick()
                     get_voice_service().speak_now(spoken)
                 return {"ok": True, "response": response, "spoken_response": spoken,
                         "output_mode": output["mode"], "tool": "none",
-                        "model": brain_result.get("model", ""), "shadow_task": shadow_task,
+                        "model": llm_info.get("model", brain_result.get("model", "")), "shadow_task": shadow_task,
+                        "routing_metadata": canonical.get("routing_metadata", {}),
                         **meta}
             tool_name = plan.get("tool", "")
             args = plan.get("args", {})
 
             # 3. Executa a ferramenta
             exec_result = jarvis.execute_tool(tool_name, args, text)
+            canonical = jarvis._attach_research_telemetry(
+                {**exec_result, "provider": llm_info.get("provider", exec_result.get("provider", "")),
+                 "model": llm_info.get("model", brain_result.get("model", ""))},
+                request_id, session_id, request_started)
             meta["telemetry"] = brain.request_metrics(tool_name)
             jarvis.record_response_metrics(preview.route.value, preview.preferred_skill,
                                            tool_name, meta["telemetry"], exec_result)
@@ -6017,6 +6030,7 @@ void OnTick()
                 "tool_provider": exec_result.get("provider", ""),
                 "model": brain_result.get("model", ""),
                 "shadow_task": shadow_task,
+                "routing_metadata": canonical.get("routing_metadata", {}),
                 **meta,
             }
         except Exception as e:
@@ -6412,8 +6426,12 @@ void OnTick()
                 reason = "nenhum provider ONLINE"
             elif fallback:
                 reason = "%s %s" % (requested["provider"], states.get(requested["provider"], "OFFLINE"))
+            core_status = DESKTOP_CENTER.service.ai_core_status()
+            # Keep the historical provider fields and add the canonical status
+            # consumed by the desktop/web panel.
             return {"ok": True, "mode": str(getattr(DESKTOP_CENTER.service.orchestrator, "mode", "shadow")),
                     "providers": providers, "primary_models": primary,
+                    "ai_core": core_status,
                     "readiness": self._api_jarvis_readiness({}).get("readiness", {}),
                     "primary": {"requested_provider": requested.get("provider", ""),
                                 "requested_model": requested.get("model", ""),

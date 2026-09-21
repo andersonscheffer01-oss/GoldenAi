@@ -295,13 +295,14 @@
         const id = this._nextId();
         this._pendingCommands.set(id, { resolve, reject, timestamp: Date.now() });
         this._send('command', { command: command, ...(options || {}) }, undefined, id);
-        // Timeout after 60s
+        // Allow Brain routing plus the research tool's 45s execution budget
+        // to complete without expiring the client-side command first.
         setTimeout(() => {
           if (this._pendingCommands.has(id)) {
             this._pendingCommands.delete(id);
             reject(new Error('Command timeout'));
           }
-        }, 60000);
+        }, 90000);
       });
     }
 

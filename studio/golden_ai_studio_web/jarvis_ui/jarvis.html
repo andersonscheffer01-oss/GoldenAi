@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="src/fonts.css">
-<link rel="stylesheet" href="src/styles.css">
+<link rel="stylesheet" href="src/styles.css?v=20260921-4">
 <link rel="stylesheet" href="lib/github-dark.min.css">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0a0a0f">
@@ -237,7 +237,7 @@
 
           <div class="gBandMid">
             <section class="gCard gChatCard">
-              <h4><span>CONVERSA ATUAL</span><button id="gClearBtn" class="gMini" type="button">LIMPAR HISTÓRICO</button></h4>
+              <h4><span>CONVERSA ATUAL</span><span class="gHeadActions"><button id="gExpandChatBtn" class="gMini" type="button" title="Abrir conversa expandida">EXPANDIR CHAT</button><button id="gClearBtn" class="gMini" type="button">LIMPAR HISTÓRICO</button></span></h4>
               <div id="gChatSlot" class="gChatSlot"></div>
             </section>
 
@@ -342,6 +342,9 @@
           <section class="gCard gSpan2">
             <h4><span>NÚCLEO DE IA</span><i class="gSrc" id="gFlowState">EM ESPERA</i></h4>
             <div id="gModels" class="gModels"></div>
+            <div id="gAiCoreSummary" class="gAiCoreSummary"></div>
+            <div id="gAiCoreProviders" class="gAiCoreProviders"></div>
+            <div id="gAiCoreLast" class="gAiCoreLast"></div>
             <canvas id="gFlow" height="46" aria-hidden="true"></canvas>
             <div class="gFlowSteps"><span>Voz</span><span>Análise</span><span>Resposta</span></div>
           </section>
@@ -372,6 +375,17 @@
       <span id="gVer">GOLDEN JARVIS v1.0.0</span>
     </footer>
   </div>
+
+  <section id="chatExpanded" class="chatExpanded" hidden aria-modal="true" role="dialog" aria-labelledby="chatExpandedTitle">
+    <div class="chatExpandedHead">
+      <div><strong id="chatExpandedTitle">JARVIS — CONVERSA</strong><span id="chatExpandedStatus">ONLINE</span><time id="chatExpandedTime"></time></div>
+      <button id="chatExpandedClose" class="iconBtn" type="button" title="Fechar conversa expandida" aria-label="Fechar conversa expandida">×</button>
+    </div>
+    <div id="chatExpandedHistory" class="chatExpandedHistory"></div>
+    <div id="chatExpandedThinking"></div>
+    <div id="chatExpandedInput" class="chatExpandedInput"></div>
+    <button id="chatExpandedLatest" class="chatExpandedLatest" type="button" hidden>↓ IR PARA A MENSAGEM MAIS RECENTE</button>
+  </section>
 
   <div id="toastCtn"></div>
 
@@ -459,7 +473,7 @@
 <!-- Local libs (pinned versions, zero CDN at runtime) -->
 <script src="lib/marked.min.js"></script>
 <script src="lib/highlight.min.js"></script>
-<script src="src/markdown-sanitizer.js"></script>
+<script src="src/markdown-sanitizer.js?v=20260921-4"></script>
 <script src="src/trading-panels.js"></script>
 
 <!-- Configuration: derived from location, no hardcoded backend -->
@@ -469,7 +483,7 @@
 <script src="src/math-parser.js"></script>
 
 <!-- Gateway adapter: real protocol, device auth, no X-Ja-Token -->
-<script src="src/gateway-adapter.js"></script>
+<script src="src/gateway-adapter.js?v=20260921-3"></script>
 
 <!-- Command router: all commands → Gateway → JarvisService -->
 <script src="src/command-router.js"></script>
@@ -478,6 +492,6 @@
 <script src="src/telemetry-adapter.js"></script>
 
 <!-- Application (modified: uses new adapters, no brain.js direct actions) -->
-<script type="module" src="src/app.js"></script>
+<script type="module" src="src/app.js?v=20260921-4"></script>
 </body>
 </html>
