@@ -13,7 +13,19 @@ class SkillsRouter:
                 "maximize_window", "minimize_window", "switch_window"), "MEDIUM", ModelProfile.FAST),
             "system": (Route.SYSTEM, ("system_status", "get_time", "get_date", "get_ip",
                 "get_username", "get_battery", "get_network", "list_processes"), "LOW", ModelProfile.FAST),
+            "computer_use": (Route.COMPUTER_USE, (
+                "mouse_position", "mouse_move", "mouse_click", "screenshot",
+                "keyboard_type", "keyboard_press", "keyboard_hotkey",
+                "clipboard_get", "clipboard_set", "gpu_status", "gpu_list",
+                "vision_analyze_screen",
+            ), "LOW", ModelProfile.GENERAL),
             "market_data": (Route.MARKET_DATA, ("get_exchange_rate",), "LOW", ModelProfile.FAST),
+            "market_analysis": (Route.MARKET_ANALYSIS, (
+                "mt5_status", "mt5_account_info", "mt5_positions", "mt5_orders",
+                "mt5_symbol_tick", "mt5_symbol_info", "mt5_recent_candles",
+                "golden_status", "golden_scanner_status", "golden_scanner_results",
+                "golden_risk_status", "web_research",
+            ), "LOW", ModelProfile.GENERAL),
             "memory": (Route.MEMORY, ("memory_search", "memory_recent", "memory_remember"), "MEDIUM", ModelProfile.GENERAL),
             "vision": (Route.VISION, ("analyze_screen", "take_screenshot", "take_screenshot_window"), "MEDIUM", ModelProfile.VISION),
             "browser": (Route.BROWSER, (
@@ -28,9 +40,15 @@ class SkillsRouter:
             "image": (Route.IMAGE, (), "LOW", ModelProfile.GENERAL),
             "video": (Route.VIDEO, (), "MEDIUM", ModelProfile.DEEP),
             "whatsapp": (Route.WHATSAPP, (), "HIGH", ModelProfile.GENERAL),
-            "golden": (Route.GOLDEN, (), "LOW", ModelProfile.GENERAL),
+            "golden": (Route.GOLDEN, (
+                "golden_status", "golden_scanner_status", "golden_scanner_results",
+                "golden_risk_status",
+            ), "LOW", ModelProfile.GENERAL),
             "radar": (Route.RADAR, (), "LOW", ModelProfile.GENERAL),
-            "mt5": (Route.MT5, (), "HIGH", ModelProfile.GENERAL),
+            "mt5": (Route.MT5, (
+                "mt5_status", "mt5_account_info", "mt5_positions", "mt5_orders",
+                "mt5_symbol_tick", "mt5_symbol_info", "mt5_recent_candles",
+            ), "LOW", ModelProfile.GENERAL),
             "trading": (Route.TRADING, (), "HIGH", ModelProfile.DEEP),
             "task": (Route.TASK, ("open_program", "open_url", "system_status",
                 "get_time", "memory_search"), "MEDIUM", ModelProfile.DEEP),

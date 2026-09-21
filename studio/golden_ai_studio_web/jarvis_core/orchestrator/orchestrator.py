@@ -40,6 +40,41 @@ _OPERATIONAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_MARKET_CURRENCIES = frozenset({
+    "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "BRL", "CNY", "CNH",
+})
+_MARKET_ASSETS = frozenset({
+    "XAUUSD", "XAGUSD", "BTCUSD", "ETHUSD", "NAS100", "US100", "US30", "US500",
+    "SPX500", "GER40", "DAX40",
+})
+
+
+def _extract_market_symbol(text):
+    value = str(text or "")
+    low = value.casefold()
+    if re.search(r"\b(ouro|gold)\b", low):
+        return "XAUUSD"
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9]{2,11}", value.upper())
+    for token in tokens:
+        if token in _MARKET_ASSETS:
+            return token
+        if any(token.startswith(asset) for asset in _MARKET_ASSETS):
+            return next(asset for asset in _MARKET_ASSETS if token.startswith(asset))
+        if len(token) == 6 and token[:3] in _MARKET_CURRENCIES and token[3:] in _MARKET_CURRENCIES:
+            return token
+    return ""
+
+
+def _is_market_analysis(text, symbol=""):
+    low = str(text or "").casefold().strip()
+    if low in {"analise o ouro", "análise o ouro"}:
+        return False
+    asks_for_analysis = bool(re.search(
+        r"\b(analis[aeiouáéíóú]*|tend[eê]ncia|cen[aá]rio|perspectiva|como\s+est[aá]|"
+        r"estado\s+do\s+mercado|vis[aã]o\s+do\s+mercado)\b", low))
+    market_subject = bool(symbol or re.search(r"\b(ouro|gold|mercado|ativo|par|forex)\b", low))
+    return asks_for_analysis and market_subject
+
 
 def is_conceptual_query(text):
     """Return True if text is a conceptual/explanatory question (not operational).
@@ -95,7 +130,12 @@ class CentralOrchestrator:
                                   "system_status", {}))
         has_research = any(step.tool in {"web_research", "web_research_learn"}
                            for step in steps)
-        current_data_tool = any(step.tool == "get_exchange_rate" for step in steps)
+        current_data_tool = any(step.tool in {
+            "get_exchange_rate", "mt5_status", "mt5_account_info", "mt5_positions",
+            "mt5_orders", "mt5_symbol_tick", "mt5_symbol_info", "mt5_recent_candles",
+            "golden_status", "golden_scanner_status", "golden_scanner_results",
+            "golden_risk_status",
+        } for step in steps)
         if research.required and not has_research and not current_data_tool:
             original_steps = bool(steps)
             query = self._extract_research_query(text)
@@ -170,6 +210,157 @@ class CentralOrchestrator:
             step = PlanStep("step-1", "get_time", Route.SYSTEM, "get_time", {})
             return self._decision("get_time", Route.SYSTEM, 1.0, "system",
                                   ModelProfile.FAST, classification, ai=False, steps=(step,))
+        # Computer Use primitives: route through the existing skill and let
+        # JarvisService/SecurityManager enforce each tool's risk policy.
+        if re.search(r"\b(posi[cç][aã]o|onde)\b.*\bmouse\b|\bmouse\b.*\b(posi[cç][aã]o|onde)\b", low):
+            step = PlanStep("step-1", "mouse_position", Route.COMPUTER_USE,
+                            "mouse_position", {})
+            return self._decision("mouse_position", Route.COMPUTER_USE, .99,
+                                  "computer_use", ModelProfile.FAST, classification,
+                                  ai=False, steps=(step,))
+        move = re.search(r"\b(?:mova|mover|move)\s+(?:o\s+)?mouse\s+(?:para|to)\s*(-?\d+)\s*[,;]\s*(-?\d+)", low)
+        if move:
+            step = PlanStep("step-1", "mouse_move", Route.COMPUTER_USE,
+                            "mouse_move", {"x": int(move.group(1)), "y": int(move.group(2)),
+                                            "duration": 0.5})
+            return self._decision("mouse_move", Route.COMPUTER_USE, .98,
+                                  "computer_use", ModelProfile.FAST, classification,
+                                  ai=False, steps=(step,))
+        if re.search(r"\b(clique|clicar|click)\b", low):
+            button = "right" if re.search(r"\bdireit[oa]\b", low) else "middle" if re.search(r"\bmeio\b", low) else "left"
+            step = PlanStep("step-1", "mouse_click", Route.COMPUTER_USE,
+                            "mouse_click", {"button": button, "clicks": 1})
+            return self._decision("mouse_click", Route.COMPUTER_USE, .97,
+                                  "computer_use", ModelProfile.FAST, classification,
+                                  ai=False, steps=(step,))
+        hotkey = re.search(r"\b([a-z]+(?:\+[a-z0-9]+)+)\b", low)
+        if hotkey and re.search(r"\b(atalho|teclas?|pressione|aperte)\b", low):
+            keys = [item for item in hotkey.group(1).split("+") if item]
+            step = PlanStep("step-1", "keyboard_hotkey", Route.COMPUTER_USE,
+                            "keyboard_hotkey", {"keys": keys})
+            return self._decision("keyboard_hotkey", Route.COMPUTER_USE, .97,
+                                  "computer_use", ModelProfile.FAST, classification,
+                                  ai=False, steps=(step,))
+        typed = re.search(r"\b(?:digite|escreva)\s+[\"'](.+?)[\"']", text, re.I)
+        if typed:
+            step = PlanStep("step-1", "keyboard_type", Route.COMPUTER_USE,
+                            "keyboard_type", {"text": typed.group(1), "interval": 0.1})
+            return self._decision("keyboard_type", Route.COMPUTER_USE, .97,
+                                  "computer_use", ModelProfile.FAST, classification,
+                                  ai=False, steps=(step,))
+        pressed = re.search(r"\b(?:pressione|aperte)\s+(?:a\s+)?([a-z0-9_]+)\b", low)
+        if pressed:
+            step = PlanStep("step-1", "keyboard_press", Route.COMPUTER_USE,
+                            "keyboard_press", {"key": pressed.group(1)})
+            return self._decision("keyboard_press", Route.COMPUTER_USE, .97,
+                                  "computer_use", ModelProfile.FAST, classification,
+                                  ai=False, steps=(step,))
+        clip_set = re.search(r"\b(?:copie|copiar|coloque)\s+[\"'](.+?)[\"'].*\b(?:clipboard|[aá]rea\s+de\s+transfer[eê]ncia)\b", low)
+        if clip_set:
+            step = PlanStep("step-1", "clipboard_set", Route.COMPUTER_USE,
+                            "clipboard_set", {"text": clip_set.group(1)})
+            return self._decision("clipboard_set", Route.COMPUTER_USE, .97,
+                                  "computer_use", ModelProfile.FAST, classification,
+                                  ai=False, steps=(step,))
+        if re.search(r"\b(?:o que tem|leia|mostre|conte)\b.*\b(?:clipboard|[aá]rea\s+de\s+transfer[eê]ncia)\b", low):
+            step = PlanStep("step-1", "clipboard_get", Route.COMPUTER_USE,
+                            "clipboard_get", {})
+            return self._decision("clipboard_get", Route.COMPUTER_USE, .96,
+                                  "computer_use", ModelProfile.GENERAL, classification,
+                                  ai=False, steps=(step,))
+        gpu_query = re.search(
+            r"\b(?:uso|status|mem[oó]ria|informa[cç][oõ]es?|lista|listar|quais)\b.*"
+            r"\b(?:gpu|placa de v[ií]deo)\b", low)
+        if gpu_query and not re.search(r"\b(?:temperatura|graus|hotspot|normal)\b", low):
+            tool = "gpu_list" if re.search(r"\b(?:quais|lista|listar)\b", low) else "gpu_status"
+            step = PlanStep("step-1", tool, Route.COMPUTER_USE, tool, {})
+            return self._decision(tool, Route.COMPUTER_USE, .96, "computer_use",
+                                  ModelProfile.FAST, classification, ai=False, steps=(step,))
+        vision_request = re.search(r"\b(?:onde est[aá]|o que (?:voc[eê]|v[êe])|descreva|analise)\b.*\b(?:tela|bot[aã]o|screen)\b", low)
+        if vision_request:
+            step = PlanStep("step-1", "vision_analyze_screen", Route.COMPUTER_USE,
+                            "vision_analyze_screen", {"prompt": text})
+            return self._decision("vision_analyze_screen", Route.COMPUTER_USE, .95,
+                                  "computer_use", ModelProfile.VISION, classification,
+                                  ai=False, steps=(step,))
+        if re.search(r"\b(?:screenshot|captura(?:r)?\s+(?:a\s+)?tela|tir(?:e|ar)\s+(?:um\s+)?print)\b", low):
+            step = PlanStep("step-1", "screenshot", Route.COMPUTER_USE,
+                            "screenshot", {})
+            return self._decision("screenshot", Route.COMPUTER_USE, .97,
+                                  "computer_use", ModelProfile.FAST, classification,
+                                  ai=False, steps=(step,))
+        market_symbol = _extract_market_symbol(text)
+        if re.search(r"\b(status|sa[uú]de)\b.*\bmt5\b|\bmt5\b.*\b(status|sa[uú]de)\b", low):
+            step = PlanStep("step-1", "mt5_status", Route.MT5, "mt5_status", {})
+            return self._decision("mt5_status", Route.MT5, .99, "mt5",
+                                  ModelProfile.FAST, classification, ai=False, steps=(step,))
+        if re.search(r"\b(saldo|equity|margem)\b.*\b(conta|mt5)\b|\b(conta|mt5)\b.*\b(saldo|equity|margem)\b", low):
+            step = PlanStep("step-1", "mt5_account_info", Route.MT5,
+                            "mt5_account_info", {})
+            return self._decision("mt5_account_info", Route.MT5, .98, "mt5",
+                                  ModelProfile.FAST, classification, ai=False, steps=(step,))
+        if re.search(r"\b(posi[cç][oõ]es?|exposi[cç][aã]o)\b.*\babert", low):
+            step = PlanStep("step-1", "mt5_positions", Route.MT5,
+                            "mt5_positions", {})
+            return self._decision("mt5_positions", Route.MT5, .98, "mt5",
+                                  ModelProfile.FAST, classification, ai=False, steps=(step,))
+        if re.search(r"\b(ordens?|ordem)\b.*\b(pendent|abert)", low):
+            step = PlanStep("step-1", "mt5_orders", Route.MT5, "mt5_orders", {})
+            return self._decision("mt5_orders", Route.MT5, .98, "mt5",
+                                  ModelProfile.FAST, classification, ai=False, steps=(step,))
+        if market_symbol and re.search(r"\b(pre[cç]o|cota[cç][aã]o|valor|tick)\b.*\b(atual|agora|corrente)?", low):
+            step = PlanStep("step-1", "mt5_symbol_tick", Route.MT5,
+                            "mt5_symbol_tick", {"symbol": market_symbol})
+            return self._decision("mt5_symbol_tick", Route.MT5, .98, "mt5",
+                                  ModelProfile.FAST, classification, ai=False, steps=(step,))
+        if market_symbol and re.search(r"\b(candles?|velas?|hist[oó]rico)\b", low):
+            step = PlanStep("step-1", "mt5_recent_candles", Route.MT5,
+                            "mt5_recent_candles", {"symbol": market_symbol,
+                                                    "timeframe": "M15", "count": 100})
+            return self._decision("mt5_recent_candles", Route.MT5, .98, "mt5",
+                                  ModelProfile.FAST, classification, ai=False, steps=(step,))
+        if _is_market_analysis(text, market_symbol):
+            target = market_symbol or "mercado financeiro"
+            steps = [PlanStep("step-1", "market_analysis", Route.MARKET_ANALYSIS,
+                              "mt5_status", {})]
+            if market_symbol:
+                steps.extend((
+                    PlanStep("step-2", "market_analysis", Route.MARKET_ANALYSIS,
+                             "mt5_symbol_info", {"symbol": market_symbol}),
+                    PlanStep("step-3", "market_analysis", Route.MARKET_ANALYSIS,
+                             "mt5_symbol_tick", {"symbol": market_symbol}),
+                    PlanStep("step-4", "market_analysis", Route.MARKET_ANALYSIS,
+                             "mt5_recent_candles", {"symbol": market_symbol,
+                                                     "timeframe": "M5", "count": 100}),
+                    PlanStep("step-5", "market_analysis", Route.MARKET_ANALYSIS,
+                             "mt5_recent_candles", {"symbol": market_symbol,
+                                                     "timeframe": "M15", "count": 100}),
+                    PlanStep("step-6", "market_analysis", Route.MARKET_ANALYSIS,
+                             "mt5_recent_candles", {"symbol": market_symbol,
+                                                     "timeframe": "H1", "count": 100}),
+                    PlanStep("step-7", "market_analysis", Route.MARKET_ANALYSIS,
+                             "golden_status", {}),
+                    PlanStep("step-8", "market_analysis", Route.MARKET_ANALYSIS,
+                             "golden_scanner_results", {"symbol": market_symbol, "limit": 3}),
+                    PlanStep("step-9", "market_analysis", Route.MARKET_ANALYSIS,
+                             "golden_risk_status", {}),
+                ))
+            else:
+                steps.extend((
+                    PlanStep("step-2", "market_analysis", Route.MARKET_ANALYSIS,
+                             "golden_status", {}),
+                    PlanStep("step-3", "market_analysis", Route.MARKET_ANALYSIS,
+                             "golden_scanner_status", {}),
+                    PlanStep("step-4", "market_analysis", Route.MARKET_ANALYSIS,
+                             "golden_risk_status", {}),
+                ))
+            steps.append(PlanStep(
+                "step-%d" % (len(steps) + 1), "market_analysis", Route.WEB,
+                "web_research", {"query": f"{target} mercado notícias macro fundamentos",
+                                  "limit": 5, "privacy": classification.value}))
+            return self._decision("market_analysis", Route.MARKET_ANALYSIS, .96,
+                                  "market_analysis", ModelProfile.GENERAL, classification,
+                                  ai=False, steps=tuple(steps))
         # Cotacao deterministica: moeda detectada pelos aliases canonicos,
         # sem LLM generativo (resposta vem da tool + provider real).
         if re.search(r"\bcota[cç][aã]o\b", low):

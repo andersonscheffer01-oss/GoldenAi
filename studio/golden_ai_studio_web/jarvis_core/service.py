@@ -25,6 +25,16 @@ from .task_manager import TaskManager
 
 class JarvisService:
     MAX_PLAN_STEPS = 5
+    MARKET_PLAN_MAX_STEPS = 10
+    MARKET_PLAN_TOOLS = frozenset({
+        "mt5_status", "mt5_account_info", "mt5_positions", "mt5_orders",
+        "mt5_symbol_tick", "mt5_symbol_info", "mt5_recent_candles",
+        "golden_status", "golden_scanner_status", "golden_scanner_results",
+        "golden_risk_status", "web_research", "web_research_learn",
+    })
+    MARKET_OPTIONAL_TOOLS = frozenset({
+        "golden_scanner_results", "web_research", "web_research_learn",
+    })
     FINAL_TOOLS = {
         "open_program", "close_program", "open_folder", "open_file", "open_path",
         "is_running", "system_status", "get_time", "get_date", "get_ip", "open_url",
@@ -303,6 +313,13 @@ class JarvisService:
     # REGISTRO DE FERRAMENTAS
     # ═══════════════════════════════════════════════════════════════
     def _register_tools(self):
+        from .tools.computer_use_tools import COMPUTER_USE_TOOLS
+        from .tools.market_readonly import (
+            golden_risk_status, golden_scanner_results, golden_scanner_status,
+            golden_status, mt5_account_info, mt5_orders, mt5_positions,
+            mt5_recent_candles, mt5_status, mt5_symbol_info, mt5_symbol_tick,
+        )
+
         for tool in (
             # --- PROGRAMAS ---
             Tool("open_program", "Abre um programa autorizado", self._open_program,
@@ -409,6 +426,46 @@ class JarvisService:
                  parameter_descriptions={"base": "Moeda base (ex.: USD)",
                                          "quote": "Moeda de cotação (ex.: BRL)"},
                  category="data"),
+            # --- MARKET INTELLIGENCE (SOMENTE LEITURA) ---
+            Tool("mt5_status", "Consulta o estado da conexão MT5 sem executar operações.",
+                 mt5_status, Risk.LOW, timeout=20, category="market"),
+            Tool("mt5_account_info", "Consulta saldo e estado da conta MT5 sem executar operações.",
+                 mt5_account_info, Risk.LOW, timeout=20, category="market"),
+            Tool("mt5_positions", "Lista posições abertas do MT5 sem alterar ordens.",
+                 mt5_positions, Risk.LOW, timeout=20, category="market"),
+            Tool("mt5_orders", "Lista ordens pendentes do MT5 sem alterá-las.",
+                 mt5_orders, Risk.LOW, timeout=20, category="market"),
+            Tool("mt5_symbol_tick", "Consulta bid/ask/last de um símbolo no MT5.",
+                 mt5_symbol_tick, Risk.LOW, timeout=20,
+                 parameters={"symbol": str},
+                 parameter_descriptions={"symbol": "Símbolo exato do broker, como XAUUSD ou EURUSD."},
+                 category="market"),
+            Tool("mt5_symbol_info", "Consulta metadados de um símbolo no MT5.",
+                 mt5_symbol_info, Risk.LOW, timeout=20,
+                 parameters={"symbol": str},
+                 parameter_descriptions={"symbol": "Símbolo exato do broker, como XAUUSD ou EURUSD."},
+                 category="market"),
+            Tool("mt5_recent_candles", "Consulta candles recentes do MT5 sem executar operações.",
+                 mt5_recent_candles, Risk.LOW, timeout=25,
+                 parameters={"symbol": str, "timeframe": str, "count": int},
+                 parameter_descriptions={
+                     "symbol": "Símbolo exato do broker.",
+                     "timeframe": "M1, M5, M15, H1, H4 ou D1.",
+                     "count": "Quantidade de candles, limitada pelo adapter.",
+                 }, category="market"),
+            Tool("golden_status", "Consulta a disponibilidade dos módulos Golden.",
+                 golden_status, Risk.LOW, timeout=20, category="market"),
+            Tool("golden_scanner_status", "Consulta o estado do scanner Golden sem iniciar scan.",
+                 golden_scanner_status, Risk.LOW, timeout=20, category="market"),
+            Tool("golden_scanner_results", "Consulta setups do scanner Golden em modo leitura.",
+                 golden_scanner_results, Risk.LOW, timeout=35,
+                 parameters={"symbol": str, "limit": int},
+                 parameter_descriptions={
+                     "symbol": "Símbolo a consultar; vazio apenas inspeciona cache.",
+                     "limit": "Máximo de setups retornados.",
+                 }, category="market"),
+            Tool("golden_risk_status", "Consulta o estado de risco Golden sem enviar ordens.",
+                 golden_risk_status, Risk.LOW, timeout=25, category="market"),
             Tool("web_research", "Pesquisa real na web e retorna fontes sem memorizar.",
                  self._web_research, Risk.LOW, timeout=45,
                  parameters={"query": str, "limit": int, "privacy": str},
@@ -425,6 +482,8 @@ class JarvisService:
                      "limit": "Máximo de resultados, de 1 a 10.",
                      "privacy": "PUBLIC, INTERNAL, SENSITIVE ou SECRET."},
                  category="research"),
+            # --- COMPUTER USE ---
+            *COMPUTER_USE_TOOLS,
 
             # --- BROWSER (Playwright V1) ---
             Tool("browser_open", "Inicia o navegador Playwright (headless)", self._browser_open,
@@ -988,12 +1047,18 @@ class JarvisService:
 
     def _execute_plan(self, brain, command, plan, task_id):
         steps = plan.get("steps", []) if isinstance(plan, dict) else []
+        is_market_plan = any(
+            step.get("intent") == "market_analysis" or
+            step.get("tool") in self.MARKET_PLAN_TOOLS
+            for step in steps
+        )
+        max_plan_steps = self.MARKET_PLAN_MAX_STEPS if is_market_plan else self.MAX_PLAN_STEPS
         classification = getattr(brain.orchestrator.last_decision,
                                  "data_classification", None)
         secure_command = ("[REDACTED]" if getattr(classification, "value", classification) == "SECRET"
                           else command)
-        if len(steps) > self.MAX_PLAN_STEPS:
-            error = f"Plano excede o limite de {self.MAX_PLAN_STEPS} etapas."
+        if len(steps) > max_plan_steps:
+            error = f"Plano excede o limite de {max_plan_steps} etapas."
             brain.clear_steps()
             self.audit.add(task_id=task_id, command=secure_command, tool="multi_tool_plan",
                            status="plan_rejected", result=error)
@@ -1032,6 +1097,7 @@ class JarvisService:
                 }),
                 "evidence_scope": ("WEB_EVIDENCE" if tool.name in
                                    {"web_research", "web_research_learn"}
+                                   else "LOCAL_MARKET_DATA" if tool.name in self.MARKET_PLAN_TOOLS
                                    else "LOCAL_EVIDENCE"),
             }
             executions.append(execution)
@@ -1048,7 +1114,8 @@ class JarvisService:
                         "completed_steps": executions[:-1],
                         "message": result.get("message", "") +
                                    " O plano será encerrado após esta ação por segurança."}
-            if not result.get("ok"):
+            if not result.get("ok") and not (
+                    is_market_plan and tool.name in self.MARKET_OPTIONAL_TOOLS):
                 break
 
         brain.clear_steps()
@@ -1067,7 +1134,9 @@ class JarvisService:
                        status=synthesis_status,
                        result={"provider": provider, "execution_count": len(executions)})
         perf_diagnostic = self._performance_diagnostic(executions)
-        return {"ok": all(item["ok"] for item in executions), "message": message,
+        return {"ok": all(item["ok"] or (
+                    is_market_plan and item["tool"] in self.MARKET_OPTIONAL_TOOLS)
+                           for item in executions), "message": message,
                 "executions": executions, "final_synthesis": True,
                 "synthesis_provider": provider,
                 "synthesis_ms": synthesis_ms,
