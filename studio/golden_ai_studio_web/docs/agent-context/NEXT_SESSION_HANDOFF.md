@@ -136,3 +136,41 @@ python server_agent.py
 # Start LAN OFF (no SSL)
 python server_agent.py
 ```
+
+## OmniRoute O1/O2 Closure
+
+Date: 2026-09-23
+
+OmniRoute O1/O2 is CLOSED. The canonical integration is:
+
+```text
+Jarvis -> ModelRouter -> OmniRouteProvider -> OmniRoute -> ollama-local -> qwen2.5-coder:14b
+```
+
+Validated final state:
+
+- OmniRoute health, auth, storage encryption, localhost-only binding, LAN blocking, streaming, structured output, fallback, and secret policy: PASS.
+- Gemini direct, Groq direct, and Ollama direct: PASS.
+- OmniRoute -> Ollama and Jarvis -> OmniRoute -> Ollama: PASS.
+- OmniRoute OFF preserves the direct-provider fallback path: PASS.
+- Groq direct is the Jarvis route for fast/tool-calling requests. Groq through OmniRoute remains DEFERRED.
+
+Known limitation for OmniRoute 3.8.51 + Groq:
+
+- Connection and `/models` work, and the Groq API works directly.
+- `/v1/chat/completions` through OmniRoute reaches the upstream, which returns `404 model_not_found`.
+- The internal model test returns `401`.
+- Connection test, internal model test, and external chat do not share the same credential resolver/pool.
+- OmniRoute transforms the request/model before dispatch; auto routes can lose candidates after cooldown.
+
+The Groq OmniRoute connection is disabled (`isActive=false`) without deleting or changing its credential. Do not reopen this investigation or patch OmniRoute source in the next phase.
+
+Preserved routing policy:
+
+- SECRET -> Ollama direct.
+- Vision -> local `qwen2.5vl`.
+- Normal quality -> Gemini direct/preferred.
+- Fast/tool calling -> Groq direct.
+- OmniRoute -> optional experimental fallback.
+
+Auto routes `auto/fast`, `auto/coding`, `auto/cheap`, and `auto/offline` are DEFERRED. RTK remains disabled and compression remains OFF; future O3 work may evaluate RTK separately.
