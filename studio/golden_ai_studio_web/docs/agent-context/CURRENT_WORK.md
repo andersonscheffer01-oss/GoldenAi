@@ -86,3 +86,14 @@ Validação atual:
 - Suíte global atual: 1411 passed, 24 skipped, 44 failed, 4 errors, 89 subtests passed; falhas em testes/fixtures/dependências ambientais fora do escopo M1.5.1B.
 
 Próximo: aguardar autorização; não iniciar M1.6.
+
+## Computer Use 3D — Windows Known Folder Hardening
+
+**Date:** 2026-09-23
+**Status:** REAL VALIDATION PASS
+
+- The real Notepad mission completed through `JarvisService`, UIA, SecurityManager, and AuditLog.
+- Windows `Documents` is resolved with `SHGetKnownFolderPath`; no user-profile path is hardcoded on Windows.
+- `PATH_NOT_FOUND` is audited, bounded, re-resolves the Known Folder, and only dismisses a matching Windows error dialog.
+- Authorized result verified at the resolved Documents folder with exact content `Golden Jarvis funcionando`.
+- Focused Computer Use/UIA/Vision/Security regression: 172 passed, 30 subtests passed.

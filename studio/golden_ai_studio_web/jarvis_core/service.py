@@ -177,6 +177,8 @@ class JarvisService:
             self.learning_engine = None
             self.project_memory = None
         self._register_tools()
+        from .computer_use_mission import ComputerMissionExecutor
+        self.computer_missions = ComputerMissionExecutor(self)
         self.orchestrator = CentralOrchestrator(self.registry, audit=self.audit)
         self.task_manager = TaskManager(base_dir)
         self.runtime = JarvisRuntimeCoordinator(self.orchestrator, self,
@@ -914,12 +916,19 @@ class JarvisService:
             return {"ok": False, "error": "Comando vazio"}
         if command.lower().strip(" .,!") in {"pare", "cancelar", "interromper", "pare jarvis", "parar jarvis"}:
             self.cancellation.request_cancel()
+            try:
+                self.computer_missions.cancel_current_mission()
+            except Exception:
+                pass
             self.state = AgentState.IDLE
             self.audit.add(task_id=task_id, command=command, tool="cancel",
                            risk=Risk.LOW.value, status="cancelamento_solicitado",
                            result="Cancelamento solicitado")
             return {"ok": True, "message": "Cancelamento solicitado.", "cancel_requested": True}
         self.cancellation.clear_cancel()
+        if self.computer_missions.planner.can_plan(command):
+            self.state = AgentState.EXECUTING
+            return self.run_computer_mission(command, task_id)
         self.state = AgentState.PLANNING
         intent = self._parse(command)
         if not intent:
@@ -991,6 +1000,19 @@ class JarvisService:
                         "error": "Não entendi o comando. Tente: 'abrir calculadora', "
                                  "'tirar print', 'listar processos', 'volume baixo', etc."}
         return self.execute_tool(intent[0], intent[1], command, task_id)
+
+    def run_computer_mission(self, request, task_id="desktop"):
+        """Run a bounded Computer Use mission through the existing core."""
+        return self.computer_missions.run(request, task_id=task_id)
+
+    def resume_computer_mission(self, mission_id, token, task_id="desktop"):
+        """Resume only the pending mission step after SecurityManager approval."""
+        return self.computer_missions.resume(mission_id, token, task_id=task_id)
+
+    def cancel_current_mission(self):
+        """Cooperatively cancel the active mission between actions."""
+        self.cancellation.request_cancel()
+        return self.computer_missions.cancel_current_mission()
 
     def _conversation_snapshot(self, task_id):
         session_id = str(task_id or "desktop")

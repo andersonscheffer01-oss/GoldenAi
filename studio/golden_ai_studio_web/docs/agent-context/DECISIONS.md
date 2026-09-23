@@ -11,6 +11,10 @@ e sua representação para o LLM deve ser gerada por `get_llm_tools()`.
 Qualquer falha de JSON, schema, lookup ou tipo encerra o fluxo sem execução.
 `open_any_exe` não é exposta ao modelo.
 
+## 2026-09-23 — Computer Use usa Known Folder e recuperação fail-closed
+
+Missões de arquivo não montam `C:\\Users\\<nome>\\Documents`. No Windows, o destino usa o Known Folder nativo de Documents; falhas `PATH_NOT_FOUND` são auditadas, re-resolvidas de forma limitada e não permitem prosseguir cegamente.
+
 ## 2026-09-11 — Memória é contexto não confiável
 
 Memórias recuperadas nunca recebem autoridade de system prompt. O Brain recebe apenas Top-K

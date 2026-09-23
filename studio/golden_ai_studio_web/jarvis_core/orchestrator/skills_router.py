@@ -20,7 +20,8 @@ class SkillsRouter:
                 "vision_analyze_screen", "vision_describe_screen",
                 "vision_find_element", "vision_list_elements",
                 "ui_active_window", "ui_find_element", "ui_list_elements",
-                "ui_get_element_text", "hybrid_find_ui_target",
+                "ui_get_element_text", "ui_focus_window", "ui_focus_element",
+                "ui_dismiss_path_not_found", "hybrid_find_ui_target",
             ), "LOW", ModelProfile.GENERAL),
             "market_data": (Route.MARKET_DATA, ("get_exchange_rate",), "LOW", ModelProfile.FAST),
             "market_analysis": (Route.MARKET_ANALYSIS, (

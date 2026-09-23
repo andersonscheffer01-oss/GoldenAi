@@ -148,7 +148,9 @@ def _window_wrapper(window: Optional[Any] = None):
         wanted = window.strip().casefold()
         for candidate in desktop.windows(top_level_only=True):
             title = str(_safe_call(candidate, "window_text", "") or "")
-            if wanted in title.casefold():
+            pid = int(_safe_call(candidate, "process_id", 0) or 0)
+            process = _process_name(pid)
+            if wanted in title.casefold() or wanted in process.casefold():
                 return candidate
         return None
     handle = _foreground_handle()
@@ -332,6 +334,109 @@ def ui_get_element_text(target: str, control_type: Optional[str] = None,
         return {"found": False, "reason": str(exc)[:200], "source": "windows_uia"}
 
 
+def _find_first_control(control_type: str, window: Optional[Any] = None):
+    root = _window_wrapper(window)
+    if root is None:
+        return None, {"found": False, "reason": "window_not_found", "source": "windows_uia"}
+    window_info = _window_record(root)
+    wanted = str(control_type or "").casefold()
+    for wrapper in _walk(root):
+        if wanted and _control_type(wrapper).casefold() != wanted:
+            continue
+        record = _element_record(wrapper, window_info)
+        if record:
+            return wrapper, record
+    return None, {"found": False, "reason": "element_not_found",
+                  "source": "windows_uia", "window_title": window_info["title"]}
+
+
+def ui_focus_window(window: Optional[Any] = None) -> dict[str, Any]:
+    """Focus a freshly resolved window without clicking by coordinates."""
+    try:
+        wrapper = _window_wrapper(window)
+        if wrapper is None:
+            return {"ok": False, "found": False, "reason": "window_not_found",
+                    "source": "windows_uia"}
+        record = _window_record(wrapper)
+        handle = int(record.get("handle") or 0)
+        if not handle or not _window_exists(handle):
+            return {"ok": False, "found": False, "reason": "window_gone",
+                    "source": "windows_uia"}
+        focus = getattr(wrapper, "set_focus", None)
+        if not callable(focus):
+            return {"ok": False, "found": True, "reason": "focus_unavailable",
+                    "source": "windows_uia", "window": record}
+        focus()
+        refreshed = ui_active_window()
+        valid = int(refreshed.get("handle") or 0) == handle
+        return {"ok": valid, "found": True, "focused": valid,
+                "window": refreshed if valid else record,
+                "source": "windows_uia",
+                "reason": None if valid else "focus_not_confirmed"}
+    except Exception as exc:
+        return {"ok": False, "found": False, "reason": str(exc)[:200],
+                "source": "windows_uia"}
+
+
+def ui_focus_element(target: str = "", control_type: Optional[str] = None,
+                     window: Optional[Any] = None) -> dict[str, Any]:
+    """Focus a freshly resolved UIA control and confirm its window remains active."""
+    try:
+        if str(target or "").strip():
+            wrapper, record = _find_with_wrapper(target, control_type, window)
+        else:
+            wrapper, record = _find_first_control(control_type or "", window)
+        if wrapper is None or not record.get("found"):
+            return {**record, "ok": False}
+        if not record.get("enabled") or not record.get("visible"):
+            return {**record, "ok": False, "reason": "element_not_actionable"}
+        valid = validate_ui_target(record, coordinate_mapping_validated=True)
+        if not valid.get("valid"):
+            return {**record, "ok": False, "reason": valid.get("reason")}
+        focus = getattr(wrapper, "set_focus", None)
+        if not callable(focus):
+            return {**record, "ok": False, "reason": "focus_unavailable"}
+        focus()
+        return {**record, "ok": True, "focused": True,
+                "verification": "uia_element_focus"}
+    except Exception as exc:
+        return {"ok": False, "found": False, "reason": str(exc)[:200],
+                "source": "windows_uia"}
+
+
+def ui_dismiss_path_not_found() -> dict[str, Any]:
+    """Close only a Windows path-not-found dialog after exact title matching."""
+    try:
+        active = ui_active_window()
+        title = str(active.get("title") or "").casefold()
+        markers = ("caminho especificado", "path specified", "cannot find the path",
+                   "sistema não pode encontrar")
+        if not any(marker in title for marker in markers):
+            return {"ok": False, "reason": "path_not_found_dialog_not_confirmed",
+                    "source": "windows_uia"}
+        wrapper, record = _find_with_wrapper("OK", "Button", active.get("handle"))
+        if wrapper is None:
+            return {"ok": False, "reason": "path_not_found_ok_button_not_found",
+                    "source": "windows_uia", "window": active}
+        valid = validate_ui_target(record, coordinate_mapping_validated=True)
+        if not valid.get("valid"):
+            return {"ok": False, "reason": valid.get("reason"),
+                    "source": "windows_uia"}
+        invoke = getattr(wrapper, "invoke", None)
+        if callable(invoke):
+            invoke()
+        else:
+            click = getattr(wrapper, "click_input", None)
+            if not callable(click):
+                return {"ok": False, "reason": "path_not_found_ok_action_unavailable",
+                        "source": "windows_uia"}
+            click()
+        return {"ok": True, "dismissed": True,
+                "verification": "exact_path_not_found_dialog", "source": "windows_uia"}
+    except Exception as exc:
+        return {"ok": False, "reason": str(exc)[:200], "source": "windows_uia"}
+
+
 def validate_ui_target(target: Optional[dict[str, Any]], now: Optional[float] = None,
                        coordinate_mapping_validated: bool = False) -> dict[str, Any]:
     """Validate a UIA snapshot before any future action is considered."""
@@ -416,7 +521,7 @@ def hybrid_find_ui_target(target: str, control_type: Optional[str] = None,
 
 
 def _ui_active_window_tool():
-    return ui_active_window()
+    return {"ok": True, **ui_active_window()}
 
 
 def _ui_find_element_tool(target: str, control_type: Optional[str] = None,
@@ -431,6 +536,19 @@ def _ui_list_elements_tool(window: Optional[Any] = None, limit: int = 50):
 def _ui_get_text_tool(target: str, control_type: Optional[str] = None,
                       window: Optional[Any] = None):
     return ui_get_element_text(target, control_type, window)
+
+
+def _ui_focus_window_tool(window: Optional[Any] = None):
+    return ui_focus_window(window)
+
+
+def _ui_focus_element_tool(target: str = "", control_type: Optional[str] = None,
+                           window: Optional[Any] = None):
+    return ui_focus_element(target, control_type, window)
+
+
+def _ui_dismiss_path_not_found_tool():
+    return ui_dismiss_path_not_found()
 
 
 def _hybrid_find_tool(target: str, control_type: Optional[str] = None,
@@ -452,6 +570,15 @@ UI_AUTOMATION_TOOLS = (
          _ui_get_text_tool, Risk.MEDIUM,
          parameters={"target": str, "control_type": str, "window": str},
          category="computer_use"),
+    Tool("ui_focus_window", "Foca uma janela resolvida via Windows UIA.",
+         _ui_focus_window_tool, Risk.LOW,
+         parameters={"window": str}, category="computer_use"),
+    Tool("ui_focus_element", "Foca um controle resolvido via Windows UIA.",
+         _ui_focus_element_tool, Risk.MEDIUM,
+         parameters={"target": str, "control_type": str, "window": str},
+         category="computer_use"),
+    Tool("ui_dismiss_path_not_found", "Fecha somente o diálogo confirmado de caminho inexistente.",
+         _ui_dismiss_path_not_found_tool, Risk.MEDIUM, category="computer_use"),
     Tool("hybrid_find_ui_target", "Busca UIA primeiro e usa visão local como fallback.",
          _hybrid_find_tool, Risk.MEDIUM,
          parameters={"target": str, "control_type": str, "window": str},
@@ -462,5 +589,6 @@ UI_AUTOMATION_TOOLS = (
 __all__ = [
     "UI_AUTOMATION_TOOLS", "ui_active_window", "ui_find_element",
     "ui_list_elements", "ui_get_element_text", "validate_ui_target",
+    "ui_focus_window", "ui_focus_element", "ui_dismiss_path_not_found",
     "hybrid_find_ui_target",
 ]

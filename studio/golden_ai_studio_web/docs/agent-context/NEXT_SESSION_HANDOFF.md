@@ -174,3 +174,15 @@ Preserved routing policy:
 - OmniRoute -> optional experimental fallback.
 
 Auto routes `auto/fast`, `auto/coding`, `auto/cheap`, and `auto/offline` are DEFERRED. RTK remains disabled and compression remains OFF; future O3 work may evaluate RTK separately.
+
+## Computer Use 3D Validation
+
+Date: 2026-09-23
+
+The real mission `Abra o Bloco de Notas, escreva Golden Jarvis funcionando, salve como teste.txt e confirme que foi salvo` completed through the canonical `JarvisService`.
+
+- `Documents` is resolved through Windows Known Folder (`SHGetKnownFolderPath`), including redirection compatibility.
+- The authorized file was verified directly on the filesystem with exact content.
+- SecurityManager confirmations and mission-scoped AuditLog entries were present.
+- `PATH_NOT_FOUND` is fail-closed, audited, bounded, and can dismiss only an exactly matched Windows path-error dialog before re-resolving the target.
+- Do not touch `device_registry.json`; do not push.

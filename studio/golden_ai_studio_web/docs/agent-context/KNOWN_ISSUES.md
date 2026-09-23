@@ -8,3 +8,5 @@
 - Havia dois servidores na porta 8765; a instância antiga foi encerrada e somente o backend atualizado permanece.
 - O diretório da aplicação continua sem metadados Git, portanto `git status/diff` não está disponível.
 - O plugin opcional `system_info.py` requer `psutil`; sua ausência não afeta o Memory Core.
+- O helper auxiliar de CUA do Codex não inicializou nesta sessão; a validação real foi executada pelo próprio `JarvisService` usando o caminho UIA/pywinauto do produto.
+- A resolução nativa de Known Folder depende de Windows; em ambientes não-Windows o helper usa o diretório Documents do perfil para manter os testes portáveis.
