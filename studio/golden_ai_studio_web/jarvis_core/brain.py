@@ -552,6 +552,7 @@ class JarvisBrain:
                              "provider_wait_ms": result.ttft_ms,
                              "time_to_first_token_ms": result.ttft_ms,
                              "generation_ms": result.generation_ms,
+                             "metadata": dict(result.metadata or {}),
                              "attempts": list(result.attempts)}
             self.last_metrics.update({"profile": (profile or _MP.GENERAL).value,
                 "provider_requested": self.last_llm["provider_requested"],
@@ -562,7 +563,8 @@ class JarvisBrain:
             if result.ok:
                 return {"ok": True, "response": result.output, "provider": result.provider,
                         "model": result.model, "profile": (profile or _MP.GENERAL).value,
-                        "fallback": result.fallback_used, "latency_ms": result.latency_ms}
+                        "fallback": result.fallback_used, "latency_ms": result.latency_ms,
+                        "metadata": dict(result.metadata or {})}
             return {"ok": False, "error": "Nenhum provider respondeu: " + result.error,
                     "fallback": result.fallback_used, "latency_ms": result.latency_ms}
         def invoke():

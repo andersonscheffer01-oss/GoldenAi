@@ -21,9 +21,15 @@ PROVIDER_MODELS = {
                            else "gemini-3.8-flash") for profile in ModelProfile},
     "ollama": {profile: ("qwen2.5vl:7b" if profile == ModelProfile.VISION else
                            "qwen2.5-coder:14b") for profile in ModelProfile},
+    "omniroute": {
+        ModelProfile.FAST: "auto/fast", ModelProfile.VOICE_FAST: "auto/fast",
+        ModelProfile.GENERAL: "auto", ModelProfile.DEEP: "auto/smart",
+        ModelProfile.CODING: "auto/coding", ModelProfile.VISION: "auto",
+        ModelProfile.OFFLINE: "auto/offline",
+    },
 }
 
-PROVIDER_ORDER = ("groq", "openrouter", "gemini", "ollama")
+PROVIDER_ORDER = ("groq", "openrouter", "gemini", "omniroute", "ollama")
 MAX_TRANSIENT_RETRIES = 1
 PROVIDER_TIMEOUT_SECONDS = 8.0
 VOICE_FAST_TIMEOUT_SECONDS = 2.5

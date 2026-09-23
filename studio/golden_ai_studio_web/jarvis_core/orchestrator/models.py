@@ -110,3 +110,4 @@ class ProviderResult:
     ttft_ms: int = 0
     generation_ms: int = 0
     attempts: tuple[dict[str, Any], ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)

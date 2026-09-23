@@ -140,7 +140,7 @@ class ModelRouter:
                         "result": "ok", "elapsed_ms": latency})
                     return ProviderResult(True, adapter.name, model, ProviderState.AVAILABLE,
                         output_text, index > 0, latency, "", ttft, generation,
-                        tuple(attempt_log))
+                        tuple(attempt_log), timing.get("metadata", {}))
                 except FutureTimeout as exc:
                     state = ProviderState.TIMEOUT
                     adapter.state = state
