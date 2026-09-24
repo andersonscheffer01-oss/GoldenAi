@@ -25,6 +25,7 @@ from jarvis_core.browser import (
     BrowserSession, NavigationSecurity, ExternalContent,
     ElementRef, PageInfo, ElementInfo, _BrowserThread,
     _BLOCKED_SCHEMES, _ALLOWED_SCHEMES, _LOCAL_HOSTS,
+    classify_page_barrier,
 )
 
 
@@ -745,6 +746,7 @@ class TestSecurityPathProof:
             "browser_read_page", "browser_get_elements", "browser_click",
             "browser_type", "browser_scroll", "browser_back", "browser_forward",
             "browser_screenshot", "browser_close", "browser_health",
+            "browser_wait_for_results", "browser_record_window",
         ]
         for name in browser_tool_names:
             tool = svc.registry.get(name)
@@ -759,3 +761,22 @@ class TestSecurityPathProof:
             tool = svc.registry.get(name)
             assert tool is not None
             assert callable(tool.handler)
+
+
+def test_4d_barrier_classifier_detects_antibot_without_bypass():
+    barrier = classify_page_barrier(
+        {"url": "https://www.google.com/search?q=OpenAI",
+         "title": "Google Search", "text": "Verify you are human"},
+        [],
+    )
+    assert barrier == "ANTI_BOT"
+
+
+def test_4d_barrier_classifier_ignores_hidden_consent_controls():
+    barrier = classify_page_barrier(
+        {"url": "https://example.com", "title": "Example",
+         "text": "Privacy Policy"},
+        [{"ref": "e1", "text": "Aceitar", "visible": False},
+         {"ref": "e2", "text": "Rejeitar", "visible": False}],
+    )
+    assert barrier == "NONE"

@@ -30,10 +30,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import time
 import urllib.parse
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger("jarvis.browser")
@@ -77,6 +79,133 @@ _DANGEROUS_ACTIONS = frozenset({
     "publicar", "publish", "pagar", "pay", "submeter", "submit",
     "cancelar", "cancel", "desativar", "disable", "deletar",
 })
+
+SEARCH_PROVIDER_URLS = {
+    "google": "https://www.google.com",
+    "bing": "https://www.bing.com",
+    "duckduckgo": "https://duckduckgo.com",
+}
+SEARCH_PROVIDER_ORDER = ("google", "bing", "duckduckgo")
+MAX_SEARCH_PROVIDERS = len(SEARCH_PROVIDER_ORDER)
+
+_BARRIER_TYPES = frozenset({
+    "NONE", "COOKIE_CONSENT", "PRIVACY_CONSENT", "BENIGN_INTERSTITIAL",
+    "LOGIN_REQUIRED", "AUTH_REQUIRED", "CAPTCHA", "ANTI_BOT",
+    "BOT_VERIFICATION", "ACCESS_DENIED", "RATE_LIMITED", "NETWORK_ERROR",
+    "PAGE_ERROR", "UNKNOWN_BLOCKER",
+})
+
+
+def resolve_application(name: str) -> Optional[str]:
+    """Resolve an installed Windows application without assuming one install path."""
+    if str(name or "").casefold() not in {"chrome", "google chrome"}:
+        return None
+
+    candidates: list[str] = []
+    for executable in ("chrome.exe", "chrome"):
+        found = shutil.which(executable)
+        if found:
+            candidates.append(found)
+
+    env_roots = [
+        os.environ.get("PROGRAMFILES", ""),
+        os.environ.get("PROGRAMFILES(X86)", ""),
+        os.environ.get("LOCALAPPDATA", ""),
+    ]
+    for root in env_roots:
+        if root:
+            candidates.append(str(Path(root) / "Google" / "Chrome" /
+                                 "Application" / "chrome.exe"))
+
+    if os.name == "nt":
+        try:
+            import winreg
+            subkeys = (
+                r"Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
+            )
+            views = [getattr(winreg, "KEY_WOW64_64KEY", 0),
+                     getattr(winreg, "KEY_WOW64_32KEY", 0), 0]
+            for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                for subkey in subkeys:
+                    for view in views:
+                        try:
+                            access = winreg.KEY_READ | view
+                            with winreg.OpenKey(root, subkey, 0, access) as key:
+                                value = str(winreg.QueryValueEx(key, "")[0] or "")
+                            match = re.match(r'\s*"([^"]+)"|\s*([^\s]+)', value)
+                            if match:
+                                candidates.append(match.group(1) or match.group(2))
+                        except (FileNotFoundError, OSError):
+                            continue
+        except (ImportError, AttributeError, OSError):
+            pass
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if Path(candidate).is_file():
+            return str(Path(candidate).resolve())
+    return None
+
+
+def classify_page_barrier(page: Optional[dict[str, Any]] = None,
+                          elements: Optional[list[dict[str, Any]]] = None) -> str:
+    """Classify visible browser barriers from untrusted page/UIA data."""
+    page = page or {}
+    elements = elements or []
+    text = " ".join(str(page.get(key) or "") for key in ("title", "url", "text"))
+    element_text = " ".join(
+        " ".join(str(item.get(key) or "") for key in
+                  ("text", "aria_label", "placeholder", "role"))
+        for item in elements if isinstance(item, dict) and item.get("visible", True)
+    )
+    haystack = f"{text} {element_text}".casefold()
+
+    if any(marker in haystack for marker in (
+        "captcha", "verify you are human", "verifique se é você",
+        "unusual traffic", "tráfego incomum", "detected automated traffic",
+        "bot verification", "cloudflare challenge", "challenge required",
+    )):
+        return "CAPTCHA" if "captcha" in haystack else "ANTI_BOT"
+    if any(marker in haystack for marker in (
+        "access denied", "acesso negado", "403 forbidden", "rate limit",
+        "too many requests",
+    )):
+        return "RATE_LIMITED" if "rate" in haystack or "requests" in haystack else "ACCESS_DENIED"
+    if any(marker in haystack for marker in (
+        "sign in", "log in", "login", "entrar", "iniciar sessão", "iniciar sessao",
+    )) and not any(marker in haystack for marker in ("search", "pesquisar")):
+        return "LOGIN_REQUIRED"
+    if any(marker in haystack for marker in (
+        "notification", "notifica", "notificação", "notificacao", "location", "localização",
+        "localizacao", "camera", "microphone", "microfone", "save password",
+        "salvar senha",
+    )):
+        return "UNKNOWN_BLOCKER"
+    if any(marker in haystack for marker in (
+        "cookie", "cookies", "tecnologias semelhantes", "privacy preferences",
+        "preferências de privacidade", "preferencias de privacidade",
+    )) and any(marker in haystack for marker in (
+        "accept", "aceitar", "reject", "rejeitar", "only necessary",
+        "somente necessários", "somente necessarios", "consent",
+    )):
+        return "COOKIE_CONSENT"
+    if (any(marker in haystack for marker in ("privacy policy", "política de privacidade"))
+            and any(marker in haystack for marker in (
+                "consent", "agree", "concordo", "preferences", "preferências",
+                "accept", "aceitar", "reject", "rejeitar", "continue", "continuar",
+            ))):
+        return "PRIVACY_CONSENT"
+    if any(marker in haystack for marker in (
+        "network error", "não foi possível carregar", "unable to load",
+    )):
+        return "NETWORK_ERROR"
+    if any(marker in haystack for marker in ("page error", "something went wrong")):
+        return "PAGE_ERROR"
+    return "NONE"
 
 # ═══════════════════════════════════════════════════════════════
 # URL VALIDATION
@@ -293,6 +422,7 @@ class ElementInfo:
     input_type: str = ""
     selector: str = ""
     index: int = 0
+    visible: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -300,6 +430,7 @@ class ElementInfo:
             "tag": self.tag,
             "text": self.text[:200],
             "index": self.index,
+            "visible": self.visible,
         }
         if self.role:
             d["role"] = self.role
@@ -338,6 +469,11 @@ class BrowserSession:
         self.headless = headless
         self.timeout_ms = timeout_ms
         self.provider = str(provider or "default").casefold()
+        self.executable_path = ""
+        self.process_id = 0
+        self.window_id = 0
+        self.active_tab = ""
+        self.navigation_state = "INITIAL"
         self._playwright = None
         self._browser = None
         self._context = None
@@ -365,6 +501,31 @@ class BrowserSession:
     def element_refs(self) -> ElementRef:
         return self._element_refs
 
+    @staticmethod
+    def _find_chrome_process(started_after: float) -> int:
+        """Find the freshly launched Chrome browser process without killing anything."""
+        try:
+            import psutil
+            candidates = []
+            for process in psutil.process_iter(("pid", "name", "create_time", "cmdline")):
+                try:
+                    info = process.info
+                    if str(info.get("name") or "").casefold() != "chrome.exe":
+                        continue
+                    if float(info.get("create_time") or 0) < started_after - 5:
+                        continue
+                    command_line = " ".join(info.get("cmdline") or [])
+                    candidates.append(("--type=" not in command_line, float(info.get("create_time") or 0),
+                                      int(info.get("pid") or 0)))
+                except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+                    continue
+            if candidates:
+                candidates.sort(reverse=True)
+                return candidates[0][2]
+        except Exception:
+            pass
+        return 0
+
     def start(self) -> dict[str, Any]:
         """Start the browser session."""
         if self._started:
@@ -373,20 +534,20 @@ class BrowserSession:
         try:
             from playwright.sync_api import sync_playwright
             self._playwright = sync_playwright().start()
+            launch_started = time.time()
+            if not self.headless and self.provider != "chrome":
+                self._cleanup()
+                return {"ok": False, "error": "NON_CHROME_BROWSER_DISABLED",
+                        "provider": self.provider}
             launch_kwargs = {"headless": self.headless}
-            channel = {"edge": "msedge", "chrome": "chrome"}.get(self.provider)
-            if self.provider == "default" and not self.headless:
-                channel = "msedge"
-            if channel:
-                launch_kwargs["channel"] = channel
-            try:
-                self._browser = self._playwright.chromium.launch(**launch_kwargs)
-            except Exception:
-                if not self.headless and channel:
-                    launch_kwargs.pop("channel", None)
-                    self._browser = self._playwright.chromium.launch(**launch_kwargs)
-                else:
-                    raise
+            if self.provider == "chrome":
+                self.executable_path = resolve_application("chrome") or ""
+                if not self.executable_path:
+                    self._cleanup()
+                    return {"ok": False, "error": "CHROME_NOT_FOUND",
+                            "provider": "chrome"}
+                launch_kwargs["executable_path"] = self.executable_path
+            self._browser = self._playwright.chromium.launch(**launch_kwargs)
             self._context = self._browser.new_context(
                 viewport={"width": 1280, "height": 720},
                 user_agent=(
@@ -397,12 +558,17 @@ class BrowserSession:
             )
             self._page = self._context.new_page()
             self._started = True
-            self._started_at = time.time()
+            self._started_at = launch_started
+            self.process_id = self._find_chrome_process(launch_started) if self.provider == "chrome" else 0
             self._page_state_id = 0
             self._last_action = "start"
+            self.active_tab = self._page.url
+            self.navigation_state = "READY"
             logger.info("Browser session started (headless=%s)", self.headless)
             return {"ok": True, "message": "Browser started", "headless": self.headless,
-                    "provider": self.provider}
+                    "provider": self.provider,
+                    "browser_provider": self.provider.upper(),
+                    "executable_path": self.executable_path}
         except ImportError:
             return {"ok": False, "error": "Playwright not installed. Run: pip install playwright && python -m playwright install chromium"}
         except Exception as e:
@@ -444,6 +610,10 @@ class BrowserSession:
         self._browser = None
         self._playwright = None
         self._started = False
+        self.process_id = 0
+        self.window_id = 0
+        self.active_tab = ""
+        self.navigation_state = "STOPPED"
 
     def _require_started(self) -> Optional[str]:
         """Return error message if not started, None if ok."""
@@ -499,6 +669,8 @@ class BrowserSession:
             self._element_refs.reset(final_url)
             self._page_state_id += 1
             self._last_action = "navigate"
+            self.active_tab = final_url
+            self.navigation_state = "CHANGED"
             self._last_observation = {"url": final_url, "title": title,
                                       "page_state_id": self._page_state_id}
 
@@ -532,6 +704,8 @@ class BrowserSession:
             self._element_refs.reset(final_url)
             self._page_state_id += 1
             self._last_action = "back"
+            self.active_tab = final_url
+            self.navigation_state = "CHANGED"
             return {"ok": True, "url": final_url, "title": self._page.title() or ""}
         except Exception as e:
             return {"ok": False, "error": "NAVIGATION_FAILED", "message": str(e)[:200]}
@@ -552,6 +726,8 @@ class BrowserSession:
             self._element_refs.reset(final_url)
             self._page_state_id += 1
             self._last_action = "forward"
+            self.active_tab = final_url
+            self.navigation_state = "CHANGED"
             return {"ok": True, "url": final_url, "title": self._page.title() or ""}
         except Exception as e:
             return {"ok": False, "error": "NAVIGATION_FAILED", "message": str(e)[:200]}
@@ -587,10 +763,23 @@ class BrowserSession:
 
             # Extract links
             page_info.links = self._page.evaluate("""() => {
-                return Array.from(document.querySelectorAll('a[href]')).map(a => ({
-                    text: a.innerText.trim().substring(0, 100),
-                    href: a.href
-                })).filter(l => l.text && l.href).slice(0, 100);
+                return Array.from(document.querySelectorAll('a[href]')).map(a => {
+                    const visible = !!(a.offsetWidth || a.offsetHeight || a.getClientRects().length);
+                    const container = a.closest('article, [role="article"], [data-testid*="result" i], [class*="result" i], li');
+                    const containerText = container ? `${container.id || ''} ${container.className || ''} ${container.getAttribute('data-testid') || ''}` : '';
+                    const navigationLike = /nav|menu|footer|header|cookie|consent|privacy/i.test(containerText);
+                    const hasHeading = !!a.querySelector('h1,h2,h3,h4,h5,h6') || !!a.closest('h1,h2,h3,h4,h5,h6');
+                    const resultCandidate = visible && !navigationLike &&
+                        (!!container && (hasHeading || /result|article|b_algo/i.test(containerText)));
+                    return {
+                        text: a.innerText.trim().substring(0, 100),
+                        href: a.href,
+                        visible,
+                        result_candidate: resultCandidate,
+                        role: a.getAttribute('role') || '',
+                        rel: a.getAttribute('rel') || ''
+                    };
+                }).filter(l => l.text && l.href).slice(0, 100);
             }""") or []
 
             # Extract forms
@@ -619,11 +808,14 @@ class BrowserSession:
                     href: el.href || '',
                     type: el.type || '',
                     selector: el.id ? '#' + el.id : '',
+                    visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
                     index: i
                 }));
             }""") or []
 
-            return {"ok": True, "page": page_info.to_dict()}
+            page = page_info.to_dict()
+            page["barrier_type"] = classify_page_barrier(page, page.get("interactive"))
+            return {"ok": True, "page": page}
         except Exception as e:
             return {"ok": False, "error": f"Failed to extract page: {e}"}
 
@@ -671,6 +863,7 @@ class BrowserSession:
                     placeholder: el.placeholder || '',
                     href: el.href || '',
                     type: el.type || '',
+                    visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
                     index: i
                 }));
             }""") or []
@@ -690,6 +883,7 @@ class BrowserSession:
                     href=raw.get("href", ""),
                     input_type=raw.get("type", ""),
                     index=raw.get("index", 0),
+                    visible=bool(raw.get("visible", True)),
                 )
                 elements.append(elem.to_dict())
 
@@ -791,19 +985,38 @@ class BrowserSession:
             selector = self._build_selector(self._element_refs.get(ref) or {}) if ref else ""
             if not selector:
                 return {"ok": False, "error": "SEARCH_FIELD_STALE"}
-            self._page.locator(selector).press("Enter", timeout=self.timeout_ms)
+            field = self._page.locator(selector)
+            field.press("Enter", timeout=self.timeout_ms)
             self._last_action = "search"
             result = self.wait_for_navigation(before=before, timeout_ms=5000,
                                               require_content=True)
             if result.get("ok"):
                 return result
-            submit = self._page.locator(
-                'button[type="submit"], input[type="submit"]')
-            if submit.count() > 0:
-                submit.first.click(timeout=self.timeout_ms)
-                return self.wait_for_navigation(before=before, timeout_ms=15000,
-                                                require_content=True)
-            return result
+            try:
+                field.press("Enter", timeout=3000)
+                result = self.wait_for_navigation(before=before, timeout_ms=5000,
+                                                  require_content=True)
+                if result.get("ok"):
+                    return result
+            except Exception:
+                pass
+            form = field.locator("xpath=ancestor::form[1]")
+            submit = form.locator(
+                'button:visible, input[type="submit"]:visible, [role="button"]:visible')
+            for index in range(min(submit.count(), 5)):
+                candidate = submit.nth(index)
+                try:
+                    if not candidate.is_visible():
+                        continue
+                    candidate.click(timeout=3000)
+                    result = self.wait_for_navigation(before=before, timeout_ms=5000,
+                                                      require_content=True)
+                    if result.get("ok"):
+                        return result
+                except Exception:
+                    continue
+            return {"ok": False, "error": "NAVIGATION_TIMEOUT",
+                    "before": before, "url": self._page.url}
         except Exception as exc:
             return {"ok": False, "error": "SEARCH_EXECUTION_FAILED",
                     "message": str(exc)[:200]}
@@ -838,6 +1051,8 @@ class BrowserSession:
                             time.sleep(0.15)
                     self._page_state_id += 1
                     self._last_observation = {**current, "page_state_id": self._page_state_id}
+                    self.active_tab = current["url"]
+                    self.navigation_state = "CHANGED"
                     return {"ok": True, "navigation_changed": True, **current,
                             "page_state_id": self._page_state_id}
             except Exception:
@@ -845,6 +1060,28 @@ class BrowserSession:
             time.sleep(0.15)
         return {"ok": False, "error": "NAVIGATION_TIMEOUT",
                 "before": before, "url": self._page.url}
+
+    def wait_for_results(self, timeout_ms: int = 10000) -> dict[str, Any]:
+        """Wait for visible, structured result candidates or a classified blocker."""
+        err = self._require_started()
+        if err:
+            return {"ok": False, "error": err}
+        deadline = time.monotonic() + max(0.1, min(float(timeout_ms) / 1000, 20.0))
+        while time.monotonic() < deadline:
+            page = self.get_page_info()
+            if not page.get("ok"):
+                time.sleep(0.2)
+                continue
+            payload = page.get("page") or {}
+            candidates = [item for item in payload.get("links", [])
+                          if item.get("visible", True) and item.get("result_candidate")]
+            barrier = payload.get("barrier_type") or "NONE"
+            if candidates or barrier != "NONE":
+                return {"ok": True, "result_candidate_count": len(candidates),
+                        "barrier_type": barrier, "page_state_id": self._page_state_id}
+            time.sleep(0.2)
+        return {"ok": False, "error": "RESULT_PAGE_NOT_READY",
+                "page_state_id": self._page_state_id}
 
     def scroll(self, direction: str = "down", amount: int = 500) -> dict[str, Any]:
         """Scroll the page."""
@@ -950,6 +1187,12 @@ class BrowserSession:
             "started": self._started,
             "headless": self.headless,
             "provider": self.provider,
+            "browser_provider": self.provider.upper(),
+            "executable_path": self.executable_path,
+            "process_id": self.process_id,
+            "window_id": self.window_id,
+            "active_tab": self.active_tab,
+            "navigation_state": self.navigation_state,
             "current_url": self.current_url,
             "page_title": self._page.title() if self._page and not self._page.is_closed() else "",
             "element_refs_count": self._element_refs.count,
@@ -959,6 +1202,13 @@ class BrowserSession:
             "last_action": self._last_action,
             "last_observation": dict(self._last_observation),
         }
+
+    def record_window_identity(self, process_id: int = 0, window_id: int = 0) -> dict[str, Any]:
+        """Record the UIA-owned Chrome process/window for this browser session."""
+        self.process_id = int(process_id or 0)
+        self.window_id = int(window_id or 0)
+        return {"ok": True, "process_id": self.process_id, "window_id": self.window_id,
+                "browser_provider": self.provider.upper()}
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -10,8 +10,8 @@
 - O plugin opcional `system_info.py` requer `psutil`; sua ausência não afeta o Memory Core.
 - O helper auxiliar de CUA do Codex não inicializou nesta sessão; a validação real foi executada pelo próprio `JarvisService` usando o caminho UIA/pywinauto do produto.
 - A resolução nativa de Known Folder depende de Windows; em ambientes não-Windows o helper usa o diretório Documents do perfil para manter os testes portáveis.
-- Computer Use 4D real remains blocked by browser-controlled external state: Bing may show a
-  cookie-consent dialog and Google may show anti-bot verification. The Browser Use executor
-  detects these states, records them in AuditLog, and stops without accepting, solving CAPTCHA,
-  or bypassing the barrier. Three valid search-result titles therefore require an authorized
-  benign consent decision or a permitted result page without that barrier.
+- Computer Use 4D.1 depends on browser-controlled external state: Google may show anti-bot
+  verification and Bing may retain a cookie-consent state after a safe reject attempt. The
+  executor detects and audits these states, never solves CAPTCHA or bypasses anti-bot, and
+  falls back only to the next bounded provider in the same visible Chrome session. Real
+  OpenAI and Python missions completed through DuckDuckGo with three structured results.

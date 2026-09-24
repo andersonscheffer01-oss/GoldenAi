@@ -8,7 +8,6 @@ required.
 from __future__ import annotations
 
 import re
-import os
 import threading
 import time
 import uuid
@@ -17,10 +16,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+from .browser import (MAX_SEARCH_PROVIDERS, SEARCH_PROVIDER_ORDER,
+                      SEARCH_PROVIDER_URLS, classify_page_barrier)
 from .windows_known_folders import documents_dir as known_documents_dir
 
 
-DEFAULT_SEARCH_HOME = os.getenv("JARVIS_BROWSER_SEARCH_HOME", "https://www.bing.com")
+DEFAULT_SEARCH_HOME = SEARCH_PROVIDER_URLS[SEARCH_PROVIDER_ORDER[0]]
 
 
 class MissionStatus(str, Enum):
@@ -216,6 +217,7 @@ class ComputerMissionPlanner:
         tool_names = {
             "browser_open", "browser_navigate", "browser_health", "browser_get_elements",
             "browser_search", "browser_get_page_info", "ui_active_window", "ui_focus_window",
+            "browser_click", "browser_record_window", "browser_wait_for_results",
         }
         missing = sorted(name for name in tool_names if self.registry.get(name) is None)
         if missing:
@@ -227,7 +229,7 @@ class ComputerMissionPlanner:
 
         steps = [
             step("open-browser", "Abrir navegador visível controlado", "browser_open",
-                 target="browser", args={"visible": True, "provider": "default"}),
+                 target="browser", args={"visible": True, "provider": "chrome"}),
             step("navigate-search-home", "Abrir página inicial de pesquisa", "browser_navigate",
                  target=DEFAULT_SEARCH_HOME, args={"url": DEFAULT_SEARCH_HOME}),
             step("focus-browser", "Confirmar foco no navegador", "focus_browser",
@@ -249,6 +251,9 @@ class ComputerMissionPlanner:
                                   time.time(), steps, max_steps=self.MAX_STEPS)
         mission.result["browser_mission"] = True
         mission.result["search_query"] = query
+        mission.result["search_provider"] = SEARCH_PROVIDER_ORDER[0]
+        mission.result["provider_index"] = 0
+        mission.result["provider_health"] = []
         return mission
 
 
@@ -359,7 +364,13 @@ class ComputerMissionExecutor:
                     step.status = MissionStepStatus.WAITING_CONFIRMATION
                     self._audit_step(mission, step, result, "user_confirmation_required")
                     return self._finish(mission, False)
-                if result.get("error") in {"NAVIGATION_TIMEOUT", "SEARCH_EXECUTION_FAILED"}:
+                if result.get("error") in {
+                    "NAVIGATION_TIMEOUT", "SEARCH_EXECUTION_FAILED",
+                    "SEARCH_PROVIDERS_EXHAUSTED", "NON_CHROME_BROWSER_DETECTED",
+                    "CHROME_FOCUS_GUARD_FAILED", "CHROME_WINDOW_PROCESS_MISMATCH",
+                    "CHROME_WINDOW_IDENTITY_UNAVAILABLE", "CHROME_NOT_FOUND",
+                    "NON_CHROME_BROWSER_DISABLED",
+                }:
                     mission.status = MissionStatus.BLOCKED
                     mission.error = str(result.get("error"))
                     step.status = MissionStepStatus.BLOCKED
@@ -429,14 +440,21 @@ class ComputerMissionExecutor:
                                           task_id=mission.mission_id)
 
     def _focus_browser(self):
-        for process in ("msedge", "chrome", "chromium", "firefox"):
-            result = self.service.execute_tool(
-                "ui_focus_window", {"window": process},
-                command="computer_mission:focus_browser", task_id="computer-mission")
-            if result.get("ok"):
-                return {"ok": True, "focused": True, "browser_process": process,
-                        "verification": "browser_window_focus_guard"}
-        return {"ok": False, "error": "CORRECT_BROWSER_WINDOW_NOT_FOCUSED"}
+        result = self.service.execute_tool(
+            "ui_focus_window", {"window": "chrome"},
+            command="computer_mission:focus_browser", task_id="computer-mission")
+        if not result.get("ok"):
+            return {"ok": False, "error": "CHROME_FOCUS_GUARD_FAILED"}
+        active = self.service.execute_tool(
+            "ui_active_window", {}, command="computer_mission:focus_browser",
+            task_id="computer-mission")
+        data = active.get("result") if isinstance(active.get("result"), dict) else active
+        process = str(data.get("process_name") or "").casefold()
+        if process != "chrome.exe":
+            return {"ok": False, "error": "NON_CHROME_BROWSER_DETECTED",
+                    "window": data}
+        return {"ok": True, "focused": True, "browser_process": "chrome.exe",
+                "window": data, "verification": "chrome_window_focus_guard"}
 
     def _observe_browser(self, mission, step):
         health = self.service.execute_tool(
@@ -444,13 +462,31 @@ class ComputerMissionExecutor:
             task_id=mission.mission_id)
         if not health.get("ok") or not health.get("started"):
             return {"ok": False, "error": "BROWSER_SESSION_NOT_STARTED"}
+        if str(health.get("browser_provider") or health.get("provider") or "").casefold() != "chrome":
+            return {"ok": False, "error": "NON_CHROME_BROWSER_DETECTED"}
         active = self.service.execute_tool(
             "ui_active_window", {}, command="computer_mission:observe_browser",
             task_id=mission.mission_id)
         data = active.get("result") if isinstance(active.get("result"), dict) else active
         process = str(data.get("process_name") or "").casefold()
-        if not any(name in process for name in ("msedge", "chrome", "chromium", "firefox")):
-            return {"ok": False, "error": "CORRECT_BROWSER_WINDOW_NOT_FOCUSED"}
+        if process != "chrome.exe":
+            return {"ok": False, "error": "NON_CHROME_BROWSER_DETECTED",
+                    "window": data}
+        pid = int(data.get("pid") or 0)
+        window_id = int(data.get("handle") or 0)
+        session_pid = int(health.get("process_id") or 0)
+        if session_pid and pid and session_pid != pid:
+            return {"ok": False, "error": "CHROME_WINDOW_PROCESS_MISMATCH",
+                    "window": data, "session_process_id": session_pid}
+        if self.service.registry.get("browser_record_window") is not None:
+            recorded = self.service.execute_tool(
+                "browser_record_window", {"pid": pid, "window_id": window_id},
+                command="computer_mission:observe_browser", task_id=mission.mission_id)
+            if not recorded.get("ok"):
+                return {"ok": False, "error": "CHROME_WINDOW_IDENTITY_UNAVAILABLE"}
+            health = self.service.execute_tool(
+                "browser_health", {}, command="computer_mission:observe_browser",
+                task_id=mission.mission_id)
         state_id = health.get("page_state_id")
         previous = mission.result.get("browser_page_state_id")
         if step.expected_state.get("page_changed") and previous is not None and state_id == previous:
@@ -458,64 +494,186 @@ class ComputerMissionExecutor:
         mission.result["browser_page_state_id"] = state_id
         mission.result["browser_url"] = health.get("current_url", "")
         mission.result["browser_title"] = health.get("page_title", "")
+        mission.result["browser_provider"] = "chrome"
+        mission.result["chrome_process_id"] = pid
+        mission.result["chrome_window_id"] = window_id
         return {"ok": True, "verified": True,
                 "verification": "browser_window_and_session_state",
                 "window": data, "health": health}
 
-    def _ground_search_field(self, mission):
-        result = self.service.execute_tool(
-            "browser_get_elements", {}, command="computer_mission:ground_search_field",
-            task_id=mission.mission_id)
-        elements = list(result.get("elements") or [])
-        popup_terms = ("aceitar", "rejeitar", "accept", "reject", "consent")
-        popup = [item for item in elements if any(
-            term in " ".join(str(item.get(key) or "").casefold()
-                              for key in ("text", "aria_label", "placeholder"))
-            for term in popup_terms)]
-        if popup:
-            return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
-                    "dialog": "browser_consent_or_privacy_popup"}
+    @staticmethod
+    def _search_field(elements):
         candidates = [item for item in elements
-                      if str(item.get("tag")) in {"input", "textarea"}]
+                      if item.get("visible", True) and
+                      str(item.get("tag")) in {"input", "textarea"}]
         search_terms = ("search", "busca", "query", "pesquisar")
         preferred = [item for item in candidates if any(
             term in " ".join(str(item.get(key) or "").casefold()
                               for key in ("aria_label", "placeholder", "text"))
             for term in search_terms)]
-        selected = (preferred or [item for item in candidates
-                                  if str(item.get("input_type") or "text").casefold() in
-                                  {"", "text", "search"} or
-                                  str(item.get("tag")) == "textarea"])
-        if not result.get("ok") or not selected:
-            return {"ok": False, "error": "SEARCH_FIELD_NOT_FOUND"}
-        ref = str(selected[0].get("ref") or "")
-        if not ref:
-            return {"ok": False, "error": "SEARCH_FIELD_UNGROUNDED"}
-        mission.result["search_ref"] = ref
-        return {"ok": True, "verified": True, "ref": ref,
-                "verification": "structured_search_field_grounding"}
+        return (preferred or [item for item in candidates
+                              if str(item.get("input_type") or "text").casefold() in
+                              {"", "text", "search"} or
+                              str(item.get("tag")) == "textarea"])
 
-    def _verify_browser_results(self, mission, step):
-        result = self.service.execute_tool(
-            "browser_get_page_info", {}, command="computer_mission:verify_results",
-            task_id=mission.mission_id)
-        page = result.get("page") or {}
-        links = list(page.get("links") or [])
-        page_url = str(page.get("url") or "")
-        page_text = str(page.get("text") or "").casefold()
-        blocked_markers = ("tráfego incomum", "unusual traffic", "captcha",
-                           "verify you are human", "verifique se é você",
-                           "detected automated traffic")
-        if any(marker in page_text for marker in blocked_markers):
+    @staticmethod
+    def _consent_target(elements):
+        safe_first = (
+            "reject all", "rejeitar tudo", "only necessary", "somente necessários",
+            "somente necessarios", "necessary only", "rejeitar", "reject",
+        )
+        benign_fallback = ("accept", "aceitar", "continue", "continuar", "ok")
+        candidates = [item for item in elements if item.get("visible", True) and
+                      str(item.get("tag")) in {"a", "button", "input"}]
+        for labels in (safe_first, benign_fallback):
+            for item in candidates:
+                label = " ".join(str(item.get(key) or "") for key in
+                                 ("text", "aria_label", "placeholder")).strip().casefold()
+                if label and any(label == target or target in label for target in labels):
+                    return str(item.get("ref") or ""), label
+        return "", ""
+
+    def _provider_health(self, mission, provider, status, block_reason=""):
+        entries = list(mission.result.get("provider_health") or [])
+        entries.append({"provider": provider, "attempt": len(entries) + 1,
+                        "status": status, "block_reason": block_reason})
+        mission.result["provider_health"] = entries[-MAX_SEARCH_PROVIDERS:]
+
+    def _advance_provider(self, mission, reason):
+        current_index = int(mission.result.get("provider_index", 0))
+        current = SEARCH_PROVIDER_ORDER[current_index]
+        self._provider_health(mission, current, "BLOCKED", reason)
+        next_index = current_index + 1
+        if next_index >= MAX_SEARCH_PROVIDERS:
+            return {"ok": False, "error": "SEARCH_PROVIDERS_EXHAUSTED",
+                    "barrier_type": reason}
+        provider = SEARCH_PROVIDER_ORDER[next_index]
+        mission.result["provider_index"] = next_index
+        mission.result["search_provider"] = provider
+        navigation = self.service.execute_tool(
+            "browser_navigate", {"url": SEARCH_PROVIDER_URLS[provider]},
+            command="computer_mission:provider_fallback", task_id=mission.mission_id)
+        if not navigation.get("ok"):
+            self._provider_health(mission, provider, "ERROR", navigation.get("error", ""))
+            return {"ok": False, "error": "SEARCH_PROVIDER_FALLBACK_FAILED"}
+        observed = self._observe_browser(
+            mission, ComputerMissionStep("provider-observe", "Observar provider de busca",
+                                         "observe_browser", expected_state={}))
+        if not observed.get("ok"):
+            return observed
+        self._provider_health(mission, provider, "AVAILABLE", "")
+        self.service.audit.add(
+            task_id=mission.mission_id,
+            command=f"computer_mission:{mission.mission_id}",
+            tool="browser_provider_fallback",
+            arguments={"from": current, "to": provider},
+            risk=mission.risk_level,
+            status="fallback",
+            result={"reason": reason, "browser": "chrome"},
+        )
+        return {"ok": True, "provider": provider, "verification": "chrome_provider_fallback"}
+
+    def _handle_cookie_consent(self, mission, page, elements):
+        ref, label = self._consent_target(elements)
+        if not ref:
             return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
-                    "dialog": "browser_anti_bot_or_verification"}
+                    "dialog": "unknown_cookie_consent"}
+        guard = self._observe_browser(
+            mission, ComputerMissionStep("consent-observe", "Validar janela antes do consentimento",
+                                         "observe_browser", expected_state={}))
+        if not guard.get("ok"):
+            return guard
+        clicked = self.service.execute_tool(
+            "browser_click", {"ref": ref, "selector": "", "text": ""},
+            command="computer_mission:cookie_consent", task_id=mission.mission_id)
+        if not clicked.get("ok"):
+            return {"ok": False, "error": "COOKIE_CONSENT_ACTION_FAILED"}
+        page_result = self.service.execute_tool(
+            "browser_get_page_info", {}, command="computer_mission:cookie_consent",
+            task_id=mission.mission_id)
+        elements_result = self.service.execute_tool(
+            "browser_get_elements", {}, command="computer_mission:cookie_consent",
+            task_id=mission.mission_id)
+        barrier = classify_page_barrier(page_result.get("page") or {},
+                                        elements_result.get("elements") or [])
+        self.service.audit.add(
+            task_id=mission.mission_id,
+            command=f"computer_mission:{mission.mission_id}",
+            tool="browser_cookie_consent",
+            arguments={"target": ref, "label": label},
+            risk=mission.risk_level,
+            status="dismissed" if barrier == "NONE" else "blocked",
+            result={"browser": "chrome", "barrier_type": barrier,
+                    "decision": "safe_consent_target"},
+        )
+        if barrier != "NONE":
+            return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
+                    "dialog": barrier}
+        return {"ok": True, "verified": True,
+                "verification": "cookie_consent_dismissed"}
+
+    def _prepare_search_provider(self, mission):
+        while True:
+            page_result = self.service.execute_tool(
+                "browser_get_page_info", {}, command="computer_mission:classify_barrier",
+                task_id=mission.mission_id)
+            elements_result = self.service.execute_tool(
+                "browser_get_elements", {}, command="computer_mission:ground_search_field",
+                task_id=mission.mission_id)
+            page = page_result.get("page") or {}
+            elements = list(elements_result.get("elements") or [])
+            barrier = classify_page_barrier(page, elements)
+            mission.result["barrier_type"] = barrier
+            if barrier == "COOKIE_CONSENT":
+                consent = self._handle_cookie_consent(mission, page, elements)
+                if not consent.get("ok"):
+                    return consent
+                continue
+            if barrier in {"UNKNOWN_BLOCKER", "LOGIN_REQUIRED", "AUTH_REQUIRED",
+                           "PRIVACY_CONSENT", "BENIGN_INTERSTITIAL"}:
+                return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
+                        "dialog": barrier}
+            if barrier in {"CAPTCHA", "ANTI_BOT", "BOT_VERIFICATION", "ACCESS_DENIED",
+                           "RATE_LIMITED", "NETWORK_ERROR", "PAGE_ERROR"}:
+                fallback = self._advance_provider(mission, barrier)
+                if not fallback.get("ok"):
+                    return fallback
+                continue
+            selected = self._search_field(elements)
+            if selected:
+                ref = str(selected[0].get("ref") or "")
+                if ref:
+                    mission.result["search_ref"] = ref
+                    return {"ok": True, "verified": True, "ref": ref,
+                            "verification": "structured_search_field_grounding"}
+            fallback = self._advance_provider(mission, "SEARCH_FIELD_NOT_FOUND")
+            if not fallback.get("ok"):
+                return {"ok": False, "error": "SEARCH_FIELD_NOT_FOUND"}
+
+    def _ground_search_field(self, mission):
+        return self._prepare_search_provider(mission)
+
+    def _extract_browser_results(self, mission, page, minimum=3):
+        page = page or {}
+        barrier = classify_page_barrier(page, page.get("interactive"))
+        if barrier != "NONE":
+            return {"ok": False, "barrier_type": barrier, "titles": [], "source_urls": []}
+        links = [link for link in list(page.get("links") or [])
+                 if link.get("visible", True) and link.get("result_candidate")]
+        page_url = str(page.get("url") or "")
         try:
             page_host = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(page_url).netloc
         except Exception:
             page_host = ""
-        excluded = {"images", "videos", "maps", "news", "shopping", "sign in", "more"}
-        titles = []
-        sources = []
+        query = str(mission.result.get("search_query") or "").casefold()
+        excluded = {"images", "videos", "maps", "news", "shopping", "sign in", "more",
+                    "aceitar", "rejeitar", "privacy policy", "política de privacidade"}
+        selected: dict[str, tuple[str, str]] = {}
+
+        def title_score(value):
+            lowered = value.casefold()
+            return (0 if "›" in value or value.startswith("http") else 100) + min(len(value), 120)
+
         for link in links:
             title = " ".join(str(link.get("text") or "").split())
             href = str(link.get("href") or "")
@@ -523,22 +681,107 @@ class ComputerMissionExecutor:
                 host = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(href).netloc
             except Exception:
                 host = ""
-            if (len(title) < 3 or title.casefold() in excluded or
+            lowered = title.casefold()
+            if (len(title) < 3 or lowered in excluded or
+                    any(marker in lowered for marker in ("sponsored", "patrocinado", "anúncio", "anuncio")) or
                     not href.startswith(("http://", "https://")) or host == page_host):
                 continue
-            if title not in titles:
-                titles.append(title)
-                sources.append(href)
-            if len(titles) >= int(step.expected_state.get("minimum", 3)):
+            normalized_href = href.rstrip("/")
+            previous = selected.get(normalized_href)
+            if previous is None or title_score(title) > title_score(previous[0]):
+                selected[normalized_href] = (title, href)
+            if len(selected) >= int(minimum):
                 break
-        ok = bool(result.get("ok")) and len(titles) >= 3
-        if ok:
-            mission.result.update({"titles": titles[:3], "source_urls": sources[:3],
+        titles = [item[0] for item in selected.values()]
+        sources = [item[1] for item in selected.values()]
+        page_text = " ".join(str(page.get(key) or "") for key in
+                             ("url", "title", "text", "headings")).casefold()
+        query_present = not query or query in page_text or query.replace(" ", "+") in page_url.casefold()
+        ok = query_present and len(titles) >= int(minimum)
+        return {"ok": ok, "barrier_type": "NONE", "titles": titles[:minimum],
+                "source_urls": sources[:minimum],
+                "result_page_confirmed": ok, "visible_results_read": bool(links)}
+
+    def _fallback_search_and_extract(self, mission, step):
+        for _ in range(MAX_SEARCH_PROVIDERS):
+            prepared = self._prepare_search_provider(mission)
+            if not prepared.get("ok"):
+                return prepared
+            search = self.service.execute_tool(
+                "browser_search", {"query": mission.result["search_query"],
+                                    "ref": mission.result.get("search_ref", "")},
+                command="computer_mission:provider_fallback_search",
+                task_id=mission.mission_id)
+            if not search.get("ok"):
+                fallback = self._advance_provider(mission, search.get("error", "SEARCH_FAILED"))
+                if fallback.get("ok"):
+                    continue
+                return fallback
+            observed = self._observe_browser(
+                mission, ComputerMissionStep("fallback-observe", "Observar resultados do provider",
+                                             "observe_browser", expected_state={"page_changed": True}))
+            if not observed.get("ok"):
+                return observed
+            self.service.execute_tool(
+                "browser_wait_for_results", {"timeout_ms": 10000},
+                command="computer_mission:wait_fallback_results",
+                task_id=mission.mission_id)
+            page_result = self.service.execute_tool(
+                "browser_get_page_info", {}, command="computer_mission:fallback_results",
+                task_id=mission.mission_id)
+            extracted = self._extract_browser_results(
+                mission, page_result.get("page") or {}, minimum=3)
+            if extracted.get("ok"):
+                mission.result.update({
+                    "titles": extracted["titles"],
+                    "source_urls": extracted["source_urls"],
+                    "result_page_confirmed": True,
+                    "visible_results_read": True,
+                    "page_title": (page_result.get("page") or {}).get("title", ""),
+                    "page_url": (page_result.get("page") or {}).get("url", ""),
+                })
+                return {"ok": True, "verified": True,
+                        "verification": "fallback_result_page_confirmed"}
+            barrier = extracted.get("barrier_type") or "SEARCH_RESULTS_NOT_CONFIRMED"
+            fallback = self._advance_provider(mission, barrier)
+            if not fallback.get("ok"):
+                return {"ok": False, "error": "SEARCH_PROVIDERS_EXHAUSTED",
+                        "barrier_type": barrier}
+        return {"ok": False, "error": "SEARCH_PROVIDERS_EXHAUSTED"}
+
+    def _verify_browser_results(self, mission, step):
+        self.service.execute_tool(
+            "browser_wait_for_results", {"timeout_ms": 10000},
+            command="computer_mission:wait_results",
+            task_id=mission.mission_id)
+        result = self.service.execute_tool(
+            "browser_get_page_info", {}, command="computer_mission:verify_results",
+            task_id=mission.mission_id)
+        page = result.get("page") or {}
+        extracted = self._extract_browser_results(
+            mission, page, minimum=int(step.expected_state.get("minimum", 3)))
+        if extracted.get("ok"):
+            titles = extracted["titles"]
+            sources = extracted["source_urls"]
+            mission.result.update({"titles": titles, "source_urls": sources,
                                    "page_title": page.get("title", ""),
-                                   "page_url": page_url})
-        return {"ok": ok, "verified": ok, "titles": titles[:3],
-                "source_urls": sources[:3],
-                "error": "THREE_RESULTS_NOT_EXTRACTED" if not ok else ""}
+                                   "page_url": page.get("url", ""),
+                                   "result_page_confirmed": True,
+                                   "visible_results_read": True})
+            return {"ok": True, "verified": True, "titles": titles,
+                    "source_urls": sources, "verification": "result_page_confirmed"}
+        barrier = extracted.get("barrier_type") or "SEARCH_RESULTS_NOT_CONFIRMED"
+        if barrier in {"UNKNOWN_BLOCKER", "LOGIN_REQUIRED", "AUTH_REQUIRED",
+                       "PRIVACY_CONSENT", "BENIGN_INTERSTITIAL"}:
+            return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
+                    "dialog": barrier}
+        current_provider = SEARCH_PROVIDER_ORDER[int(mission.result.get("provider_index", 0))]
+        self._provider_health(mission, current_provider, "BLOCKED", barrier)
+        fallback = self._advance_provider(mission, barrier)
+        if fallback.get("ok"):
+            return self._fallback_search_and_extract(mission, step)
+        return {"ok": False, "error": "SEARCH_PROVIDERS_EXHAUSTED",
+                "barrier_type": barrier}
 
     def _observe_window(self, step):
         result = self.service.execute_tool("ui_active_window", {},

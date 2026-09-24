@@ -187,33 +187,40 @@ The real mission `Abra o Bloco de Notas, escreva Golden Jarvis funcionando, salv
 - `PATH_NOT_FOUND` is fail-closed, audited, bounded, and can dismiss only an exactly matched Windows path-error dialog before re-resolving the target.
 - Do not touch `device_registry.json`; do not push.
 
-## Computer Use 4D Browser Use
+## Computer Use 4D.1 Browser Use
 
 Date: 2026-09-23
 
-Status: PARTIAL/BLOCKED. The implementation uses the existing Jarvis singleton and mission
-stack. It does not create a second planner, executor, SecurityManager, ToolRegistry, browser
-core, or AuditLog.
+Status: REAL VALIDATION PASS. The implementation uses the existing Jarvis singleton and
+mission stack. It does not create a second planner, executor, SecurityManager, ToolRegistry,
+browser core, or AuditLog.
 
 Implemented and regression-tested:
 
-- visible Edge/Chromium provider selection without hardcoded browser installation paths;
+- visible Google Chrome provider resolution without hardcoded browser installation paths;
+- explicit fail-closed rejection of visible non-Chrome providers;
+- bounded Google -> Bing -> DuckDuckGo fallback inside the same Chrome session;
 - UIA browser-window focus guard and active-process validation;
 - structured DOM/ARIA search-field grounding, including `textarea` fields;
 - grounded search submission with bounded navigation/content wait;
 - page-state tracking, stale-result protection, result extraction, and audit events;
-- fail-closed handling for cookie consent and anti-bot/verification markers;
-- no CAPTCHA solving, consent clicking, or anti-bot bypass.
+- fail-closed handling for cookie/privacy/login/permission consent and anti-bot markers;
+- safe reject/only-necessary handling for benign cookie consent only;
+- no CAPTCHA solving, stealth, proxy, fingerprint or anti-bot bypass.
 
 Real validation:
 
-- Edge opened and the correct `msedge.exe` window was focused;
-- Bing's search field was grounded and navigation state was observed;
-- Bing then exposed a consent dialog (`Aceitar`, `Rejeitar`, `Mais opções`), while a prior
-  Google attempt exposed anti-bot verification;
-- the mission did not extract three valid result titles and remains BLOCKED pending a permitted
-  benign consent decision or another authorized result page.
+- Chrome opened and the correct `chrome.exe` window was focused for both missions;
+- `OpenAI` and `Python` searches completed after bounded in-session provider fallback;
+- each mission extracted three unique structured result URLs; the Python mission returned
+  three `python.org` titles;
+- Google anti-bot and Bing consent states were detected and audited without bypass.
+
+Test-count note: `172 passed + 30 subtests` is the historical 3D-focused collection.
+The current 4D-focused collection is reported separately (`101 passed, 1 skipped`); the
+full repository collection was previously observed as 1601 collected tests.
 
 Next action must remain within Browser Use 4D. Do not reopen OmniRoute/Groq/RTK work, do not
-touch `device_registry.json`, and do not push. If the user does not authorize the benign browser
-consent action, keep the phase partial/blocked rather than bypassing the barrier.
+touch `device_registry.json`, and do not push. Keep the phase partial/blocked if a future
+mission cannot obtain three valid organic results without user confirmation; never bypass a
+browser barrier.

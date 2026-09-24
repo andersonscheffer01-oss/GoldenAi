@@ -514,6 +514,10 @@ class JarvisService:
             Tool("browser_wait_for_navigation", "Aguarda mudança observável de navegação.",
                  self._browser_wait_for_navigation, Risk.LOW, timeout=20,
                  parameters={"timeout_ms": int}, category="browser"),
+            Tool("browser_wait_for_results", "Aguarda resultados visíveis e estruturados da página.",
+                 self._browser_wait_for_results, Risk.LOW, timeout=25,
+                 parameters={"timeout_ms": int}, category="browser",
+                 llm_enabled=False),
             Tool("browser_scroll", "Rola a página (down/up/top/bottom)",
                  self._browser_scroll, Risk.LOW, timeout=10,
                  parameters={"direction": str, "amount": int}, category="browser"),
@@ -528,6 +532,10 @@ class JarvisService:
                  Risk.LOW, timeout=10, category="browser"),
             Tool("browser_health", "Verifica status do navegador", self._browser_health,
                  Risk.LOW, timeout=5, category="browser"),
+            Tool("browser_record_window", "Registra a identidade UIA da janela Chrome",
+                 self._browser_record_window, Risk.LOW, timeout=5,
+                 parameters={"pid": int, "window_id": int}, category="browser",
+                 llm_enabled=False),
         ):
             if tool.name in self.FINAL_TOOLS:
                 tool = replace(tool, response_policy=ResponsePolicy.FINAL)
@@ -2111,7 +2119,13 @@ class JarvisService:
 
     def _browser_open(self, visible=False, provider="default"):
         from .browser import get_browser_thread
-        bt = get_browser_thread(headless=not bool(visible), provider=provider)
+        selected_provider = str(provider or "default").casefold()
+        if visible and selected_provider == "default":
+            selected_provider = "chrome"
+        if visible and selected_provider != "chrome":
+            return {"ok": False, "error": "NON_CHROME_BROWSER_DISABLED",
+                    "provider": selected_provider}
+        bt = get_browser_thread(headless=not bool(visible), provider=selected_provider)
         return bt.submit("start")
 
     def _browser_navigate(self, url=""):
@@ -2146,6 +2160,10 @@ class JarvisService:
         from .browser import get_browser_thread
         return get_browser_thread().submit("wait_for_navigation", timeout_ms=timeout_ms)
 
+    def _browser_wait_for_results(self, timeout_ms=10000):
+        from .browser import get_browser_thread
+        return get_browser_thread().submit("wait_for_results", timeout_ms=timeout_ms)
+
     def _browser_scroll(self, direction="down", amount=500):
         from .browser import get_browser_thread
         return get_browser_thread().submit("scroll", direction=direction, amount=amount)
@@ -2172,6 +2190,11 @@ class JarvisService:
     def _browser_health(self):
         from .browser import get_browser_thread
         return get_browser_thread().submit("health")
+
+    def _browser_record_window(self, pid=0, window_id=0):
+        from .browser import get_browser_thread
+        return get_browser_thread().submit("record_window_identity", process_id=pid,
+                                           window_id=window_id)
 
     # ═══════════════════════════════════════════════════════════════
     # HANDLERS — SCREENSHOT

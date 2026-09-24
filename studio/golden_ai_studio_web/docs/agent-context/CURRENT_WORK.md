@@ -115,3 +115,28 @@ Próximo: aguardar autorização; não iniciar M1.6.
   verification page. Neither CAPTCHA nor consent/verification barriers are bypassed.
 - The phase is not CLOSED because three valid result titles were not extracted from a
   permitted result page. The safe outcome is `USER_CONFIRMATION_REQUIRED`/blocked.
+
+## Computer Use 4D.1 — Chrome, Consent and Safe Provider Fallback
+
+**Date:** 2026-09-23
+**Status:** REAL VALIDATION PASS
+
+- `GOOGLE_CHROME` is the only visible browser provider. Edge, Firefox, Chromium,
+  Brave and Opera are disabled for this mission path; no non-Chrome fallback is used.
+- Public search fallback is bounded to Google -> Bing -> DuckDuckGo inside the same
+  visible Chrome session. Provider loops are prevented and a maximum of three providers
+  is enforced.
+- Benign cookie consent may use a grounded reject/only-necessary action through the
+  existing SecurityManager/UIA/DOM path. Notifications, location, camera, microphone,
+  password, default-browser prompts, login, privacy gates and unknown dialogs stop for
+  user confirmation.
+- CAPTCHA, Cloudflare, anti-bot verification, stealth, proxy and fingerprint bypass are
+  never attempted.
+- The result extractor waits for visible structured candidates, excludes navigation and
+  sponsored links, and deduplicates normalized URLs before accepting three results.
+- Real missions completed in Chrome for `OpenAI` and `Python`. Both validated a Chrome
+  process/window and returned three unique result URLs; the Python run returned three
+  `python.org` titles.
+- Focused Browser/Computer Use regression: 101 passed, 1 skipped. The historical
+  `172 passed + 30 subtests` count belongs to the prior 3D-focused collection; the
+  current focused 4D collection is separately reported.

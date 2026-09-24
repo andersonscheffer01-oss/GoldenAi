@@ -87,10 +87,13 @@ class FakeService:
 
 
 class FakeBrowserService:
-    def __init__(self, wrong_window=False, popup=False, anti_bot=False):
+    def __init__(self, wrong_window=False, popup=False, anti_bot=False, consent=False,
+                 unknown_consent=False):
         self.registry = FakeRegistry({
             "browser_open", "browser_navigate", "browser_health", "browser_get_elements",
-            "browser_search", "browser_get_page_info", "ui_active_window", "ui_focus_window",
+            "browser_search", "browser_get_page_info", "browser_click",
+            "browser_record_window", "browser_wait_for_results",
+            "ui_active_window", "ui_focus_window",
         })
         self.cancellation = CancellationToken()
         self.audit = SimpleNamespace(add=lambda **_kwargs: None)
@@ -99,6 +102,10 @@ class FakeBrowserService:
         self.wrong_window = wrong_window
         self.popup = popup
         self.anti_bot = anti_bot
+        self.consent = consent
+        self.unknown_consent = unknown_consent
+        self.provider = "google"
+        self.current_url = "https://www.google.com/"
 
     def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False):
         self.calls.append((name, dict(arguments), confirmed))
@@ -106,25 +113,35 @@ class FakeBrowserService:
             return {"ok": True, "started": True, "headless": False}
         if name == "browser_navigate":
             self.page_state_id += 1
-            return {"ok": True, "url": "https://www.google.com/", "title": "Google"}
+            self.current_url = arguments["url"]
+            self.provider = "bing" if "bing.com" in self.current_url else "duckduckgo" if "duckduckgo" in self.current_url else "google"
+            return {"ok": True, "url": self.current_url, "title": self.provider.title()}
         if name == "browser_health":
             return {"ok": True, "started": True, "headless": False,
-                    "current_url": "https://www.google.com/search?q=OpenAI",
-                    "page_title": "OpenAI - Google Search",
+                    "provider": "chrome", "browser_provider": "CHROME",
+                    "current_url": self.current_url,
+                    "page_title": "OpenAI - Search",
+                    "process_id": 100,
                     "page_state_id": self.page_state_id}
         if name == "ui_active_window":
             if self.wrong_window:
                 return {"ok": True, "found": True, "title": "Codex",
                         "process_name": "Codex.exe"}
-            return {"ok": True, "found": True, "title": "Google - Microsoft Edge",
-                    "process_name": "msedge.exe"}
+            return {"ok": True, "found": True, "title": "Google - Google Chrome",
+                    "process_name": "chrome.exe", "pid": 100, "handle": 200}
         if name == "ui_focus_window":
             return {"ok": False} if self.wrong_window else {"ok": True, "focused": True}
         if name == "browser_get_elements":
-            if self.popup:
+            if self.popup or self.unknown_consent or (self.consent and self.provider == "bing"):
+                if self.unknown_consent:
+                    return {"ok": True, "elements": [
+                        {"ref": "e2", "tag": "button", "text": "Permitir notificações"},
+                        {"ref": "e1", "tag": "textarea", "placeholder": "Pesquisar"},
+                    ]}
                 return {"ok": True, "elements": [
                     {"ref": "e2", "tag": "button", "text": "Aceitar"},
                     {"ref": "e3", "tag": "button", "text": "Rejeitar"},
+                    {"ref": "e1", "tag": "textarea", "placeholder": "Pesquisar"},
                 ]}
             return {"ok": True, "elements": [
                 {"ref": "e1", "tag": "input", "input_type": "text",
@@ -132,18 +149,35 @@ class FakeBrowserService:
             ]}
         if name == "browser_search":
             self.page_state_id += 1
+            self.current_url = f"https://{self.provider}.com/search?q=OpenAI"
             return {"ok": True, "navigation_changed": True,
-                    "url": "https://www.google.com/search?q=OpenAI",
+                    "url": self.current_url,
                     "title": "OpenAI - Google Search", "page_state_id": self.page_state_id}
+        if name == "browser_click":
+            if self.consent:
+                self.consent = False
+            return {"ok": True, "verified": True, "verification": "consent_target_clicked"}
+        if name == "browser_record_window":
+            return {"ok": True, "process_id": arguments.get("pid", 0),
+                    "window_id": arguments.get("window_id", 0)}
+        if name == "browser_wait_for_results":
+            return {"ok": True, "result_candidate_count": 3,
+                    "barrier_type": "NONE", "result_page_ready": True}
         if name == "browser_get_page_info":
             return {"ok": True, "page": {
-                "url": "https://www.google.com/search?q=OpenAI",
+                "url": self.current_url,
                 "title": "OpenAI - Google Search",
-                "text": "Verify you are human" if self.anti_bot else "",
+                "text": ("Verify you are human" if self.anti_bot and self.provider == "google"
+                          else "Cookies: Permitir notificações" if self.unknown_consent
+                          else "Cookies: Aceitar Rejeitar" if self.popup
+                          else "OpenAI search results"),
                 "links": [
-                    {"text": "OpenAI official", "href": "https://openai.com/"},
-                    {"text": "OpenAI API", "href": "https://platform.openai.com/"},
-                    {"text": "OpenAI Wikipedia", "href": "https://en.wikipedia.org/wiki/OpenAI"},
+                    {"text": "OpenAI official", "href": "https://openai.com/",
+                     "visible": True, "result_candidate": True},
+                    {"text": "OpenAI API", "href": "https://platform.openai.com/",
+                     "visible": True, "result_candidate": True},
+                    {"text": "OpenAI Wikipedia", "href": "https://en.wikipedia.org/wiki/OpenAI",
+                     "visible": True, "result_candidate": True},
                 ],
             }}
         return {"ok": False, "error": "unexpected_tool"}
@@ -171,6 +205,8 @@ def test_browser_planner_reuses_registered_browser_capabilities():
         "ground_search_field", "browser_search", "observe_browser",
         "browser_get_page_info", "verify_browser_results",
     ]
+    assert mission.steps[0].args["provider"] == "chrome"
+    assert mission.steps[1].args["url"] == "https://www.google.com"
 
 
 def test_browser_executor_grounds_search_and_extracts_three_titles():
@@ -192,11 +228,11 @@ def test_browser_executor_blocks_when_focus_guard_fails():
     result = executor.run(BROWSER_MISSION, task_id="browser-focus-test")
     assert result["ok"] is False
     assert result["mission"]["status"] == MissionStatus.BLOCKED.value
-    assert result["mission"]["error"] == "ACTION_LOOP_DETECTED"
+    assert result["mission"]["error"] == "CHROME_FOCUS_GUARD_FAILED"
 
 
 def test_browser_executor_stops_for_unexpected_consent_popup():
-    service = FakeBrowserService(popup=True)
+    service = FakeBrowserService(unknown_consent=True)
     executor = ComputerMissionExecutor(service)
     result = executor.run(BROWSER_MISSION, task_id="browser-popup-test")
     assert result["ok"] is False
@@ -204,14 +240,40 @@ def test_browser_executor_stops_for_unexpected_consent_popup():
     assert result["mission"]["error"] == "USER_CONFIRMATION_REQUIRED"
 
 
-def test_browser_executor_stops_for_anti_bot_verification():
+def test_browser_executor_falls_back_for_anti_bot_verification():
     service = FakeBrowserService(anti_bot=True)
     executor = ComputerMissionExecutor(service)
     result = executor.run(BROWSER_MISSION, task_id="browser-anti-bot-test")
 
-    assert result["ok"] is False
-    assert result["mission"]["status"] == MissionStatus.WAITING_CONFIRMATION.value
-    assert result["mission"]["error"] == "USER_CONFIRMATION_REQUIRED"
+    assert result["ok"] is True
+    assert result["mission"]["status"] == MissionStatus.COMPLETED.value
+    assert result["mission"]["result"]["search_provider"] == "bing"
+
+
+def test_browser_executor_rejects_cookie_consent_and_keeps_chrome():
+    service = FakeBrowserService(anti_bot=True, consent=True)
+    executor = ComputerMissionExecutor(service)
+    result = executor.run(BROWSER_MISSION, task_id="browser-consent-test")
+
+    assert result["ok"] is True
+    assert result["mission"]["status"] == MissionStatus.COMPLETED.value
+    assert result["mission"]["result"]["search_provider"] == "bing"
+    assert result["mission"]["result"]["result_count"] == 3
+    assert all(name != "ui_focus_window" or args.get("window") == "chrome"
+               for name, args, _ in service.calls)
+
+
+def test_browser_executor_falls_back_inside_chrome_after_anti_bot():
+    service = FakeBrowserService(anti_bot=True)
+    executor = ComputerMissionExecutor(service)
+    result = executor.run(BROWSER_MISSION, task_id="browser-fallback-test")
+
+    assert result["ok"] is True
+    assert result["mission"]["status"] == MissionStatus.COMPLETED.value
+    assert result["mission"]["result"]["search_provider"] == "bing"
+    assert result["mission"]["result"]["provider_health"]
+    assert all(args.get("provider") != "edge" for name, args, _ in service.calls
+               if name == "browser_open")
 
 
 def test_executor_runs_one_step_at_a_time_and_verifies_file(tmp_path):
