@@ -193,7 +193,7 @@ class FakeMultiAppService:
             "browser_search", "browser_get_page_info", "browser_click",
             "browser_record_window", "browser_wait_for_results", "ui_active_window",
             "ui_focus_window", "ui_focus_element", "ui_focus_editor", "ui_read_editor",
-            "ui_invoke_element", "ui_classify_dialog", "ui_list_elements", "open_program", "keyboard_type",
+            "ui_type_editor", "ui_invoke_element", "ui_classify_dialog", "ui_list_elements", "open_program", "keyboard_type",
             "keyboard_hotkey", "keyboard_press",
         })
         self.cancellation = CancellationToken()
@@ -288,6 +288,19 @@ class FakeMultiAppService:
                 "document_identity": self.editor_identity,
                 "content_state_id": "state-before",
             }, "text": self.editor_text}
+        if name == "ui_type_editor":
+            if self.wrong_window:
+                return {"ok": False, "reason": "process_mismatch"}
+            if self.confirm_keyboard and not confirmed:
+                return {"ok": True, "confirmation_required": True,
+                        "token": "multi-app-confirm-token"}
+            self.editor_text = str(arguments.get("text") or "")
+            self.typed.append(self.editor_text)
+            return {"ok": True, "verified": True,
+                    "verification": "uia_editor_typed_and_read",
+                    "editor": {"document_identity": self.editor_identity,
+                                "content_state_id": "state-after"},
+                    "text": self.editor_text}
         if name == "ui_read_editor":
             if self.wrong_window:
                 return {"ok": False, "found": False, "reason": "process_mismatch"}
@@ -355,8 +368,11 @@ class FakeMultiAppService:
                                      confirmed=True)
         assert token == "multi-app-confirm-token"
         self.confirm_keyboard = False
-        return self.execute_tool("keyboard_type", {"text":
-                                  "Versão atual do Python: Python 3.14.7"},
+        return self.execute_tool("ui_type_editor", {
+                                  "window": "notepad",
+                                  "expected_process": "notepad",
+                                  "text": "Versão atual do Python: Python 3.14.7",
+                                  "interval": 0.03},
                                  confirmed=True)
 
 

@@ -111,6 +111,45 @@ def test_focus_window_selects_requested_process_when_chrome_is_ambiguous(monkeyp
     assert focused == [202]
 
 
+def test_focus_window_restores_minimized_target_before_focus(monkeypatch):
+    root = _FakeWrapper("Sem título - Bloco de notas", "Window",
+                        (-32000, -32000, -31900, -31900), handle=303, pid=303)
+    restored = []
+    focused = []
+    root.restore = lambda: restored.append(True)
+    root.set_focus = lambda: focused.append(True)
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_window_exists", lambda _handle: True)
+    monkeypatch.setattr(uia, "_foreground_handle", lambda: 303)
+    monkeypatch.setattr(uia, "_process_name", lambda _pid: "notepad.exe")
+
+    result = uia.ui_focus_window("notepad")
+
+    assert result["ok"] is True
+    assert restored == [True]
+    assert focused == [True]
+
+
+def test_focus_window_uses_grounded_click_when_set_focus_loses_foreground(monkeypatch):
+    root = _FakeWrapper("Sem título - Bloco de notas", "Window",
+                        (0, 0, 800, 600), handle=304, pid=304)
+    focused = []
+    clicked = []
+    root.set_focus = lambda: focused.append(True)
+    root.click_input = lambda: clicked.append(True)
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_window_exists", lambda _handle: True)
+    monkeypatch.setattr(uia, "_process_name", lambda _pid: "notepad.exe")
+    active = iter([{"handle": 999}, {"handle": 304}])
+    monkeypatch.setattr(uia, "ui_active_window", lambda: next(active))
+
+    result = uia.ui_focus_window("notepad")
+
+    assert result["ok"] is True
+    assert focused == [True, True]
+    assert clicked == [True]
+
+
 def test_ui_find_element_and_bounds_validation(monkeypatch):
     _fake_tree(monkeypatch)
 
@@ -263,11 +302,13 @@ def test_ui_tools_are_read_only_and_use_canonical_security_manager(tmp_path):
     service = JarvisService(str(tmp_path))
     names = {"ui_active_window", "ui_find_element", "ui_list_elements",
              "ui_get_element_text", "ui_read_editor", "ui_focus_editor",
-             "ui_classify_dialog",
+             "ui_type_editor", "ui_classify_dialog",
              "hybrid_find_ui_target"}
 
     catalog_names = {item["name"] for item in service.registry.public_catalog()}
     assert names <= catalog_names
     assert service.registry.get("ui_active_window").risk == Risk.LOW
     assert service.registry.get("ui_find_element").confirmation is False
+    assert service.registry.get("ui_type_editor").risk == Risk.HIGH
+    assert service.registry.get("ui_type_editor").confirmation is True
     assert service.registry.get("hybrid_find_ui_target").confirmation is False

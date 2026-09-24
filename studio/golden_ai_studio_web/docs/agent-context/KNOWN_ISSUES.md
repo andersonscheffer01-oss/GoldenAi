@@ -15,11 +15,15 @@
   executor detects and audits these states, never solves CAPTCHA or bypasses anti-bot, and
   falls back only to the next bounded provider in the same visible Chrome session. Real
   OpenAI and Python missions completed through DuckDuckGo with three structured results.
-- Computer Use 6D real validation is intentionally partial at the Save As boundary. The mission
-  paused and resumed durably, completed Python and Ollama research, and verified the Notepad
-  summary, but `C:\Users\Anderson\Documents\resumo_pesquisa.txt` was not authorized or created.
-  A future continuation must obtain explicit authorization for that exact target and must not
-  auto-resume or write another path.
+- Computer Use 6D validation was partial at the Save As boundary. The mission paused and
+  resumed durably, completed Python and Ollama research, and verified the Notepad summary.
+  The later 6D.1 continuation received authorization for the exact target, but external desktop
+  state closed/disappeared Notepad before the recovered document could be written, so
+  `C:\Users\Anderson\Documents\resumo_pesquisa.txt` remains absent.
 - The Codex CUA helper failed to initialize in this session because its kernel asset path was
   unavailable; the product mission was nevertheless validated through the canonical
   `JarvisService` UIA/Playwright path.
+- Computer Use 6D.1 real recovery remains blocked by external desktop state: the Notepad
+  process/window disappears when `TslGame.exe` (PUBG) retakes the foreground. The executor
+  classifies the change, invalidates stale targets, preserves the verified MissionContext and
+  fails closed before typing or saving. No `resumo_pesquisa.txt` was created.

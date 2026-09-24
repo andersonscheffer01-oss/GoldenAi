@@ -164,3 +164,21 @@ Próximo: aguardar autorização; não iniciar M1.6.
   `C:\Users\Anderson\Documents\resumo_pesquisa.txt` was not created because write authorization
   was not granted.
 - Focused 6D and related Computer Use tests: `149 passed, 1 skipped`.
+
+## Computer Use 6D.1 — World State Recovery
+
+**Date:** 2026-09-24
+**Status:** BLOCKED — recovery logic PASS; real save blocked by external app closure
+
+- Added explicit world-state classification and fail-closed recovery for `APP_CLOSED`,
+  `WINDOW_MISSING`, `DOCUMENT_MISSING`, `TARGET_CHANGED` and unknown in-flight actions.
+- Recovery validates the persisted `MissionContext` and official source provenance, invalidates
+  old window/document identities, opens a new mission-owned Notepad document through UIA, and
+  rebuilds the summary from persisted values. Python and Ollama were not re-researched.
+- Added an atomic confirmed `ui_type_editor` action and bounded native foreground activation
+  to close the focus race between separate focus and keyboard calls.
+- Real resume detected the closed/missing Notepad state and emitted recovery audit events, but
+  the external PUBG foreground caused Notepad to disappear again before `focus-notepad` could
+  be verified. The authorized target `C:\Users\Anderson\Documents\resumo_pesquisa.txt`
+  remains absent and no file was written.
+- Focused 6D.1/UIA regression: `59 passed`.

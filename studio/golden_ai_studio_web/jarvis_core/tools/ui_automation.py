@@ -196,6 +196,37 @@ def _window_record(wrapper: Any) -> dict[str, Any]:
     }
 
 
+def _activate_window_handle(handle: int) -> bool:
+    """Activate one already-grounded window handle through the Win32 focus path."""
+    if not handle:
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        foreground = int(user32.GetForegroundWindow() or 0)
+        current_thread = int(user32.GetCurrentThreadId())
+        target_pid = ctypes.c_ulong(0)
+        target_thread = int(user32.GetWindowThreadProcessId(
+            ctypes.c_void_p(handle), ctypes.byref(target_pid)) or 0)
+        foreground_pid = ctypes.c_ulong(0)
+        foreground_thread = int(user32.GetWindowThreadProcessId(
+            ctypes.c_void_p(foreground), ctypes.byref(foreground_pid)) or 0)
+        attached = []
+        for thread_id in (foreground_thread, target_thread):
+            if thread_id and thread_id != current_thread and thread_id not in attached:
+                if user32.AttachThreadInput(current_thread, thread_id, True):
+                    attached.append(thread_id)
+        try:
+            user32.ShowWindow(ctypes.c_void_p(handle), 9)  # SW_RESTORE
+            user32.BringWindowToTop(ctypes.c_void_p(handle))
+            user32.SetForegroundWindow(ctypes.c_void_p(handle))
+        finally:
+            for thread_id in reversed(attached):
+                user32.AttachThreadInput(current_thread, thread_id, False)
+        return int(user32.GetForegroundWindow() or 0) == int(handle)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
 def ui_active_window() -> dict[str, Any]:
     """Return metadata for the foreground window without reading its content."""
     try:
@@ -526,6 +557,113 @@ def ui_focus_editor(window: Optional[Any] = None,
                 "source": "windows_uia"}
 
 
+def ui_type_editor(window: Optional[Any] = None,
+                   expected_process: str = "", text: str = "",
+                   interval: float = 0.03) -> dict[str, Any]:
+    """Focus and write one mission-owned editor in one confirmed UIA action.
+
+    Keeping grounding and input in the same handler closes the foreground race
+    between a separate focus call and the keyboard action.  The value pattern
+    is preferred because it writes to the grounded control without depending
+    on whichever process wins the foreground immediately afterward.
+    """
+    try:
+        root = _window_wrapper(window)
+        if root is None:
+            return {"ok": False, "found": False, "reason": "window_not_found",
+                    "source": "windows_uia"}
+        window_info = _window_record(root)
+        wanted_process = str(expected_process or "").casefold()
+        actual_process = str(window_info.get("process_name") or "").casefold()
+        if wanted_process and wanted_process not in actual_process:
+            return {"ok": False, "found": False, "reason": "process_mismatch",
+                    "window": window_info, "source": "windows_uia"}
+        marker, _ = _path_not_found_dialog(root)
+        if marker is not None:
+            return {"ok": False, "found": False, "reason": "path_not_found_dialog",
+                    "path_error_dialog": True, "window": window_info,
+                    "source": "windows_uia"}
+        candidates = _editor_candidates(root, window_info)
+        if not candidates:
+            return {"ok": False, "found": False, "reason": "editor_not_found",
+                    "window": window_info, "source": "windows_uia"}
+        _, _, record, wrapper, current_text = candidates[0]
+        value = str(text or "")
+        if current_text and current_text != value:
+            return {"ok": False, "found": True, "reason": "editor_not_empty",
+                    "editor": _editor_record(record, current_text),
+                    "window": window_info, "source": "windows_uia"}
+
+        restore = getattr(root, "restore", None)
+        if callable(restore):
+            restore()
+        root_focus = getattr(root, "set_focus", None)
+        if callable(root_focus):
+            root_focus()
+        focus = getattr(wrapper, "set_focus", None)
+        if not callable(focus):
+            return {"ok": False, "found": True, "reason": "focus_unavailable",
+                    "editor": record, "window": window_info,
+                    "source": "windows_uia"}
+        focus()
+        click_input = getattr(wrapper, "click_input", None)
+        if callable(click_input):
+            click_input()
+
+        method = ""
+        # Modern Notepad exposes a UIA Value pattern on its Document control.
+        # Prefer it to foreground keyboard injection; it remains scoped to the
+        # freshly resolved editor and replaces the whole value atomically.
+        for method_name in ("set_edit_text", "set_value"):
+            setter = getattr(wrapper, method_name, None)
+            if not callable(setter):
+                continue
+            try:
+                setter(value)
+                method = f"uia_{method_name}"
+                break
+            except Exception:
+                continue
+
+        if not method:
+            type_keys = getattr(wrapper, "type_keys", None)
+            if callable(type_keys):
+                try:
+                    type_keys(value, with_spaces=True,
+                              pause=max(0.0, min(float(interval), 1.0)))
+                    method = "uia_type_keys"
+                except Exception:
+                    method = ""
+        if not method:
+            # Retain the existing Unicode-aware keyboard boundary as the last
+            # option, still inside this single confirmed UIA action.
+            from .computer_use_tools import keyboard_type
+            fallback = keyboard_type(value, interval=interval)
+            if not fallback.get("ok"):
+                return {**fallback, "editor": record, "window": window_info,
+                        "source": "windows_uia"}
+            method = str(fallback.get("input_method") or "keyboard")
+
+        time.sleep(0.05)
+        refreshed = ui_read_editor(window_info.get("handle"), expected_process)
+        if not refreshed.get("found"):
+            return {"ok": False, "found": True, "reason": "editor_reread_failed",
+                    "editor": record, "window": window_info,
+                    "input_method": method, "source": "windows_uia"}
+        actual = str(refreshed.get("text") or "")
+        if actual != value:
+            return {"ok": False, "found": True, "reason": "editor_content_mismatch",
+                    "editor": refreshed.get("editor"), "window": refreshed.get("window", window_info),
+                    "input_method": method, "source": "windows_uia"}
+        return {"ok": True, "found": True, "focused": True, "typed": True,
+                "text": actual, "editor": refreshed.get("editor"),
+                "window": refreshed.get("window", window_info),
+                "input_method": method, "verification": "uia_editor_typed_and_read"}
+    except Exception as exc:
+        return {"ok": False, "found": False, "reason": str(exc)[:200],
+                "source": "windows_uia"}
+
+
 def ui_classify_dialog(window: Optional[Any] = None) -> dict[str, Any]:
     """Classify a visible dialog without acting on it."""
     try:
@@ -604,13 +742,37 @@ def ui_focus_window(window: Optional[Any] = None, process_id: int = 0) -> dict[s
         if not handle or not _window_exists(handle):
             return {"ok": False, "found": False, "reason": "window_gone",
                     "source": "windows_uia"}
+        restore = getattr(wrapper, "restore", None)
+        if callable(restore):
+            restore()
         focus = getattr(wrapper, "set_focus", None)
         if not callable(focus):
             return {"ok": False, "found": True, "reason": "focus_unavailable",
                     "source": "windows_uia", "window": record}
-        focus()
-        refreshed = ui_active_window()
-        valid = int(refreshed.get("handle") or 0) == handle
+        refreshed = {}
+        valid = False
+        click_input = getattr(wrapper, "click_input", None)
+        for attempt in range(2):
+            focus()
+            refreshed = ui_active_window()
+            valid = int(refreshed.get("handle") or 0) == handle
+            if valid:
+                break
+            # Some desktop windows reject a background SetForegroundWindow
+            # while another app owns the foreground.  A grounded UIA click on
+            # the resolved window is the bounded fallback; no coordinates are
+            # invented and identity is still checked afterward.
+            if attempt == 0 and callable(click_input):
+                try:
+                    click_input()
+                except Exception:
+                    pass
+                time.sleep(0.05)
+            if not valid:
+                valid = _activate_window_handle(handle)
+                if valid:
+                    refreshed = ui_active_window()
+                    break
         return {"ok": valid, "found": True, "focused": valid,
                 "window": refreshed if valid else record,
                 "source": "windows_uia",
@@ -839,6 +1001,12 @@ def _ui_focus_editor_tool(window: Optional[Any] = None,
     return ui_focus_editor(window, expected_process)
 
 
+def _ui_type_editor_tool(window: Optional[Any] = None,
+                         expected_process: str = "", text: str = "",
+                         interval: float = 0.03):
+    return ui_type_editor(window, expected_process, text, interval)
+
+
 def _ui_classify_dialog_tool(window: Optional[Any] = None):
     return ui_classify_dialog(window)
 
@@ -888,6 +1056,11 @@ UI_AUTOMATION_TOOLS = (
          _ui_focus_editor_tool, Risk.MEDIUM,
          parameters={"window": str, "expected_process": str},
          category="computer_use"),
+    Tool("ui_type_editor", "Resolve, foca e escreve em um editor UIA em uma ação atômica.",
+         _ui_type_editor_tool, Risk.HIGH, confirmation=True,
+         parameters={"window": str, "expected_process": str,
+                     "text": str, "interval": float},
+         category="computer_use"),
     Tool("ui_classify_dialog", "Classifica diálogos visíveis sem executar ações.",
          _ui_classify_dialog_tool, Risk.LOW,
          parameters={"window": str}, category="computer_use"),
@@ -916,6 +1089,7 @@ __all__ = [
     "UI_AUTOMATION_TOOLS", "ui_active_window", "ui_find_element",
     "ui_list_elements", "ui_get_element_text", "validate_ui_target",
     "ui_read_editor", "ui_focus_editor", "ui_classify_dialog",
+    "ui_type_editor",
     "ui_focus_window", "ui_focus_element", "ui_dismiss_path_not_found",
     "ui_invoke_element", "hybrid_find_ui_target",
 ]

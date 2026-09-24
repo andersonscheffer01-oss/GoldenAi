@@ -45,3 +45,13 @@ A missão real pausou em `CHECKPOINT_PYTHON_DONE`, retomou sem reexecutar Python
 pesquisa de Ollama e a transferência para o Notepad, e parou em `open-save-dialog` porque a
 escrita de `resumo_pesquisa.txt` não foi autorizada. O caminho não foi criado; qualquer
 continuação requer autorização explícita para o alvo exato.
+
+## 2026-09-24 — 6D.1 recupera estado externo sem reutilizar alvos
+
+O fechamento inesperado do aplicativo é classificado antes de qualquer retry. Quando contexto,
+proveniência e alvo autorizado continuam válidos, a recuperação invalida handles/documentos
+anteriores, abre uma nova superfície UIA pertencente à missão e reconstrói o conteúdo a partir
+do `MissionContext`; pesquisa web não é executada novamente. A escrita usa `ui_type_editor`,
+uma ação única, confirmada e protegida pelo `SecurityManager`, para evitar a corrida entre foco
+e teclado. A validação real desta sessão permaneceu BLOCKED porque o Notepad desapareceu quando
+o PUBG retomou o foreground; nenhum arquivo foi criado.

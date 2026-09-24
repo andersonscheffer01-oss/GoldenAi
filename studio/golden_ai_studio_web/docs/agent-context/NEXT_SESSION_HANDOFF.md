@@ -245,10 +245,33 @@ Real mission state:
 - Final state: `WAITING_CONFIRMATION` at `open-save-dialog`.
 - Target: `C:\Users\Anderson\Documents\resumo_pesquisa.txt`; it does not exist.
 
-Do not resume automatically. The next action requires explicit authorization for that exact
-file before Save As may continue. Do not touch `device_registry.json`, build/dist/runtime
-artifacts, or push. The 6D phase remains `PARTIAL` until the authorized save and direct
+This was the pre-6D.1 checkpoint state. Authorization for that exact file was subsequently
+received, but the 6D.1 recovery attempt was blocked when external desktop state closed/disappeared
+Notepad. Do not write another path. Do not touch `device_registry.json`, build/dist/runtime
+artifacts, or push. The phase remains `PARTIAL/BLOCKED` until the authorized save and direct
 filesystem verification are completed.
 
 Focused result: `149 passed, 1 skipped`. The historical full-suite failures recorded before 6D
 remain baseline failures and must not be attributed to this phase without a new comparison.
+
+## Computer Use 6D.1 Handoff
+
+Date: 2026-09-24
+
+6D.1 code is in `jarvis_core/computer_use_mission.py` and
+`jarvis_core/tools/ui_automation.py`, with regression coverage in
+`tests/test_computer_use_6d.py` and `tests/test_ui_automation_grounding.py`.
+
+- The persisted mission is `7d2a9962-4a8c-49d8-8540-c7d2c7f860eb`.
+- `Python 3.14.7` and `Ollama` remain verified in the same MissionContext and were not
+  researched again.
+- Recovery classified the missing Notepad state as recoverable, invalidated old targets,
+  and recorded the recovery audit events. The authorized target remains
+  `C:\Users\Anderson\Documents\resumo_pesquisa.txt` and is absent.
+- A real retry remains blocked because Notepad disappears when PUBG takes the foreground;
+  no typing or Save As occurred after that block. Do not mark 6D.1 CLOSED until a stable
+  real desktop permits the new mission-owned document, exact summary verification and direct
+  filesystem save.
+- The new atomic `ui_type_editor` action is HIGH-risk and confirmation-protected. Do not bypass
+  SecurityManager, reuse stale window/document identities, or write another path.
+- Focused validation: `59 passed`; no push; do not touch `device_registry.json`.

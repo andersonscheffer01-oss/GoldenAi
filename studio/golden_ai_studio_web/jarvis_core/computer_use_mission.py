@@ -70,6 +70,17 @@ class ActionState(str, Enum):
     FAILED = "ACTION_FAILED"
 
 
+class WorldStateChangeType(str, Enum):
+    VALID = "WORLD_STATE_VALID"
+    APP_CLOSED = "APP_CLOSED"
+    WINDOW_MISSING = "WINDOW_MISSING"
+    DOCUMENT_MISSING = "DOCUMENT_MISSING"
+    PAGE_CHANGED = "PAGE_CHANGED"
+    FILE_STATE_CHANGED = "FILE_STATE_CHANGED"
+    TARGET_CHANGED = "TARGET_CHANGED"
+    UNKNOWN = "UNKNOWN_STATE_CHANGE"
+
+
 CHECKPOINT_SCHEMA_VERSION = 1
 _CHECKPOINT_RUNTIME_KEYS = {
     "bounds", "center", "handle", "window_id", "pid", "process_id",
@@ -578,6 +589,26 @@ class MissionCheckpointStore:
         except (TypeError, ValueError, json.JSONDecodeError):
             record["result"] = {}
         return record
+
+    def receipts_for_mission(self, mission_id: str) -> list[dict[str, Any]]:
+        if self.database is None:
+            return [dict(item) for (stored_mission, _), item in
+                    self._memory_receipts.items()
+                    if stored_mission == str(mission_id)]
+        self._ensure_schema()
+        with self.database.connect(rows=True) as db:
+            rows = db.execute(
+                "SELECT * FROM mission_action_receipts WHERE mission_id=?",
+                (str(mission_id),)).fetchall()
+        records = []
+        for row in rows:
+            record = dict(row)
+            try:
+                record["result"] = json.loads(record.get("result") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                record["result"] = {}
+            records.append(record)
+        return records
 
 
 class ComputerMissionPlanner:
@@ -1309,13 +1340,197 @@ class ComputerMissionExecutor:
                 ComputerMissionStep("resume-notepad-observe", "Revalidar Notepad",
                                     "observe_window", expected_state={"process": "notepad"}))
             if not observed.get("ok"):
-                return {"ok": False, "error": "WORLD_STATE_CHANGED", "detail": observed}
+                change = self._classify_world_state_change(mission, observed, task_id)
+                if change in {WorldStateChangeType.APP_CLOSED,
+                              WorldStateChangeType.WINDOW_MISSING,
+                              WorldStateChangeType.DOCUMENT_MISSING}:
+                    recovered = self._prepare_notepad_recovery(
+                        mission, change, observed)
+                    if recovered.get("ok"):
+                        return recovered
+                    return recovered
+                return {"ok": False, "error": "WORLD_STATE_CHANGED",
+                        "world_state_change_type": change.value,
+                        "detail": observed}
             if mission.context and mission.context.artifacts.get("mission_document_id"):
                 guard = self._assert_mission_document(mission, task_id)
                 if not guard.get("ok"):
-                    return {"ok": False, "error": "WORLD_STATE_CHANGED", "detail": guard}
-        return {"ok": True, "verification": "WORLD_STATE_VALID",
+                    change = self._classify_world_state_change(mission, guard, task_id)
+                    if change in {WorldStateChangeType.DOCUMENT_MISSING,
+                                  WorldStateChangeType.WINDOW_MISSING}:
+                        return self._prepare_notepad_recovery(
+                            mission, change, guard)
+                    return {"ok": False, "error": "WORLD_STATE_CHANGED",
+                            "world_state_change_type": change.value,
+                            "detail": guard}
+        return {"ok": True, "verification": WorldStateChangeType.VALID.value,
+                "world_state_change_type": WorldStateChangeType.VALID.value,
                 "current_app": current_app}
+
+    def _classify_world_state_change(self, mission, observed, task_id):
+        """Classify a missing Notepad target before deciding whether to recover."""
+        detail = dict(observed or {})
+        if detail.get("error") in {"DOCUMENT_NOT_FOUND", "DOCUMENT_IDENTITY_MISMATCH",
+                                    "DOCUMENT_WINDOW_MISMATCH"}:
+            return WorldStateChangeType.DOCUMENT_MISSING
+        probe = self.service.execute_tool(
+            "ui_read_editor", {"window": "notepad", "expected_process": "notepad"},
+            command=f"computer_mission:{mission.mission_id}:world_probe",
+            task_id=task_id)
+        if probe.get("path_error_dialog"):
+            return WorldStateChangeType.UNKNOWN
+        if probe.get("found") and probe.get("verified"):
+            return WorldStateChangeType.WINDOW_MISSING
+        reason = str(probe.get("reason") or detail.get("reason") or "").casefold()
+        if reason in {"window_not_found", "process_mismatch", "editor_not_found"}:
+            return WorldStateChangeType.APP_CLOSED
+        return WorldStateChangeType.UNKNOWN
+
+    def _recovery_context_validation(self, mission):
+        context = mission.context
+        if context is None:
+            return {"ok": False, "error": "MISSING_MISSION_CONTEXT"}
+        required = {
+            "python_version": ("python.org", ".python.org"),
+            "ollama_page_title": ("ollama.com", ".ollama.com"),
+        }
+        for key, hosts in required.items():
+            value, error = context.resolve(
+                key, mission_id=mission.mission_id,
+                current_step=mission.current_step)
+            if error or not value:
+                return {"ok": False, "error": "MISSING_MISSION_VARIABLE",
+                        "variable": key}
+            provenance = context.source_provenance.get(key) or {}
+            source_url = str(provenance.get("source_url") or "")
+            parsed = urlparse(source_url)
+            host = (parsed.hostname or "").casefold()
+            valid_hosts = {item.casefold().lstrip(".") for item in hosts}
+            if (provenance.get("confidence") != "verified" or
+                    provenance.get("invalidated") or
+                    not any(host == item or host.endswith("." + item)
+                            for item in valid_hosts)):
+                return {"ok": False, "error": "SOURCE_PROVENANCE_INVALID",
+                        "variable": key}
+        return {"ok": True, "verification": "MISSION_CONTEXT_AND_PROVENANCE_VALID"}
+
+    def _recovery_target_validation(self, mission):
+        filename = str(mission.result.get("filename") or "")
+        stored_path = Path(str(mission.result.get("target_path") or ""))
+        if not filename or not stored_path:
+            return {"ok": False, "error": "TARGET_CHANGED"}
+        resolved_path = self.planner.resolve_target_path(filename).resolve()
+        if resolved_path != stored_path.resolve():
+            return {"ok": False, "error": "TARGET_CHANGED",
+                    "expected_path": str(stored_path),
+                    "resolved_path": str(resolved_path)}
+        if resolved_path.exists():
+            return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
+                    "reason": "AUTHORIZED_TARGET_ALREADY_EXISTS",
+                    "path": str(resolved_path)}
+        return {"ok": True, "path": str(resolved_path)}
+
+    def _prepare_notepad_recovery(self, mission, change, detail):
+        context_check = self._recovery_context_validation(mission)
+        if not context_check.get("ok"):
+            return {"ok": False, "error": context_check["error"],
+                    "world_state_change_type": change.value,
+                    "world_state_change_classification": "BLOCKED",
+                    "detail": context_check}
+        target_check = self._recovery_target_validation(mission)
+        if not target_check.get("ok"):
+            classification = ("BLOCKED" if target_check.get("error") != "TARGET_CHANGED"
+                              else "REPLAN_REQUIRED")
+            return {"ok": False, "error": target_check["error"],
+                    "world_state_change_type": WorldStateChangeType.TARGET_CHANGED.value,
+                    "world_state_change_classification": classification,
+                    "detail": target_check}
+        dangerous = {
+            ActionState.IN_FLIGHT_UNKNOWN.value,
+        }
+        unknown = [receipt for receipt in self.persistence.receipts_for_mission(
+            mission.mission_id)
+                   if receipt.get("result_state") in dangerous and
+                   receipt.get("action_type") in {
+                       "keyboard_type", "keyboard_hotkey", "keyboard_press",
+                       "ui_invoke_element", "open_program"}]
+        if unknown:
+            return {"ok": False, "error": "ACTION_IN_FLIGHT_UNKNOWN",
+                    "world_state_change_type": change.value,
+                    "world_state_change_classification": "BLOCKED"}
+
+        context = mission.context
+        artifacts = context.artifacts
+        old_document_id = str(artifacts.get("mission_document_id") or "")
+        old_window_id = int(artifacts.get("mission_window_id") or 0)
+        artifacts["old_targets_invalidated"] = True
+        artifacts["old_document_target_invalidated"] = bool(old_document_id)
+        artifacts["old_window_target_invalidated"] = bool(old_window_id)
+        for key in (
+                "mission_document_id", "mission_window_id",
+                "mission_document_content_state_id", "mission_document_tabs",
+                "mission_document_created_by_mission", "pre_existing_document_ids",
+                "pre_existing_documents", "pre_existing_tabs", "editor_content_verified",
+                "editor_content_state_id", "rendered_text", "text_input_sent"):
+            artifacts.pop(key, None)
+        for key in ("mission_document_id", "mission_window_id", "document_ownership"):
+            mission.result.pop(key, None)
+        mission.result.update({
+            "old_window_target_invalidated": True,
+            "old_document_target_invalidated": True,
+            "world_state_change_type": change.value,
+            "world_state_change_classification": "RECOVERABLE",
+            "recovery_active": True,
+            "recovery_count": int(mission.result.get("recovery_count") or 0) + 1,
+        })
+        start = next((index for index, step in enumerate(mission.steps)
+                      if step.step_id == "handoff-to-notepad"), None)
+        if start is None:
+            return {"ok": False, "error": "RECOVERY_PLAN_UNAVAILABLE",
+                    "world_state_change_type": change.value,
+                    "world_state_change_classification": "BLOCKED"}
+        for step in mission.steps[start:]:
+            step.status = MissionStepStatus.PENDING
+            step.attempts = 0
+            step.error = ""
+            step.result = {}
+            if step.action_type in {"keyboard_type", "keyboard_hotkey", "keyboard_press",
+                                    "ui_invoke_element", "open_program"}:
+                self.persistence.save_receipt(
+                    mission_id=mission.mission_id, step_id=step.step_id,
+                    action_type=step.action_type, target=step.target,
+                    result_state=ActionState.NOT_STARTED,
+                    result={"recovery_reset": True})
+        new_document = next((step for step in mission.steps
+                             if step.step_id == "new-notepad-document"), None)
+        if new_document is not None:
+            # Recovery must create a fresh mission surface through a newly
+            # grounded UIA control; a global Ctrl+N can land in another app
+            # when the foreground changes between observation and action.
+            new_document.action_type = "ui_invoke_element"
+            new_document.target = "Adicionar Nova Guia"
+            new_document.args = {
+                "target": "Adicionar Nova Guia",
+                "control_type": "Button",
+                "window": "notepad",
+            }
+        mission.current_step = start
+        context.current_app = "chrome"
+        context.previous_app = "chrome"
+        context.updated_at = time.time()
+        self._audit_context_event(
+            mission, "APP_RECOVERY_STARTED", "recovering", {"ok": True},
+            app="notepad", previous_app="chrome", destination="notepad")
+        self._audit_mission(mission, "OLD_TARGETS_INVALIDATED", {
+            "old_window_target_invalidated": True,
+            "old_document_target_invalidated": True,
+            "world_state_change_type": change.value})
+        return {"ok": True, "verified": True,
+                "verification": "WORLD_STATE_CHANGED_RECOVERABLE",
+                "world_state_change_type": change.value,
+                "world_state_change_classification": "RECOVERABLE",
+                "recovery_required": True,
+                "detail": detail}
 
     def _dependencies_satisfied(self, mission, step):
         completed = {item.step_id for item in mission.steps
@@ -1562,6 +1777,19 @@ class ComputerMissionExecutor:
             step.result = self._safe_step_result(result)
             self._record_step_output(mission, step)
             self._audit_step(mission, step, result, "completed")
+            if mission.result.get("recovery_active"):
+                if step.step_id == "capture-mission-document":
+                    self._audit_context_event(
+                        mission, "MISSION_DOCUMENT_RECREATED", "recreated",
+                        result, app="notepad", destination="mission_document")
+                elif step.step_id == "verify-editor-pre-save":
+                    self._audit_context_event(
+                        mission, "EDITOR_REVERIFIED", "verified", result,
+                        app="notepad", destination="mission_document")
+                elif step.step_id == "checkpoint-text-verified":
+                    self._audit_context_event(
+                        mission, "APP_RECOVERY_COMPLETED", "completed",
+                        {"ok": True}, app="notepad", destination="save_stage")
             mission.current_step += 1
             mission.status = MissionStatus.OBSERVING
             checkpoint_name = str(step.args.get("name") or "") \
@@ -1632,6 +1860,14 @@ class ComputerMissionExecutor:
                 return guard
         if step.action_type in self._ACTION_TOOLS:
             guard = self._observe_window(step)
+            if (not guard.get("ok") and step.app == "notepad" and
+                    guard.get("error") == "CORRECT_WINDOW_NOT_FOCUSED"):
+                refocused = self.service.execute_tool(
+                    "ui_focus_window", {"window": "notepad"},
+                    command=f"computer_mission:{mission.mission_id}:refocus_notepad",
+                    task_id=task_id)
+                if refocused.get("ok"):
+                    guard = self._observe_window(step)
             if not guard.get("ok"):
                 return guard
         if (mission.result.get("multi_app_mission") and step.app == "notepad" and
@@ -1677,10 +1913,8 @@ class ComputerMissionExecutor:
         pre_existing = set(artifacts.get("pre_existing_document_ids") or [])
         if not pre_existing:
             return {"ok": False, "error": "DOCUMENT_NOT_FOUND"}
-        observed = self.service.execute_tool(
-            "ui_read_editor", {"window": "notepad", "expected_process": "notepad"},
-            command=f"computer_mission:{mission.mission_id}:preexisting_guard",
-            task_id=task_id)
+        observed = self._read_notepad_editor(
+            mission, task_id, "preexisting_guard")
         if observed.get("path_error_dialog"):
             return {"ok": False, "error": "PATH_NOT_FOUND", "path_error_dialog": True}
         if not observed.get("found") or not observed.get("verified"):
@@ -1883,21 +2117,31 @@ class ComputerMissionExecutor:
         opened = self.service.execute_tool(
             "open_program", {"name": step.args.get("name", "bloco de notas")},
             command=f"computer_mission:{mission.mission_id}", task_id=mission.mission_id)
+        if opened.get("confirmation_required"):
+            return opened
         if not opened.get("ok"):
             return {"ok": False, "error": "APP_HANDOFF_FAILED"}
         if self._cancel.is_set() or self.service.cancellation.is_cancelled():
             return self._cancelled_result()
-        focused = self.service.execute_tool(
-            "ui_focus_window", {"window": "notepad"},
-            command=f"computer_mission:{mission.mission_id}", task_id=mission.mission_id)
-        if not focused.get("ok"):
-            return {"ok": False, "error": "APP_HANDOFF_FAILED"}
-        active = self.service.execute_tool(
-            "ui_active_window", {}, command=f"computer_mission:{mission.mission_id}",
-            task_id=mission.mission_id)
-        data = active.get("result") if isinstance(active.get("result"), dict) else active
-        process = str(data.get("process_name") or "").casefold()
-        if process != "notepad.exe":
+        focused = {}
+        data = {}
+        for _ in range(8):
+            focused = self.service.execute_tool(
+                "ui_focus_window", {"window": "notepad"},
+                command=f"computer_mission:{mission.mission_id}",
+                task_id=mission.mission_id)
+            if focused.get("confirmation_required"):
+                return focused
+            active = self.service.execute_tool(
+                "ui_active_window", {},
+                command=f"computer_mission:{mission.mission_id}",
+                task_id=mission.mission_id)
+            data = active.get("result") if isinstance(active.get("result"), dict) else active
+            process = str(data.get("process_name") or "").casefold()
+            if focused.get("ok") and process == "notepad.exe":
+                break
+            time.sleep(0.2)
+        else:
             return {"ok": False, "error": "APP_IDENTITY_MISMATCH", "window": data}
         context.previous_app = previous
         context.current_app = "notepad"
@@ -1911,11 +2155,28 @@ class ComputerMissionExecutor:
             app="notepad", previous_app=previous, destination="notepad")
         return result
 
+    def _read_notepad_editor(self, mission, task_id, purpose):
+        """Re-ground the live editor across short foreground/UIA races."""
+        observed = {}
+        for attempt in range(4):
+            observed = self.service.execute_tool(
+                "ui_read_editor", {"window": "notepad", "expected_process": "notepad"},
+                command=f"computer_mission:{mission.mission_id}:{purpose}",
+                task_id=task_id)
+            if observed.get("found") and observed.get("verified"):
+                return observed
+            if observed.get("path_error_dialog"):
+                return observed
+            if attempt < 3:
+                self.service.execute_tool(
+                    "ui_focus_window", {"window": "notepad"},
+                    command=f"computer_mission:{mission.mission_id}:refocus_editor",
+                    task_id=task_id)
+                time.sleep(0.2)
+        return observed
+
     def _capture_document_state(self, mission, step, task_id):
-        observed = self.service.execute_tool(
-            "ui_read_editor", {"window": "notepad", "expected_process": "notepad"},
-            command=f"computer_mission:{mission.mission_id}:document_state",
-            task_id=task_id)
+        observed = self._read_notepad_editor(mission, task_id, "document_state")
         if observed.get("path_error_dialog"):
             return {"ok": False, "error": "PATH_NOT_FOUND", "path_error_dialog": True}
         if not observed.get("found") or not observed.get("verified"):
@@ -1974,10 +2235,7 @@ class ComputerMissionExecutor:
         mission_document_id = str(artifacts.get("mission_document_id") or "")
         if not mission_document_id:
             return {"ok": False, "error": "MISSION_DOCUMENT_NOT_REGISTERED"}
-        observed = self.service.execute_tool(
-            "ui_read_editor", {"window": "notepad", "expected_process": "notepad"},
-            command=f"computer_mission:{mission.mission_id}:document_guard",
-            task_id=task_id)
+        observed = self._read_notepad_editor(mission, task_id, "document_guard")
         if observed.get("path_error_dialog"):
             return {"ok": False, "error": "PATH_NOT_FOUND", "path_error_dialog": True}
         if not observed.get("found") or not observed.get("verified"):
@@ -2061,56 +2319,40 @@ class ComputerMissionExecutor:
             return ownership
         if self._cancel.is_set() or self.service.cancellation.is_cancelled():
             return self._cancelled_result()
-        focused = self.service.execute_tool(
-            "ui_focus_editor", {"window": "notepad", "expected_process": "notepad"},
-            command=f"computer_mission:{mission.mission_id}", task_id=task_id)
-        if not focused.get("ok"):
-            if focused.get("path_error_dialog"):
-                return {"ok": False, "error": "PATH_NOT_FOUND",
-                        "path_error_dialog": True}
-            reason = str(focused.get("reason") or "")
-            error = ("EDITOR_PROCESS_MISMATCH" if reason == "process_mismatch"
-                     else "EDITOR_NOT_FOUND")
-            return {"ok": False, "error": error, "editor": focused.get("editor")}
-        focused_id = str((focused.get("editor") or {}).get("document_identity") or "")
         mission_id = str(mission.context.artifacts.get("mission_document_id") or "")
-        if focused_id != mission_id:
-            return {"ok": False, "error": "DOCUMENT_IDENTITY_MISMATCH",
-                    "mission_document_id": mission_id,
-                    "current_document_id": focused_id}
-        if preconfirmed and preconfirmed[0] is step:
-            typed = preconfirmed[1]
-        else:
+        typed = (preconfirmed[1]
+                 if preconfirmed and preconfirmed[0] is step else None)
+        if typed is not None and not typed.get("ok"):
+            return typed
+        if typed is None:
             typed = self.service.execute_tool(
-                "keyboard_type", {"text": rendered, "interval": step.args.get("interval", 0.03)},
-                command=f"computer_mission:{mission.mission_id}", task_id=task_id)
+                "ui_type_editor", {
+                    "window": "notepad", "expected_process": "notepad",
+                    "text": rendered,
+                    "interval": step.args.get("interval", 0.03),
+                }, command=f"computer_mission:{mission.mission_id}", task_id=task_id)
         if typed.get("confirmation_required"):
             return typed
         if not typed.get("ok"):
-            return typed
+            reason = str(typed.get("reason") or typed.get("error") or "")
+            if typed.get("path_error_dialog"):
+                return {"ok": False, "error": "PATH_NOT_FOUND",
+                        "path_error_dialog": True}
+            error = ("EDITOR_PROCESS_MISMATCH" if reason == "process_mismatch"
+                     else "EDITOR_NOT_FOUND" if reason in {
+                         "window_not_found", "editor_not_found", "focus_unavailable",
+                         "editor_reread_failed"}
+                     else "EDITOR_CONTENT_MISMATCH" if reason == "editor_content_mismatch"
+                     else typed.get("error") or reason or "EDITOR_NOT_FOUND")
+            return {**typed, "ok": False, "error": error}
+        typed_id = str((typed.get("editor") or {}).get("document_identity") or
+                       typed.get("editor_identity") or "")
+        if typed_id != mission_id:
+            return {"ok": False, "error": "DOCUMENT_IDENTITY_MISMATCH",
+                    "mission_document_id": mission_id,
+                    "current_document_id": typed_id}
         mission.context.artifacts["text_input_sent"] = True
         verified = self._verify_editor_content(mission, step, task_id)
-        if not verified.get("ok"):
-            # One bounded recovery is allowed: refocus the freshly resolved
-            # editor and resend only after the observed content failed exact
-            # comparison.  Save As is never reached on a failed verification.
-            if verified.get("error") in {"EDITOR_CONTENT_EMPTY", "EDITOR_CONTENT_MISMATCH"}:
-                refocused = self.service.execute_tool(
-                    "ui_focus_editor",
-                    {"window": "notepad", "expected_process": "notepad"},
-                    command=f"computer_mission:{mission.mission_id}:editor_recovery",
-                    task_id=task_id)
-                if refocused.get("ok"):
-                    self.service.execute_tool(
-                        "keyboard_hotkey", {"keys": ["ctrl", "a"]},
-                        command=f"computer_mission:{mission.mission_id}:editor_recovery",
-                        task_id=task_id)
-                    retried = self.service.execute_tool(
-                        "keyboard_type", {"text": rendered, "interval": step.args.get("interval", 0.03)},
-                        command=f"computer_mission:{mission.mission_id}:editor_recovery",
-                        task_id=task_id)
-                    if retried.get("ok"):
-                        verified = self._verify_editor_content(mission, step, task_id)
         if not verified.get("ok"):
             return verified
         mission.context.artifacts["rendered_text"] = {
@@ -2141,10 +2383,7 @@ class ComputerMissionExecutor:
             mission, task_id, expected_text=rendered)
         if not ownership.get("ok"):
             return ownership
-        observed = self.service.execute_tool(
-            "ui_read_editor", {"window": "notepad", "expected_process": "notepad"},
-            command=f"computer_mission:{mission.mission_id}:read_editor",
-            task_id=task_id)
+        observed = self._read_notepad_editor(mission, task_id, "read_editor")
         if not observed.get("found") or not observed.get("verified"):
             if observed.get("path_error_dialog"):
                 return {"ok": False, "error": "PATH_NOT_FOUND",
@@ -2860,4 +3099,5 @@ __all__ = [
     "ComputerMission", "ComputerMissionExecutor", "ComputerMissionPlanner",
     "ComputerMissionStep", "MissionStatus", "MissionStepStatus",
     "MissionContext", "MissionCheckpointStore", "CheckpointState", "ActionState",
+    "WorldStateChangeType",
 ]

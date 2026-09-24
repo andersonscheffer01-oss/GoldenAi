@@ -16,6 +16,7 @@ from jarvis_core.computer_use_mission import (
     MissionContext,
     MissionStatus,
     MissionStepStatus,
+    WorldStateChangeType,
 )
 from jarvis_core.computer_use_mission import _resolved_result_url
 from jarvis_core.task_manager.database import TaskDatabase
@@ -318,3 +319,133 @@ def test_official_source_selection_resolves_search_provider_redirect():
         "a1aHR0cHM6Ly93d3cucHl0aG9uLm9yZy9kb3dubG9hZHMv&ntb=1"
     )
     assert _resolved_result_url(redirected) == "https://www.python.org/downloads/"
+
+
+def _recovery_mission(tmp_path):
+    names = {
+        "browser_open", "browser_navigate", "browser_health", "browser_get_elements",
+        "browser_search", "browser_get_page_info", "browser_click",
+        "browser_record_window", "browser_wait_for_results", "ui_active_window",
+        "ui_focus_window", "ui_focus_element", "ui_focus_editor", "ui_read_editor",
+        "ui_invoke_element", "ui_classify_dialog", "ui_list_elements", "open_program",
+        "keyboard_type", "keyboard_hotkey", "keyboard_press",
+    }
+    planner = ComputerMissionPlanner(Registry(*names), documents_dir=tmp_path)
+    mission = planner.plan(LONG_MISSION)
+    mission.context.current_app = "notepad"
+    mission.context.app_switches = 1
+    mission.context.store_variable(
+        "python_version", "Python 3.14.7", kind="OBSERVED_VALUE",
+        source_app="chrome", source_type="browser_result",
+        source_title="Python Release Python 3.14.7 | Python.org",
+        source_url="https://www.python.org/downloads/latest/",
+        source_state_id="python-state", valid_until_step=75,
+    )
+    mission.context.store_variable(
+        "ollama_page_title", "Ollama", kind="OBSERVED_VALUE",
+        source_app="chrome", source_type="browser_result",
+        source_title="Ollama", source_url="https://ollama.com/",
+        source_state_id="ollama-state", valid_until_step=75,
+    )
+    mission.context.artifacts.update({
+        "mission_document_id": "old-document",
+        "mission_window_id": 123,
+        "mission_document_content_state_id": "old-content",
+        "mission_document_created_by_mission": True,
+        "pre_existing_document_ids": ["old-preexisting"],
+        "rendered_text": {"value": "old text"},
+    })
+    mission.result["document_ownership"] = "OWNED_BY_CURRENT_MISSION"
+    mission.current_step = next(
+        index for index, step in enumerate(mission.steps)
+        if step.step_id == "open-save-dialog"
+    )
+    return mission, planner
+
+
+class ClosedNotepadProbe(ProbeService):
+    def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False):
+        if name == "ui_read_editor":
+            self.calls.append((name, dict(arguments), confirmed))
+            return {"found": False, "verified": False, "reason": "window_not_found"}
+        return super().execute_tool(name, arguments, command, task_id, confirmed)
+
+
+def test_app_closed_is_classified_as_recoverable_without_research_rerun(tmp_path):
+    service = ClosedNotepadProbe(TaskDatabase(tmp_path / "golden_tasks.db"))
+    mission, planner = _recovery_mission(tmp_path)
+    executor = ComputerMissionExecutor(service, planner)
+    executor.persistence.save_receipt(
+        mission_id=mission.mission_id, step_id="new-notepad-document",
+        action_type="keyboard_hotkey", target="notepad",
+        result_state=ActionState.VERIFIED,
+    )
+
+    change = executor._classify_world_state_change(
+        mission, {"ok": False, "error": "CORRECT_WINDOW_NOT_FOCUSED"},
+        mission.mission_id,
+    )
+    assert change is WorldStateChangeType.APP_CLOSED
+
+    recovered = executor._prepare_notepad_recovery(
+        mission, change, {"error": "CORRECT_WINDOW_NOT_FOCUSED"},
+    )
+    assert recovered["ok"] is True
+    assert recovered["world_state_change_classification"] == "RECOVERABLE"
+    assert mission.steps[mission.current_step].step_id == "handoff-to-notepad"
+    assert mission.result["old_window_target_invalidated"] is True
+    assert mission.result["old_document_target_invalidated"] is True
+    assert "mission_document_id" not in mission.context.artifacts
+    assert "python_version" in mission.context.variables
+    assert "ollama_page_title" in mission.context.variables
+    assert executor.persistence.receipt(
+        mission.mission_id, "new-notepad-document")["result_state"] == ActionState.NOT_STARTED.value
+    new_document = next(step for step in mission.steps
+                        if step.step_id == "new-notepad-document")
+    assert new_document.action_type == "ui_invoke_element"
+    assert new_document.args["target"] == "Adicionar Nova Guia"
+
+
+def test_recovery_rejects_existing_target_before_reopening_app(tmp_path):
+    service = ClosedNotepadProbe(TaskDatabase(tmp_path / "golden_tasks.db"))
+    mission, planner = _recovery_mission(tmp_path)
+    target = Path(mission.result["target_path"])
+    target.write_text("unexpected", encoding="utf-8")
+    executor = ComputerMissionExecutor(service, planner)
+
+    result = executor._prepare_notepad_recovery(
+        mission, WorldStateChangeType.APP_CLOSED, {"error": "window_not_found"},
+    )
+    assert result["ok"] is False
+    assert result["error"] == "USER_CONFIRMATION_REQUIRED"
+    assert service.calls == []
+
+
+def test_recovery_rejects_unknown_side_effect_receipt(tmp_path):
+    service = ClosedNotepadProbe(TaskDatabase(tmp_path / "golden_tasks.db"))
+    mission, planner = _recovery_mission(tmp_path)
+    executor = ComputerMissionExecutor(service, planner)
+    executor.persistence.save_receipt(
+        mission_id=mission.mission_id, step_id="confirm-save",
+        action_type="ui_invoke_element", target="save-button",
+        result_state=ActionState.IN_FLIGHT_UNKNOWN,
+    )
+
+    result = executor._prepare_notepad_recovery(
+        mission, WorldStateChangeType.APP_CLOSED, {"error": "window_not_found"},
+    )
+    assert result["ok"] is False
+    assert result["error"] == "ACTION_IN_FLIGHT_UNKNOWN"
+
+
+def test_recovery_rejects_invalid_provenance_without_research(tmp_path):
+    service = ClosedNotepadProbe(TaskDatabase(tmp_path / "golden_tasks.db"))
+    mission, planner = _recovery_mission(tmp_path)
+    mission.context.source_provenance["ollama_page_title"]["invalidated"] = True
+    executor = ComputerMissionExecutor(service, planner)
+
+    result = executor._prepare_notepad_recovery(
+        mission, WorldStateChangeType.APP_CLOSED, {"error": "window_not_found"},
+    )
+    assert result["ok"] is False
+    assert result["error"] == "SOURCE_PROVENANCE_INVALID"
