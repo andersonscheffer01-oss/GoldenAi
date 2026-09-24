@@ -217,8 +217,8 @@ Real validation:
 - Google anti-bot and Bing consent states were detected and audited without bypass.
 
 Test-count note: `172 passed + 30 subtests` is the historical 3D-focused collection.
-The current 4D-focused collection is reported separately (`101 passed, 1 skipped`); the
-full repository collection was previously observed as 1601 collected tests.
+The current expanded 4D-focused collection is reported separately (`181 passed, 1 skipped`);
+the current full repository collection is `1605 tests collected`.
 
 Next action must remain within Browser Use 4D. Do not reopen OmniRoute/Groq/RTK work, do not
 touch `device_registry.json`, and do not push. Keep the phase partial/blocked if a future

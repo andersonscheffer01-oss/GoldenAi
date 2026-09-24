@@ -137,6 +137,7 @@ Próximo: aguardar autorização; não iniciar M1.6.
 - Real missions completed in Chrome for `OpenAI` and `Python`. Both validated a Chrome
   process/window and returned three unique result URLs; the Python run returned three
   `python.org` titles.
-- Focused Browser/Computer Use regression: 101 passed, 1 skipped. The historical
+- Focused Browser/Computer Use regression: 181 passed, 1 skipped. The historical
   `172 passed + 30 subtests` count belongs to the prior 3D-focused collection; the
-  current focused 4D collection is separately reported.
+  current 4D-focused collection is separately reported from the full repository
+  collection (`1605 tests collected`).
