@@ -224,3 +224,31 @@ Next action must remain within Browser Use 4D. Do not reopen OmniRoute/Groq/RTK 
 touch `device_registry.json`, and do not push. Keep the phase partial/blocked if a future
 mission cannot obtain three valid organic results without user confirmation; never bypass a
 browser barrier.
+
+## Computer Use 6D Handoff
+
+Date: 2026-09-24
+
+The durable long-workflow implementation is in `jarvis_core/computer_use_mission.py` and
+`jarvis_core/service.py`, with focused coverage in `tests/test_computer_use_6d.py`.
+It reuses the existing `TaskDatabase` and persists logical checkpoints plus action receipts;
+it does not introduce a second planner, executor, memory store, or audit system.
+
+Real mission state:
+
+- Mission: `computer-use-6d-real-success-10`
+- Python checkpoint pause: PASS at `CHECKPOINT_PYTHON_DONE`.
+- Resume: PASS with a new executor and explicit checkpoint token; the Python step was not run again.
+- Python: `Python 3.14.7`, official source `https://www.python.org/downloads/latest/`.
+- Ollama: title `Ollama`, source `https://ollama.com/`.
+- Chrome -> Notepad handoff and summary verification: PASS.
+- Final state: `WAITING_CONFIRMATION` at `open-save-dialog`.
+- Target: `C:\Users\Anderson\Documents\resumo_pesquisa.txt`; it does not exist.
+
+Do not resume automatically. The next action requires explicit authorization for that exact
+file before Save As may continue. Do not touch `device_registry.json`, build/dist/runtime
+artifacts, or push. The 6D phase remains `PARTIAL` until the authorized save and direct
+filesystem verification are completed.
+
+Focused result: `149 passed, 1 skipped`. The historical full-suite failures recorded before 6D
+remain baseline failures and must not be attributed to this phase without a new comparison.

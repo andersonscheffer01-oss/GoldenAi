@@ -141,3 +141,26 @@ Próximo: aguardar autorização; não iniciar M1.6.
   `172 passed + 30 subtests` count belongs to the prior 3D-focused collection; the
   current 4D-focused collection is separately reported from the full repository
   collection (`1605 tests collected`).
+
+## Computer Use 6D — Durable Long Workflows
+
+**Date:** 2026-09-24
+**Status:** PARTIAL — real pause/resume passed; save intentionally stopped for confirmation
+
+- Existing `ComputerMissionPlanner`, `ComputerMissionExecutor`, `MissionContext`,
+  `TaskDatabase`, `SecurityManager`, and `AuditLog` were extended without a parallel workflow
+  engine or database.
+- Durable logical checkpoints and action receipts use the existing task database. Stored state
+  is schema-versioned, integrity-checked, context-revisioned, and excludes UI coordinates,
+  screenshots, cookies, browser tokens, PIDs, and other runtime-only fields.
+- Resume requires an explicit `mission_id:checkpoint_id` token, revalidates world state, honors
+  dependency contracts, skips verified side effects, and recovers unknown save state by checking
+  the filesystem before retrying.
+- Real mission `computer-use-6d-real-success-10` paused after Python extraction at
+  `CHECKPOINT_PYTHON_DONE`, then resumed with a new executor. Python was not re-executed.
+  Python value: `Python 3.14.7`; official source: `https://www.python.org/downloads/latest/`.
+- The resumed mission obtained the Ollama title `Ollama` from `https://ollama.com/`, handed off
+  Chrome to Notepad, verified the summary, and stopped at the Save As confirmation. The target
+  `C:\Users\Anderson\Documents\resumo_pesquisa.txt` was not created because write authorization
+  was not granted.
+- Focused 6D and related Computer Use tests: `149 passed, 1 skipped`.

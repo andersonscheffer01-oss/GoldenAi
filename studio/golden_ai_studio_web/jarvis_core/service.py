@@ -177,10 +177,10 @@ class JarvisService:
             self.learning_engine = None
             self.project_memory = None
         self._register_tools()
+        self.task_manager = TaskManager(base_dir)
         from .computer_use_mission import ComputerMissionExecutor
         self.computer_missions = ComputerMissionExecutor(self)
         self.orchestrator = CentralOrchestrator(self.registry, audit=self.audit)
-        self.task_manager = TaskManager(base_dir)
         self.runtime = JarvisRuntimeCoordinator(self.orchestrator, self,
                                                 task_manager=self.task_manager)
         self._closed = False
@@ -1016,13 +1016,27 @@ class JarvisService:
                                  "'tirar print', 'listar processos', 'volume baixo', etc."}
         return self.execute_tool(intent[0], intent[1], command, task_id)
 
-    def run_computer_mission(self, request, task_id="desktop"):
+    def run_computer_mission(self, request, task_id="desktop",
+                             authorized_overwrite_paths=None,
+                             pause_after_checkpoint=""):
         """Run a bounded Computer Use mission through the existing core."""
-        return self.computer_missions.run(request, task_id=task_id)
+        return self.computer_missions.run(
+            request, task_id=task_id,
+            authorized_overwrite_paths=authorized_overwrite_paths,
+            pause_after_checkpoint=pause_after_checkpoint)
 
     def resume_computer_mission(self, mission_id, token, task_id="desktop"):
         """Resume only the pending mission step after SecurityManager approval."""
         return self.computer_missions.resume(mission_id, token, task_id=task_id)
+
+    def resume_current_mission(self, mission_id, resume_token, task_id="desktop"):
+        """Resume a mission from its explicit durable checkpoint token."""
+        return self.computer_missions.resume_current_mission(
+            mission_id, resume_token, task_id=task_id)
+
+    def pause_current_mission(self, reason="operator_requested"):
+        """Request a safe pause at the next checkpoint boundary."""
+        return self.computer_missions.pause_current_mission(reason)
 
     def cancel_current_mission(self):
         """Cooperatively cancel the active mission between actions."""

@@ -15,3 +15,11 @@
   executor detects and audits these states, never solves CAPTCHA or bypasses anti-bot, and
   falls back only to the next bounded provider in the same visible Chrome session. Real
   OpenAI and Python missions completed through DuckDuckGo with three structured results.
+- Computer Use 6D real validation is intentionally partial at the Save As boundary. The mission
+  paused and resumed durably, completed Python and Ollama research, and verified the Notepad
+  summary, but `C:\Users\Anderson\Documents\resumo_pesquisa.txt` was not authorized or created.
+  A future continuation must obtain explicit authorization for that exact target and must not
+  auto-resume or write another path.
+- The Codex CUA helper failed to initialize in this session because its kernel asset path was
+  unavailable; the product mission was nevertheless validated through the canonical
+  `JarvisService` UIA/Playwright path.

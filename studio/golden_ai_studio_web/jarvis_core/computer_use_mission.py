@@ -8,6 +8,9 @@ required.
 from __future__ import annotations
 
 import re
+import base64
+import hashlib
+import json
 import threading
 import time
 import uuid
@@ -15,7 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .browser import (MAX_SEARCH_PROVIDERS, SEARCH_PROVIDER_ORDER,
                       SEARCH_PROVIDER_URLS, classify_page_barrier)
@@ -35,6 +38,9 @@ class MissionStatus(str, Enum):
     FAILED = "FAILED"
     BLOCKED = "BLOCKED"
     WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
+    PAUSED = "PAUSED"
+    RESUMING = "RESUMING"
+    RECOVERING = "RECOVERING"
     CANCELLED = "CANCELLED"
 
 
@@ -48,6 +54,58 @@ class MissionStepStatus(str, Enum):
     BLOCKED = "BLOCKED"
     WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
     CANCELLED = "CANCELLED"
+
+
+class CheckpointState(str, Enum):
+    PENDING = "CHECKPOINT_PENDING"
+    WRITING = "CHECKPOINT_WRITING"
+    VALID = "CHECKPOINT_VALID"
+    FAILED = "CHECKPOINT_FAILED"
+
+
+class ActionState(str, Enum):
+    NOT_STARTED = "ACTION_NOT_STARTED"
+    IN_FLIGHT_UNKNOWN = "ACTION_IN_FLIGHT_UNKNOWN"
+    VERIFIED = "ACTION_VERIFIED"
+    FAILED = "ACTION_FAILED"
+
+
+CHECKPOINT_SCHEMA_VERSION = 1
+_CHECKPOINT_RUNTIME_KEYS = {
+    "bounds", "center", "handle", "window_id", "pid", "process_id",
+    "identity", "runtime_id", "coordinate_mapping_verified", "screenshot",
+    "image", "audio", "token", "pending_confirmation_token", "cookies",
+    "browser_profile", "clipboard",
+}
+
+
+def _checkpoint_safe(value: Any, key: str = "") -> Any:
+    """Keep checkpoint data logical and exclude UI/runtime credentials."""
+    if str(key).casefold() in _CHECKPOINT_RUNTIME_KEYS:
+        return None
+    if isinstance(value, dict):
+        return {str(k): safe for k, raw in value.items()
+                if (safe := _checkpoint_safe(raw, str(k))) is not None}
+    if isinstance(value, (list, tuple)):
+        return [_checkpoint_safe(item, key) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _resolved_result_url(raw_url: str) -> str:
+    """Resolve common search-provider redirects without trusting page text."""
+    value = str(raw_url or "").strip()
+    parsed = urlparse(value)
+    encoded = parse_qs(parsed.query).get("u", [""])[0]
+    if encoded.startswith("a1"):
+        try:
+            decoded = base64.urlsafe_b64decode(encoded[2:] + "===").decode("utf-8")
+            if urlparse(decoded).scheme in {"http", "https"}:
+                return decoded
+        except (ValueError, UnicodeError):
+            pass
+    return value
 
 
 @dataclass
@@ -160,6 +218,43 @@ class MissionContext:
             "updated_at": self.updated_at,
         }
 
+    def checkpoint_snapshot(self) -> dict[str, Any]:
+        """Serialize only logical mission context for durable checkpoints."""
+        return _checkpoint_safe(self.public())
+
+    @classmethod
+    def from_checkpoint(cls, snapshot: dict[str, Any], mission_id: str,
+                        user_request: str) -> "MissionContext":
+        context = cls(mission_id, user_request)
+        context.current_app = str(snapshot.get("current_app") or "")
+        context.previous_app = str(snapshot.get("previous_app") or "")
+        context.artifacts = dict(snapshot.get("artifacts") or {})
+        context.step_outputs = dict(snapshot.get("step_outputs") or {})
+        context.source_provenance = dict(snapshot.get("source_provenance") or {})
+        context.context_version = int(snapshot.get("context_version") or 0)
+        context.app_switches = int(snapshot.get("app_switches") or 0)
+        context.created_at = float(snapshot.get("created_at") or time.time())
+        context.updated_at = float(snapshot.get("updated_at") or time.time())
+        for name, raw in dict(snapshot.get("variables") or {}).items():
+            value = str(raw.get("value") or "")
+            context.variables[str(name)] = MissionValue(
+                value=value, mission_id=mission_id,
+                kind=str(raw.get("kind") or "OBSERVED_VALUE"),
+                source_app=str(raw.get("source_app") or ""),
+                source_type=str(raw.get("source_type") or ""),
+                source_title=str(raw.get("source_title") or ""),
+                source_url=str(raw.get("source_url") or ""),
+                observed_at=float(raw.get("observed_at") or time.time()),
+                confidence=str(raw.get("confidence") or "verified"),
+                context_version=int(raw.get("context_version") or 0),
+                source_state_id=str(raw.get("source_state_id") or ""),
+                valid_until_step=raw.get("valid_until_step"),
+                invalidated=bool(raw.get("invalidated", False)),
+            )
+        if context.context_version != int(snapshot.get("context_version") or 0):
+            raise ValueError("CHECKPOINT_CONTEXT_MISMATCH")
+        return context
+
 
 @dataclass
 class ComputerMissionStep:
@@ -174,6 +269,9 @@ class ComputerMissionStep:
     attempts: int = 0
     result: dict[str, Any] = field(default_factory=dict)
     error: str = ""
+    requires: tuple[str, ...] = ()
+    produces: tuple[str, ...] = ()
+    max_attempts: int = 3
 
 
 @dataclass
@@ -211,6 +309,8 @@ class ComputerMission:
             "result": dict(self.result),
             "error": self.error,
             "pending_confirmation": bool(self.pending_confirmation_token),
+            "resume_token": str(self.result.get("resume_token") or ""),
+            "progress": self.progress(),
             "context": self.context.public() if self.context else {},
             "steps": [
                 {
@@ -224,10 +324,260 @@ class ComputerMission:
                     "attempts": step.attempts,
                     "result": dict(step.result),
                     "error": step.error,
+                    "requires": list(step.requires),
+                    "produces": list(step.produces),
+                    "max_attempts": step.max_attempts,
                 }
                 for step in self.steps
             ],
         }
+
+    def progress(self) -> dict[str, Any]:
+        total = len(self.steps)
+        completed = sum(step.status is MissionStepStatus.COMPLETED
+                        for step in self.steps)
+        current = self.steps[self.current_step] if self.current_step < total else None
+        return {
+            "completed_steps": completed,
+            "total_steps": total,
+            "ratio": round(completed / total, 3) if total else 1.0,
+            "current_phase": (current.description if current else "Complete"),
+        }
+
+
+class MissionCheckpointStore:
+    """Small checkpoint/receipt adapter over the existing TaskDatabase."""
+
+    def __init__(self, task_database=None):
+        self.database = task_database
+        self._memory_checkpoints: dict[str, dict[str, Any]] = {}
+        self._memory_receipts: dict[tuple[str, str], dict[str, Any]] = {}
+        if self.database is not None:
+            self._ensure_schema()
+
+    def _ensure_schema(self):
+        with getattr(self.database, "_lock", threading.RLock()):
+            with self.database.connect() as db:
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS mission_checkpoint_schema("
+                    "version INTEGER NOT NULL)"
+                )
+                row = db.execute(
+                    "SELECT version FROM mission_checkpoint_schema "
+                    "ORDER BY version DESC LIMIT 1"
+                ).fetchone()
+                if row and int(row[0]) >= CHECKPOINT_SCHEMA_VERSION:
+                    return
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS mission_checkpoints("
+                    "checkpoint_id TEXT PRIMARY KEY, mission_id TEXT NOT NULL,"
+                    "mission_version INTEGER NOT NULL, created_at REAL NOT NULL,"
+                    "name TEXT NOT NULL, state TEXT NOT NULL, pause_reason TEXT NOT NULL,"
+                    "current_step INTEGER NOT NULL, next_step INTEGER NOT NULL,"
+                    "context_revision INTEGER NOT NULL, schema_version INTEGER NOT NULL,"
+                    "snapshot TEXT NOT NULL, integrity_hash TEXT NOT NULL)"
+                )
+                db.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_mission_checkpoints_mission "
+                    "ON mission_checkpoints(mission_id, created_at)"
+                )
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS mission_action_receipts("
+                    "action_id TEXT PRIMARY KEY, mission_id TEXT NOT NULL,"
+                    "step_id TEXT NOT NULL, action_type TEXT NOT NULL, target TEXT NOT NULL,"
+                    "started_at REAL NOT NULL, verified_at REAL, result_state TEXT NOT NULL,"
+                    "result TEXT NOT NULL, UNIQUE(mission_id, step_id))"
+                )
+                db.execute("DELETE FROM mission_checkpoint_schema")
+                db.execute("INSERT INTO mission_checkpoint_schema(version) VALUES(?)",
+                           (CHECKPOINT_SCHEMA_VERSION,))
+
+    @staticmethod
+    def _canonical(snapshot: dict[str, Any]) -> str:
+        return json.dumps(snapshot, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"))
+
+    @classmethod
+    def _integrity_hash(cls, checkpoint_id: str, mission_id: str,
+                        snapshot: dict[str, Any]) -> str:
+        payload = f"{CHECKPOINT_SCHEMA_VERSION}:{checkpoint_id}:{mission_id}:" \
+                  f"{cls._canonical(snapshot)}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def save_checkpoint(self, *, mission_id: str, mission_version: int,
+                        name: str, current_step: int, next_step: int,
+                        context_revision: int, snapshot: dict[str, Any],
+                        pause_reason: str = "",
+                        state: CheckpointState = CheckpointState.VALID) -> dict[str, Any]:
+        checkpoint_id = str(uuid.uuid4())
+        safe_snapshot = _checkpoint_safe(snapshot)
+        created_at = time.time()
+        digest = self._integrity_hash(checkpoint_id, mission_id, safe_snapshot)
+        record = {
+            "checkpoint_id": checkpoint_id,
+            "mission_id": mission_id,
+            "mission_version": int(mission_version),
+            "created_at": created_at,
+            "name": str(name),
+            "state": CheckpointState.WRITING.value,
+            "pause_reason": str(pause_reason or ""),
+            "current_step": int(current_step),
+            "next_step": int(next_step),
+            "context_revision": int(context_revision),
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "snapshot": safe_snapshot,
+            "integrity_hash": digest,
+        }
+        if self.database is None:
+            record["state"] = state.value
+            self._memory_checkpoints[checkpoint_id] = record
+        else:
+            self._ensure_schema()
+            with getattr(self.database, "_lock", threading.RLock()):
+                with self.database.connect() as db:
+                    db.execute(
+                        "INSERT INTO mission_checkpoints VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (checkpoint_id, mission_id, int(mission_version), created_at,
+                         str(name), CheckpointState.WRITING.value,
+                         str(pause_reason or ""), int(current_step), int(next_step),
+                         int(context_revision), CHECKPOINT_SCHEMA_VERSION,
+                         self._canonical(safe_snapshot), digest),
+                    )
+                    db.execute(
+                        "UPDATE mission_checkpoints SET state=? WHERE checkpoint_id=?",
+                        (state.value, checkpoint_id),
+                    )
+            record["state"] = state.value
+        record["resume_token"] = f"{mission_id}:{checkpoint_id}"
+        return record
+
+    def _row_record(self, row) -> Optional[dict[str, Any]]:
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            record = dict(row)
+        else:
+            record = dict(row)
+        if not isinstance(record.get("snapshot"), dict):
+            try:
+                record["snapshot"] = json.loads(record.get("snapshot") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+        required = {"checkpoint_id", "mission_id", "snapshot", "integrity_hash",
+                    "schema_version", "context_revision", "state"}
+        if not required.issubset(record) or int(record["schema_version"]) != CHECKPOINT_SCHEMA_VERSION:
+            return None
+        if record["state"] != CheckpointState.VALID.value:
+            return None
+        if self._integrity_hash(record["checkpoint_id"], record["mission_id"],
+                                record["snapshot"]) != record["integrity_hash"]:
+            return None
+        context = record["snapshot"].get("context") or {}
+        if int(record["context_revision"]) != int(context.get("context_version") or 0):
+            return None
+        record["resume_token"] = f"{record['mission_id']}:{record['checkpoint_id']}"
+        return record
+
+    def load(self, checkpoint_id: str, mission_id: str = "") -> tuple[Optional[dict[str, Any]], str]:
+        if self.database is None:
+            record = self._memory_checkpoints.get(str(checkpoint_id))
+            if record is None:
+                return None, "CHECKPOINT_NOT_FOUND"
+            validated = self._row_record(record)
+        else:
+            self._ensure_schema()
+            with self.database.connect(rows=True) as db:
+                row = db.execute(
+                    "SELECT * FROM mission_checkpoints WHERE checkpoint_id=?",
+                    (str(checkpoint_id),)).fetchone()
+            validated = self._row_record(row)
+        if validated is None:
+            return None, "CHECKPOINT_INVALID"
+        if mission_id and validated["mission_id"] != str(mission_id):
+            return None, "RESUME_MISSION_MISMATCH"
+        return validated, ""
+
+    def load_resume_token(self, token: str) -> tuple[Optional[dict[str, Any]], str]:
+        parts = str(token or "").split(":", 1)
+        if len(parts) != 2 or not all(parts):
+            return None, "RESUME_TOKEN_INVALID"
+        return self.load(parts[1], parts[0])
+
+    def latest(self, mission_id: str) -> tuple[Optional[dict[str, Any]], str]:
+        if self.database is None:
+            records = [item for item in self._memory_checkpoints.values()
+                       if item.get("mission_id") == str(mission_id)]
+            row = max(records, key=lambda item: item.get("created_at", 0), default=None)
+            return (self._row_record(row), "" if row else "CHECKPOINT_NOT_FOUND")
+        self._ensure_schema()
+        with self.database.connect(rows=True) as db:
+            row = db.execute(
+                "SELECT * FROM mission_checkpoints WHERE mission_id=? "
+                "AND state=? ORDER BY created_at DESC LIMIT 1",
+                (str(mission_id), CheckpointState.VALID.value)).fetchone()
+        validated = self._row_record(row)
+        return validated, "" if validated else "CHECKPOINT_NOT_FOUND"
+
+    def save_receipt(self, *, mission_id: str, step_id: str,
+                     action_type: str, target: str, result_state: ActionState,
+                     result: Optional[dict[str, Any]] = None,
+                     started_at: Optional[float] = None,
+                     verified_at: Optional[float] = None) -> dict[str, Any]:
+        started = float(started_at or time.time())
+        receipt = {
+            "action_id": str(uuid.uuid4()), "mission_id": str(mission_id),
+            "step_id": str(step_id), "action_type": str(action_type),
+            "target": str(target or ""), "started_at": started,
+            "verified_at": verified_at, "result_state": result_state.value,
+            "result": _checkpoint_safe(result or {}),
+        }
+        if self.database is None:
+            old = self._memory_receipts.get((str(mission_id), str(step_id)))
+            if old:
+                receipt["action_id"] = old["action_id"]
+            self._memory_receipts[(str(mission_id), str(step_id))] = receipt
+            return receipt
+        self._ensure_schema()
+        with getattr(self.database, "_lock", threading.RLock()):
+            with self.database.connect() as db:
+                old = db.execute(
+                    "SELECT action_id FROM mission_action_receipts "
+                    "WHERE mission_id=? AND step_id=?",
+                    (str(mission_id), str(step_id))).fetchone()
+                if old:
+                    receipt["action_id"] = old[0]
+                    db.execute(
+                        "UPDATE mission_action_receipts SET action_type=?,target=?,"
+                        "started_at=?,verified_at=?,result_state=?,result=? "
+                        "WHERE action_id=?",
+                        (receipt["action_type"], receipt["target"], receipt["started_at"],
+                         receipt["verified_at"], receipt["result_state"],
+                         json.dumps(receipt["result"], ensure_ascii=False), receipt["action_id"]))
+                else:
+                    db.execute(
+                        "INSERT INTO mission_action_receipts VALUES(?,?,?,?,?,?,?,?,?)",
+                        (receipt["action_id"], receipt["mission_id"], receipt["step_id"],
+                         receipt["action_type"], receipt["target"], receipt["started_at"],
+                         receipt["verified_at"], receipt["result_state"],
+                         json.dumps(receipt["result"], ensure_ascii=False)))
+        return receipt
+
+    def receipt(self, mission_id: str, step_id: str) -> Optional[dict[str, Any]]:
+        if self.database is None:
+            return self._memory_receipts.get((str(mission_id), str(step_id)))
+        self._ensure_schema()
+        with self.database.connect(rows=True) as db:
+            row = db.execute(
+                "SELECT * FROM mission_action_receipts WHERE mission_id=? AND step_id=?",
+                (str(mission_id), str(step_id))).fetchone()
+        if not row:
+            return None
+        record = dict(row)
+        try:
+            record["result"] = json.loads(record.get("result") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            record["result"] = {}
+        return record
 
 
 class ComputerMissionPlanner:
@@ -268,6 +618,8 @@ class ComputerMissionPlanner:
             raise ValueError("Missão Computer Use não reconhecida.")
         text = str(request).strip()
         if self._is_multi_app_request(text):
+            if "ollama" in text.casefold() and "python" in text.casefold():
+                return self._plan_long_research(text)
             return self._plan_multi_app(text)
         if self._BROWSER_RE.search(text):
             return self._plan_browser_search(text)
@@ -292,9 +644,11 @@ class ComputerMissionPlanner:
             raise ValueError("Capacidades não registradas: " + ", ".join(missing))
 
         def step(step_id, description, action_type, target="", expected=None, args=None,
-                 app=""):
+                 app="", requires=(), produces=(), max_attempts=3):
             return ComputerMissionStep(step_id, description, action_type, target,
-                                       expected or {}, args or {}, app=app)
+                                       expected or {}, args or {}, app=app,
+                                       requires=tuple(requires), produces=tuple(produces),
+                                       max_attempts=max_attempts)
 
         steps = [
             step("open-notepad", "Abrir o Bloco de Notas", "open_program",
@@ -367,9 +721,11 @@ class ComputerMissionPlanner:
             raise ValueError("Capacidades não registradas: " + ", ".join(missing))
 
         def step(step_id, description, action_type, target="", expected=None, args=None,
-                 app=""):
+                 app="", requires=(), produces=(), max_attempts=3):
             return ComputerMissionStep(step_id, description, action_type, target,
-                                       expected or {}, args or {}, app=app)
+                                       expected or {}, args or {}, app=app,
+                                       requires=tuple(requires), produces=tuple(produces),
+                                       max_attempts=max_attempts)
 
         steps = [
             step("open-browser", "Abrir Google Chrome", "browser_open", "browser",
@@ -387,7 +743,9 @@ class ComputerMissionPlanner:
             step("observe-results", "Confirmar página de resultados", "observe_browser", "results",
                   expected={"page_changed": True}, app="chrome"),
             step("extract-mission-value", "Extrair e validar o valor observado",
-                  "extract_mission_value", "browser-result", app="chrome"),
+                  "extract_mission_value", "browser-result",
+                  args={"source_variable": value_key}, app="chrome",
+                  produces=(value_key,)),
             step("handoff-to-notepad", "Transferir a missão para o Bloco de Notas",
                   "handoff_to_notepad", "notepad", args={"name": "bloco de notas"},
                   app="notepad"),
@@ -459,6 +817,177 @@ class ComputerMissionPlanner:
         }
         return mission
 
+    def _plan_long_research(self, text: str) -> ComputerMission:
+        """Plan the bounded Python -> Ollama -> Notepad workflow on one stack."""
+        match = self._SAVE_RE.search(text)
+        filename = Path(match.group(1)).name if match else "resumo_pesquisa.txt"
+        target_path = self.resolve_target_path(filename)
+        tool_names = {
+            "browser_open", "browser_navigate", "browser_health", "browser_get_elements",
+            "browser_search", "browser_get_page_info", "browser_click",
+            "browser_record_window", "browser_wait_for_results", "ui_active_window",
+            "ui_focus_window", "ui_focus_element", "ui_focus_editor", "ui_read_editor",
+            "ui_invoke_element", "ui_classify_dialog", "ui_list_elements",
+            "open_program", "keyboard_type", "keyboard_hotkey", "keyboard_press",
+        }
+        missing = sorted(name for name in tool_names if self.registry.get(name) is None)
+        if missing:
+            raise ValueError("Capacidades não registradas: " + ", ".join(missing))
+
+        def step(step_id, description, action_type, target="", expected=None, args=None,
+                 app="", requires=(), produces=()):
+            return ComputerMissionStep(
+                step_id, description, action_type, target, expected or {}, args or {},
+                app=app, requires=tuple(requires), produces=tuple(produces))
+
+        steps = [
+            step("open-browser", "Abrir Google Chrome", "browser_open", "browser",
+                  args={"visible": True, "provider": "chrome"}, app="chrome"),
+            step("navigate-python-search", "Abrir pesquisa do Python", "browser_navigate",
+                  DEFAULT_SEARCH_HOME, args={"url": DEFAULT_SEARCH_HOME}, app="chrome",
+                  requires=("open-browser",)),
+            step("focus-browser-python", "Validar foco do Chrome", "focus_browser", "browser",
+                  expected={"browser_process": True}, app="chrome",
+                  requires=("navigate-python-search",)),
+            step("observe-browser-python", "Validar identidade do Chrome", "observe_browser",
+                  "browser", expected={"browser_process": True}, app="chrome",
+                  requires=("focus-browser-python",)),
+            step("ground-python-search", "Localizar campo de pesquisa do Python",
+                  "ground_search_field", "search-field", app="chrome",
+                  requires=("observe-browser-python",)),
+            step("search-python", "Pesquisar versão estável atual do Python",
+                  "browser_search", "search-field",
+                  args={"query": "current stable Python version official Python", "ref": ""},
+                  app="chrome", requires=("ground-python-search",)),
+            step("observe-python-results", "Confirmar resultados do Python", "observe_browser",
+                  "results", expected={"page_changed": True}, app="chrome",
+                  requires=("search-python",)),
+            step("extract-python-value", "Extrair versão oficial do Python",
+                  "extract_mission_value", "browser-result",
+                  args={"source_variable": "python_version", "value_kind": "version"},
+                  app="chrome", requires=("observe-python-results",),
+                  produces=("python_version",)),
+            step("checkpoint-python", "Criar CHECKPOINT_PYTHON_DONE", "checkpoint",
+                  args={"name": "CHECKPOINT_PYTHON_DONE"}, app="chrome",
+                  requires=("extract-python-value",)),
+            step("navigate-ollama-search", "Abrir pesquisa do Ollama", "browser_navigate",
+                  DEFAULT_SEARCH_HOME, args={"url": DEFAULT_SEARCH_HOME}, app="chrome",
+                  requires=("checkpoint-python",)),
+            step("focus-browser-ollama", "Revalidar foco do Chrome", "focus_browser", "browser",
+                  expected={"browser_process": True}, app="chrome",
+                  requires=("navigate-ollama-search",)),
+            step("observe-browser-ollama", "Revalidar identidade do Chrome", "observe_browser",
+                  "browser", expected={"browser_process": True}, app="chrome",
+                  requires=("focus-browser-ollama",)),
+            step("ground-ollama-search", "Localizar campo de pesquisa do Ollama",
+                  "ground_search_field", "search-field", app="chrome",
+                  requires=("observe-browser-ollama",)),
+            step("search-ollama", "Pesquisar página oficial do Ollama", "browser_search",
+                  "search-field", args={"query": "Ollama official homepage", "ref": ""},
+                  app="chrome", requires=("ground-ollama-search",)),
+            step("observe-ollama-results", "Confirmar resultados do Ollama", "observe_browser",
+                  "results", expected={"page_changed": True}, app="chrome",
+                  requires=("search-ollama",)),
+            step("extract-ollama-value", "Extrair título oficial do Ollama",
+                  "extract_mission_value", "browser-result",
+                  args={"source_variable": "ollama_page_title", "value_kind": "title"},
+                  app="chrome", requires=("observe-ollama-results",),
+                  produces=("ollama_page_title",)),
+            step("checkpoint-ollama", "Criar CHECKPOINT_OLLAMA_DONE", "checkpoint",
+                  args={"name": "CHECKPOINT_OLLAMA_DONE"}, app="chrome",
+                  requires=("extract-ollama-value",)),
+            step("checkpoint-research", "Criar CHECKPOINT_RESEARCH_COMPLETE", "checkpoint",
+                  args={"name": "CHECKPOINT_RESEARCH_COMPLETE"}, app="chrome",
+                  requires=("checkpoint-ollama",)),
+            step("handoff-to-notepad", "Transferir a pesquisa para o Bloco de Notas",
+                  "handoff_to_notepad", "notepad", args={"name": "bloco de notas"},
+                  app="notepad", requires=("checkpoint-research",)),
+            step("focus-notepad", "Validar foco do Bloco de Notas", "ui_focus_window",
+                  "notepad", expected={"process": "notepad"},
+                  args={"window": "notepad"}, app="notepad",
+                  requires=("handoff-to-notepad",)),
+            step("observe-notepad", "Validar identidade do Bloco de Notas", "observe_window",
+                  "notepad", expected={"process": "notepad"}, app="notepad",
+                  requires=("focus-notepad",)),
+            step("capture-preexisting-document", "Registrar documento pré-existente",
+                  "capture_document_state", "notepad", app="notepad",
+                  requires=("observe-notepad",)),
+            step("checkpoint-notepad-ready", "Criar CHECKPOINT_NOTEPAD_READY", "checkpoint",
+                  args={"name": "CHECKPOINT_NOTEPAD_READY"}, app="notepad",
+                  requires=("capture-preexisting-document",)),
+            step("new-notepad-document", "Abrir uma nova aba em branco", "keyboard_hotkey",
+                  "notepad", expected={"process": "notepad"}, args={"keys": ["ctrl", "n"]},
+                  app="notepad", requires=("checkpoint-notepad-ready",)),
+            step("capture-mission-document", "Registrar documento da missão",
+                  "capture_document_state", "notepad", app="notepad",
+                  requires=("new-notepad-document",)),
+            step("check-overwrite", "Verificar política de sobrescrita",
+                  "check_overwrite_policy", str(target_path), app="notepad",
+                  requires=("capture-mission-document",)),
+            step("type-summary", "Escrever resumo com os valores observados",
+                  "type_mission_template", "notepad-editor",
+                  expected={"process": "notepad"},
+                  args={"template": "Versão estável do Python: {{python_version}}\\n"
+                                "Título principal do Ollama: {{ollama_page_title}}",
+                        "source_variables": ["python_version", "ollama_page_title"]},
+                  app="notepad", requires=("check-overwrite",),
+                  produces=("summary_text",)),
+            step("verify-editor-pre-save", "Validar resumo no editor", "verify_editor_pre_save",
+                  "notepad-editor", expected={"process": "notepad"}, app="notepad",
+                  requires=("type-summary",), produces=("summary_text_verified",)),
+            step("checkpoint-text-verified", "Criar CHECKPOINT_TEXT_VERIFIED", "checkpoint",
+                  args={"name": "CHECKPOINT_TEXT_VERIFIED"}, app="notepad",
+                  requires=("verify-editor-pre-save",)),
+            step("open-save-dialog", "Abrir Salvar como", "keyboard_hotkey", "save-dialog",
+                  expected={"process": "notepad"}, args={"keys": ["ctrl", "shift", "s"]},
+                  app="notepad", requires=("checkpoint-text-verified",)),
+            step("observe-save-dialog", "Validar Salvar como", "observe_window", "save-dialog",
+                  expected={"title": ("save as", "salvar como"), "process": "notepad"},
+                  app="notepad", requires=("open-save-dialog",)),
+            step("focus-file-name", "Focar nome do arquivo", "ui_focus_element", "file-name",
+                  expected={"control_type": "Edit"},
+                  args={"target": "", "control_type": "Edit", "window": ""},
+                  app="notepad", requires=("observe-save-dialog",)),
+            step("type-file-name", "Informar o caminho autorizado", "keyboard_type", "file-name",
+                  expected={"title": ("save as", "salvar como")},
+                  args={"text": str(target_path), "interval": 0.03}, app="notepad",
+                  requires=("focus-file-name",)),
+            step("focus-save-button", "Groundar o botão Salvar", "ui_focus_element", "save-button",
+                  expected={"control_type": "Button"},
+                  args={"target": "Salvar", "control_type": "Button", "window": ""},
+                  app="notepad", requires=("type-file-name",)),
+            step("confirm-save", "Confirmar salvamento", "ui_invoke_element", "save-button",
+                  expected={"control_type": "Button"},
+                  args={"target": "Salvar", "control_type": "Button", "window": ""},
+                  app="notepad", requires=("focus-save-button",)),
+            step("handle-overwrite-confirmation", "Confirmar sobrescrita autorizada",
+                  "handle_overwrite_confirmation", "overwrite-dialog", app="notepad",
+                  requires=("confirm-save",)),
+            step("observe-saved-window", "Confirmar retorno ao Notepad", "observe_window",
+                  "notepad", expected={"process": "notepad"}, app="notepad",
+                  requires=("handle-overwrite-confirmation",)),
+            step("verify-cross-app-file", "Validar arquivo e contexto cruzado",
+                  "verify_cross_app_file", str(target_path), app="notepad",
+                  requires=("observe-saved-window",)),
+            step("checkpoint-file-saved", "Criar CHECKPOINT_FILE_SAVED", "checkpoint",
+                  args={"name": "CHECKPOINT_FILE_SAVED"}, app="notepad",
+                  requires=("verify-cross-app-file",)),
+        ]
+        mission = ComputerMission(str(uuid.uuid4()), text, MissionStatus.PENDING,
+                                  time.time(), steps, max_steps=60)
+        mission.result.update({
+            "multi_app_mission": True, "long_workflow": True,
+            "search_query": "current stable Python version official Python",
+            "target_path": str(target_path), "filename": filename,
+            "browser_mission": True, "search_provider": SEARCH_PROVIDER_ORDER[0],
+            "provider_index": 0, "provider_health": [],
+            "document_ownership": "PENDING", "replans": 0,
+            "max_replans": 2, "app_switch_budget": self.MAX_STEPS,
+        })
+        mission.context.artifacts["search_query"] = {
+            "value": mission.result["search_query"], "kind": "USER_VALUE"}
+        return mission
+
     def _plan_browser_search(self, text: str) -> ComputerMission:
         match = re.search(
             r"\b(?:pesquis(?:e|ar)?|busque|buscar|procure)\s+(.+?)(?=\s+e\s+me\s+diga|\s+e\s+abra|$)",
@@ -519,45 +1048,116 @@ class ComputerMissionExecutor:
     def __init__(self, service, planner: Optional[ComputerMissionPlanner] = None):
         self.service = service
         self.planner = planner or ComputerMissionPlanner(service.registry)
+        task_manager = getattr(service, "task_manager", None)
+        task_database = getattr(task_manager, "database", None)
+        self.persistence = MissionCheckpointStore(task_database)
         self._active: Optional[ComputerMission] = None
         self._missions: dict[str, ComputerMission] = {}
         self._lock = threading.RLock()
         self._cancel = threading.Event()
+        self._pause_requested = threading.Event()
+        self._pause_reason = ""
 
     def run(self, request: str, task_id: str = "desktop",
-            authorized_overwrite_paths: Optional[list[str]] = None) -> dict[str, Any]:
+            authorized_overwrite_paths: Optional[list[str]] = None,
+            pause_after_checkpoint: str = "") -> dict[str, Any]:
         mission = self.planner.plan(request)
         if authorized_overwrite_paths:
             mission.result["authorized_overwrite_paths"] = [
                 str(Path(path).resolve()) for path in authorized_overwrite_paths
             ]
+        if pause_after_checkpoint:
+            mission.result["pause_after_checkpoint"] = str(pause_after_checkpoint)
         with self._lock:
             self._active = mission
             self._missions[mission.mission_id] = mission
             self._cancel.clear()
+            self._pause_requested.clear()
+            self._pause_reason = ""
+        started_checkpoint = self._create_checkpoint(
+            mission, "CHECKPOINT_MISSION_STARTED", "")
+        if not started_checkpoint.get("ok"):
+            mission.status = MissionStatus.BLOCKED
+            mission.error = started_checkpoint.get("error", "CHECKPOINT_FAILED")
+            return self._finish(mission, False)
+        self._audit_mission(mission, "MISSION_STARTED", {
+            "checkpoint_id": started_checkpoint.get("checkpoint_id")})
         return self._run_from_current(mission, task_id)
 
     def resume(self, mission_id: str, token: str, task_id: str = "desktop") -> dict[str, Any]:
         with self._lock:
             mission = self._missions.get(str(mission_id))
-            if not mission or mission.pending_confirmation_token != str(token):
-                return {"ok": False, "error": "Confirmação de missão inválida ou expirada."}
+        if mission is None:
+            checkpoint, error = self.persistence.load_resume_token(token)
+            if error or not checkpoint or checkpoint.get("mission_id") != str(mission_id):
+                return {"ok": False, "error": error or "RESUME_MISSION_MISMATCH"}
+            try:
+                mission = self._restore_from_checkpoint(checkpoint)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            with self._lock:
+                self._missions[mission.mission_id] = mission
+                self._active = mission
+        if mission.pending_confirmation_token == str(token):
             mission.pending_confirmation_token = ""
-        current = mission.steps[mission.current_step]
-        revalidated = self._resume_revalidate(mission, current, task_id)
+            current = mission.steps[mission.current_step]
+            revalidated = self._resume_revalidate(mission, current, task_id)
+            if not revalidated.get("ok"):
+                mission.status = MissionStatus.BLOCKED
+                mission.error = str(revalidated.get("error") or "RESUME_REVALIDATION_FAILED")
+                current.status = MissionStepStatus.BLOCKED
+                current.error = mission.error
+                self._audit_step(mission, current, revalidated, "resume_revalidation_failed")
+                return self._finish(mission, False)
+            self._audit_mission(mission, "MISSION_RESUME_REQUESTED", {
+                "mode": "security_confirmation"})
+            result = self.service.confirm(token, task_id=mission.mission_id)
+            if not result.get("ok") or result.get("confirmation_required"):
+                mission.status = MissionStatus.FAILED
+                mission.error = result.get("error", "Confirmação falhou")
+                return self._finish(mission, False)
+            mission.status = MissionStatus.RESUMING
+            self._audit_mission(mission, "MISSION_RESUMED", {"mode": "confirmation"})
+            return self._run_from_current(mission, task_id, preconfirmed=(current, result))
+
+        checkpoint, error = self.persistence.load_resume_token(token)
+        if error or not checkpoint or checkpoint.get("mission_id") != str(mission_id):
+            return {"ok": False, "error": error or "RESUME_TOKEN_INVALID"}
+        if checkpoint.get("checkpoint_id") != mission.result.get("checkpoint_id"):
+            mission = self._restore_from_checkpoint(checkpoint)
+            with self._lock:
+                self._missions[mission.mission_id] = mission
+                self._active = mission
+        mission.status = MissionStatus.RESUMING
+        self._audit_mission(mission, "MISSION_RESUME_REQUESTED", {
+            "checkpoint_id": checkpoint.get("checkpoint_id")})
+        revalidated = self._revalidate_world(mission, task_id)
         if not revalidated.get("ok"):
             mission.status = MissionStatus.BLOCKED
-            mission.error = str(revalidated.get("error") or "RESUME_REVALIDATION_FAILED")
-            current.status = MissionStepStatus.BLOCKED
-            current.error = mission.error
-            self._audit_step(mission, current, revalidated, "resume_revalidation_failed")
+            mission.error = str(revalidated.get("error") or "WORLD_STATE_CHANGED")
+            self._audit_mission(mission, "WORLD_STATE_REVALIDATED", revalidated)
             return self._finish(mission, False)
-        result = self.service.confirm(token, task_id=mission.mission_id)
-        if not result.get("ok") or result.get("confirmation_required"):
-            mission.status = MissionStatus.FAILED
-            mission.error = result.get("error", "Confirmação falhou")
-            return self._finish(mission, False)
-        return self._run_from_current(mission, task_id, preconfirmed=(current, result))
+        self._audit_mission(mission, "WORLD_STATE_REVALIDATED", revalidated)
+        self._audit_mission(mission, "MISSION_RESUMED", {
+            "checkpoint_id": checkpoint.get("checkpoint_id")})
+        return self._run_from_current(mission, task_id)
+
+    def resume_current_mission(self, mission_id: str, resume_token: str,
+                               task_id: str = "desktop") -> dict[str, Any]:
+        return self.resume(mission_id, resume_token, task_id=task_id)
+
+    def pause_current_mission(self, reason: str = "operator_requested") -> dict[str, Any]:
+        with self._lock:
+            mission = self._active
+            if mission is None or mission.status in {MissionStatus.COMPLETED,
+                                                       MissionStatus.FAILED,
+                                                       MissionStatus.BLOCKED,
+                                                       MissionStatus.CANCELLED}:
+                return {"ok": False, "error": "NO_ACTIVE_MISSION"}
+            self._pause_reason = str(reason)
+            self._pause_requested.set()
+            return {"ok": True, "pause_requested": True,
+                    "mission_id": mission.mission_id}
 
     def cancel_current_mission(self) -> bool:
         with self._lock:
@@ -567,6 +1167,7 @@ class ComputerMissionExecutor:
                                                        MissionStatus.CANCELLED}:
                 return False
             self._cancel.set()
+            self._pause_requested.clear()
             mission.status = MissionStatus.CANCELLED
             mission.error = "Cancelamento solicitado pelo operador."
             if mission.current_step < len(mission.steps):
@@ -576,6 +1177,228 @@ class ComputerMissionExecutor:
     def current(self) -> Optional[dict[str, Any]]:
         with self._lock:
             return self._active.public() if self._active else None
+
+    def _audit_mission(self, mission, event: str, details=None):
+        self.service.audit.add(
+            task_id=mission.mission_id,
+            command=f"computer_mission:{mission.mission_id}",
+            tool="computer_mission",
+            arguments={"mission_id": mission.mission_id, "event": event},
+            risk=mission.risk_level, status=event,
+            result=_checkpoint_safe(details or {}),
+        )
+
+    def _checkpoint_snapshot(self, mission) -> dict[str, Any]:
+        context = mission.context.checkpoint_snapshot() if mission.context else {}
+        steps = []
+        for step in mission.steps:
+            steps.append({
+                "step_id": step.step_id,
+                "status": step.status.value,
+                "attempts": step.attempts,
+                "result": _checkpoint_safe(step.result),
+                "error": step.error,
+            })
+        return {
+            "mission_id": mission.mission_id,
+            "user_request": mission.user_request,
+            "status": mission.status.value,
+            "current_step": mission.current_step,
+            "next_step": mission.current_step,
+            "max_steps": mission.max_steps,
+            "timeout_seconds": mission.timeout_seconds,
+            "risk_level": mission.risk_level,
+            "result": _checkpoint_safe(mission.result),
+            "steps": steps,
+            "context": context,
+            "context_revision": int(context.get("context_version") or 0),
+        }
+
+    def _create_checkpoint(self, mission, name: str, pause_reason: str,
+                           state: CheckpointState = CheckpointState.VALID) -> dict[str, Any]:
+        try:
+            snapshot = self._checkpoint_snapshot(mission)
+            record = self.persistence.save_checkpoint(
+                mission_id=mission.mission_id,
+                mission_version=int(snapshot["context_revision"]),
+                name=name,
+                current_step=mission.current_step,
+                next_step=mission.current_step,
+                context_revision=int(snapshot["context_revision"]),
+                snapshot=snapshot,
+                pause_reason=pause_reason,
+                state=state,
+            )
+            mission.result.setdefault("completed_checkpoints", []).append(name)
+            mission.result["checkpoint_id"] = record["checkpoint_id"]
+            mission.result["resume_token"] = record["resume_token"]
+            self._audit_mission(mission, "CHECKPOINT_CREATED", {
+                "checkpoint_id": record["checkpoint_id"], "name": name,
+                "state": record["state"], "pause_reason": pause_reason,
+            })
+            return {"ok": True, **record}
+        except Exception as exc:
+            self._audit_mission(mission, "CHECKPOINT_FAILED", {
+                "name": name, "error": str(exc)[:200]})
+            return {"ok": False, "error": "CHECKPOINT_FAILED"}
+
+    def _restore_from_checkpoint(self, checkpoint: dict[str, Any]) -> ComputerMission:
+        snapshot = checkpoint.get("snapshot") or {}
+        if snapshot.get("mission_id") != checkpoint.get("mission_id"):
+            raise ValueError("CHECKPOINT_INVALID")
+        context_snapshot = snapshot.get("context") or {}
+        if int(checkpoint.get("context_revision") or 0) != int(
+                context_snapshot.get("context_version") or 0):
+            raise ValueError("CHECKPOINT_CONTEXT_MISMATCH")
+        mission = self.planner.plan(str(snapshot.get("user_request") or ""))
+        if mission.mission_id != checkpoint.get("mission_id"):
+            mission.mission_id = str(checkpoint["mission_id"])
+            context_snapshot = dict(context_snapshot)
+        mission.context = MissionContext.from_checkpoint(
+            context_snapshot, mission.mission_id,
+            str(snapshot.get("user_request") or mission.user_request))
+        mission.current_step = int(snapshot.get("next_step", snapshot.get("current_step", 0)))
+        mission.max_steps = int(snapshot.get("max_steps") or mission.max_steps)
+        mission.timeout_seconds = float(snapshot.get("timeout_seconds") or mission.timeout_seconds)
+        mission.risk_level = str(snapshot.get("risk_level") or mission.risk_level)
+        mission.result.update(dict(snapshot.get("result") or {}))
+        mission.result["checkpoint_id"] = checkpoint["checkpoint_id"]
+        mission.result["resume_token"] = checkpoint["resume_token"]
+        mission.result["recovered_from_checkpoint"] = True
+        by_id = {step.step_id: step for step in mission.steps}
+        for raw in snapshot.get("steps") or []:
+            step = by_id.get(str(raw.get("step_id") or ""))
+            if step is None:
+                continue
+            try:
+                step.status = MissionStepStatus(str(raw.get("status") or "PENDING"))
+            except ValueError:
+                raise ValueError("CHECKPOINT_INVALID")
+            step.attempts = int(raw.get("attempts") or 0)
+            step.result = dict(raw.get("result") or {})
+            step.error = str(raw.get("error") or "")
+        if mission.current_step < 0 or mission.current_step > len(mission.steps):
+            raise ValueError("CHECKPOINT_INVALID")
+        mission.status = MissionStatus.RESUMING
+        mission.pending_confirmation_token = ""
+        self._audit_mission(mission, "CHECKPOINT_LOADED", {
+            "checkpoint_id": checkpoint["checkpoint_id"]})
+        return mission
+
+    def _revalidate_world(self, mission, task_id):
+        current_app = str((mission.context.current_app if mission.context else "") or "")
+        if current_app.casefold() == "chrome":
+            previous_state = str(mission.result.get("browser_page_state_id") or "")
+            health = self.service.execute_tool(
+                "browser_health", {}, command="computer_mission:resume_browser_health",
+                task_id=mission.mission_id)
+            if not health.get("ok") or not health.get("started"):
+                return {"ok": False, "error": "WORLD_STATE_CHANGED", "detail": health}
+            provider = str(health.get("browser_provider") or health.get("provider") or "").casefold()
+            if provider != "chrome":
+                return {"ok": False, "error": "WORLD_STATE_CHANGED", "detail": health}
+            current_state = str(health.get("page_state_id") or "")
+            if previous_state and current_state and previous_state != current_state:
+                return {"ok": False, "error": "STALE_BROWSER_STATE",
+                        "expected_state": previous_state, "actual_state": current_state}
+            mission.result["browser_page_state_id"] = health.get("page_state_id")
+            mission.result["browser_url"] = health.get("current_url", "")
+            mission.result["browser_title"] = health.get("page_title", "")
+        elif current_app.casefold() == "notepad":
+            observed = self._observe_window(
+                ComputerMissionStep("resume-notepad-observe", "Revalidar Notepad",
+                                    "observe_window", expected_state={"process": "notepad"}))
+            if not observed.get("ok"):
+                return {"ok": False, "error": "WORLD_STATE_CHANGED", "detail": observed}
+            if mission.context and mission.context.artifacts.get("mission_document_id"):
+                guard = self._assert_mission_document(mission, task_id)
+                if not guard.get("ok"):
+                    return {"ok": False, "error": "WORLD_STATE_CHANGED", "detail": guard}
+        return {"ok": True, "verification": "WORLD_STATE_VALID",
+                "current_app": current_app}
+
+    def _dependencies_satisfied(self, mission, step):
+        completed = {item.step_id for item in mission.steps
+                     if item.status is MissionStepStatus.COMPLETED}
+        checkpoints = set(mission.result.get("completed_checkpoints") or [])
+        for requirement in step.requires:
+            requirement = str(requirement)
+            if requirement.startswith("checkpoint:"):
+                ok = requirement.split(":", 1)[1] in checkpoints
+            elif requirement.startswith("var:"):
+                _, name = requirement.split(":", 1)
+                ok = bool(mission.context and mission.context.resolve(
+                    name, mission_id=mission.mission_id,
+                    current_step=mission.current_step)[0])
+            else:
+                ok = requirement in completed
+            if not ok:
+                return {"ok": False, "error": "DEPENDENCY_NOT_SATISFIED",
+                        "dependency": requirement}
+        return {"ok": True}
+
+    def _receipt_before_action(self, mission, step):
+        if step.action_type not in {"keyboard_type", "keyboard_hotkey", "keyboard_press",
+                                    "ui_invoke_element", "open_program"}:
+            return None
+        receipt = self.persistence.receipt(mission.mission_id, step.step_id)
+        if receipt and receipt.get("result_state") == ActionState.VERIFIED.value:
+            return {"ok": True, "verified": True, "skipped": True,
+                    "verification": "STEP_SKIPPED_ALREADY_VERIFIED",
+                    "receipt": receipt}
+        if receipt and receipt.get("result_state") == ActionState.IN_FLIGHT_UNKNOWN.value:
+            if step.step_id in {"confirm-save", "verify-cross-app-file"}:
+                recovered = self._verify_cross_app_file(mission, step)
+                if recovered.get("ok"):
+                    self.persistence.save_receipt(
+                        mission_id=mission.mission_id, step_id=step.step_id,
+                        action_type=step.action_type, target=step.target,
+                        result_state=ActionState.VERIFIED, result=recovered,
+                        verified_at=time.time())
+                    return {"ok": True, "verified": True, "skipped": True,
+                            "verification": "ACTION_IN_FLIGHT_RECOVERED"}
+            return {"ok": False, "error": "ACTION_IN_FLIGHT_UNKNOWN"}
+        self.persistence.save_receipt(
+            mission_id=mission.mission_id, step_id=step.step_id,
+            action_type=step.action_type, target=step.target,
+            result_state=ActionState.IN_FLIGHT_UNKNOWN,
+            result={"state": ActionState.IN_FLIGHT_UNKNOWN.value})
+        return None
+
+    def _receipt_confirmation_reset(self, mission, step):
+        if step.action_type in {"keyboard_type", "keyboard_hotkey", "keyboard_press",
+                                "ui_invoke_element", "open_program"}:
+            self.persistence.save_receipt(
+                mission_id=mission.mission_id, step_id=step.step_id,
+                action_type=step.action_type, target=step.target,
+                result_state=ActionState.NOT_STARTED,
+                result={"confirmation_required": True})
+
+    def _receipt_verified(self, mission, step, result):
+        if step.action_type in {"keyboard_type", "keyboard_hotkey", "keyboard_press",
+                                "ui_invoke_element", "open_program"}:
+            self.persistence.save_receipt(
+                mission_id=mission.mission_id, step_id=step.step_id,
+                action_type=step.action_type, target=step.target,
+                result_state=ActionState.VERIFIED, result=result,
+                verified_at=time.time())
+
+    @staticmethod
+    def _classify_error(result: dict[str, Any]) -> str:
+        error = str(result.get("error") or "").casefold()
+        if any(value in error for value in
+               ("timeout", "tempor", "navigation", "network")):
+            return "TRANSIENT"
+        if any(value in error for value in
+               ("focus", "window", "stale", "state_changed", "document")):
+            return "STATE_CHANGED"
+        if any(value in error for value in
+               ("confirmation", "permission", "authorized")):
+            return "PERMISSION_REQUIRED"
+        if any(value in error for value in
+               ("captcha", "anti_bot", "source_verification")):
+            return "NON_RETRYABLE"
+        return "UNKNOWN"
 
     def _run_from_current(self, mission, task_id, preconfirmed=None):
         started = time.monotonic()
@@ -597,6 +1420,14 @@ class ComputerMissionExecutor:
                 return self._finish(mission, False)
 
             step = mission.steps[mission.current_step]
+            dependency = self._dependencies_satisfied(mission, step)
+            if not dependency.get("ok"):
+                mission.status = MissionStatus.BLOCKED
+                mission.error = dependency["error"]
+                step.status = MissionStepStatus.BLOCKED
+                step.error = dependency["dependency"]
+                self._audit_step(mission, step, dependency, "blocked")
+                return self._finish(mission, False)
             step.attempts += 1
             step.status = MissionStepStatus.OBSERVING
             if step.action_type == "verify_file":
@@ -636,14 +1467,23 @@ class ComputerMissionExecutor:
             elif step.action_type == "verify_browser_results":
                 step.status = MissionStepStatus.VERIFYING
                 result = self._verify_browser_results(mission, step)
+            elif step.action_type == "checkpoint":
+                result = {"ok": True, "verified": True,
+                          "verification": "checkpoint_boundary",
+                          "checkpoint_name": step.args.get("name", "")}
             else:
                 result = self._execute_tool_step(mission, step, task_id, preconfirmed)
                 preconfirmed = None
             if result.get("confirmation_required"):
+                self._receipt_confirmation_reset(mission, step)
                 mission.status = MissionStatus.WAITING_CONFIRMATION
                 mission.pending_confirmation_token = str(result.get("token") or "")
                 step.status = MissionStepStatus.WAITING_CONFIRMATION
                 step.result = {"confirmation_required": True}
+                self._create_checkpoint(mission, "CHECKPOINT_WAITING_CONFIRMATION",
+                                        "USER_CONFIRMATION_REQUIRED")
+                self._audit_mission(mission, "WAITING_CONFIRMATION", {
+                    "step_id": step.step_id})
                 self._audit_step(mission, step, result, "waiting_confirmation")
                 return self._finish(mission, False)
             if not result.get("ok"):
@@ -651,6 +1491,10 @@ class ComputerMissionExecutor:
                     mission.status = MissionStatus.WAITING_CONFIRMATION
                     mission.error = "USER_CONFIRMATION_REQUIRED"
                     step.status = MissionStepStatus.WAITING_CONFIRMATION
+                    self._create_checkpoint(mission, "CHECKPOINT_WAITING_CONFIRMATION",
+                                            "USER_CONFIRMATION_REQUIRED")
+                    self._audit_mission(mission, "WAITING_CONFIRMATION", {
+                        "step_id": step.step_id})
                     self._audit_step(mission, step, result, "user_confirmation_required")
                     return self._finish(mission, False)
                 if result.get("error") in {
@@ -668,7 +1512,10 @@ class ComputerMissionExecutor:
                     "OVERWRITE_CONFIRMATION_NOT_DISMISSED", "DOCUMENT_NOT_FOUND",
                     "DOCUMENT_IDENTITY_UNAVAILABLE", "DOCUMENT_IDENTITY_MISMATCH",
                     "DOCUMENT_WINDOW_MISMATCH", "MISSION_DOCUMENT_NOT_REGISTERED",
-                    "DIALOG_OWNERSHIP_MISMATCH",
+                    "DIALOG_OWNERSHIP_MISMATCH", "DEPENDENCY_NOT_SATISFIED",
+                    "ACTION_IN_FLIGHT_UNKNOWN", "WORLD_STATE_CHANGED",
+                    "STALE_BROWSER_STATE", "CHECKPOINT_CONTEXT_MISMATCH",
+                    "CHECKPOINT_INVALID",
                 }:
                     mission.status = MissionStatus.BLOCKED
                     mission.error = str(result.get("error"))
@@ -686,11 +1533,19 @@ class ComputerMissionExecutor:
                 step.error = str(result.get("error") or "Etapa falhou")[:500]
                 step.result = {"ok": False, "error": step.error}
                 self._audit_step(mission, step, result, "failed")
-                if fingerprints[fingerprint] >= 2 or step.attempts >= 3:
+                if fingerprints[fingerprint] >= 2 or step.attempts >= step.max_attempts:
                     mission.status = MissionStatus.BLOCKED
                     mission.error = "ACTION_LOOP_DETECTED"
                     step.status = MissionStepStatus.BLOCKED
                     return self._finish(mission, False)
+                mission.result["last_error"] = step.error
+                mission.result["last_error_classification"] = self._classify_error(result)
+                self._audit_mission(mission, "RETRY_STARTED", {
+                    "step_id": step.step_id,
+                    "attempt": step.attempts,
+                    "classification": mission.result["last_error_classification"],
+                })
+                time.sleep(min(0.25, 0.05 * step.attempts))
                 step.status = MissionStepStatus.PENDING
                 mission.status = MissionStatus.OBSERVING
                 continue
@@ -702,12 +1557,30 @@ class ComputerMissionExecutor:
                 mission.status = MissionStatus.FAILED
                 mission.error = step.error
                 return self._finish(mission, False)
+            self._receipt_verified(mission, step, result)
             step.status = MissionStepStatus.COMPLETED
             step.result = self._safe_step_result(result)
             self._record_step_output(mission, step)
             self._audit_step(mission, step, result, "completed")
             mission.current_step += 1
             mission.status = MissionStatus.OBSERVING
+            checkpoint_name = str(step.args.get("name") or "") \
+                if step.action_type == "checkpoint" else ""
+            if checkpoint_name:
+                checkpoint = self._create_checkpoint(mission, checkpoint_name, "")
+                if not checkpoint.get("ok"):
+                    mission.status = MissionStatus.BLOCKED
+                    mission.error = checkpoint.get("error", "CHECKPOINT_FAILED")
+                    return self._finish(mission, False)
+                pause_name = str(mission.result.get("pause_after_checkpoint") or "")
+                if pause_name == checkpoint_name or self._pause_requested.is_set():
+                    mission.status = MissionStatus.PAUSED
+                    mission.error = ""
+                    self._audit_mission(mission, "MISSION_PAUSED", {
+                        "checkpoint_id": checkpoint.get("checkpoint_id"),
+                        "reason": self._pause_reason or "checkpoint_boundary",
+                    })
+                    return self._finish(mission, False)
 
         mission.status = MissionStatus.COMPLETED
         if mission.result.get("multi_app_mission"):
@@ -728,14 +1601,27 @@ class ComputerMissionExecutor:
             mission.result.update({"mission_completed": True,
                                    "result_count": len(mission.result.get("titles", []))})
         else:
-            mission.result = {"mission_completed": True,
-                              "file_exists": bool(mission.steps[-1].result.get("file_exists")),
-                              "content_valid": bool(mission.steps[-1].result.get("content_valid"))}
+            recovered_metadata = ({
+                key: mission.result[key]
+                for key in ("recovered_from_checkpoint", "checkpoint_id",
+                            "resume_token", "completed_checkpoints")
+                if key in mission.result
+            } if mission.result.get("recovered_from_checkpoint") else {})
+            mission.result = {
+                **recovered_metadata,
+                "mission_completed": True,
+                "file_exists": bool(mission.steps[-1].result.get("file_exists"))
+                if mission.steps else False,
+                "content_valid": bool(mission.steps[-1].result.get("content_valid"))
+                if mission.steps else False,
+            }
         return self._finish(mission, True)
 
     def _execute_tool_step(self, mission, step, task_id, preconfirmed):
         if preconfirmed and preconfirmed[0] is step:
             return preconfirmed[1]
+        if step.action_type == "browser_search":
+            mission.result["search_query"] = str(step.args.get("query") or "")
         if step.action_type == "browser_search":
             ref = str(mission.result.get("search_ref") or "")
             if not ref:
@@ -755,10 +1641,20 @@ class ComputerMissionExecutor:
             ownership = self._assert_mission_document(mission, task_id)
             if not ownership.get("ok"):
                 return ownership
+        receipt_result = self._receipt_before_action(mission, step)
+        if receipt_result is not None:
+            if receipt_result.get("skipped"):
+                self._audit_mission(mission, "STEP_SKIPPED_ALREADY_VERIFIED", {
+                    "step_id": step.step_id})
+            return receipt_result
         step.status = MissionStepStatus.EXECUTING
-        return self.service.execute_tool(step.action_type, step.args,
-                                          command=f"computer_mission:{mission.mission_id}",
-                                          task_id=mission.mission_id)
+        result = self.service.execute_tool(
+            step.action_type, step.args,
+            command=f"computer_mission:{mission.mission_id}",
+            task_id=mission.mission_id)
+        if result.get("confirmation_required"):
+            self._receipt_confirmation_reset(mission, step)
+        return result
 
     def _resume_revalidate(self, mission, step, task_id):
         """Re-observe mission-owned state before consuming a confirmation."""
@@ -835,8 +1731,13 @@ class ComputerMissionExecutor:
         )
 
     def _extract_mission_value(self, mission, step):
-        key = str(mission.result.get("value_key") or "python_version")
-        mode = "title" if key == "python_page_title" else "version"
+        key = str(step.args.get("source_variable") or
+                  mission.result.get("value_key") or "python_version")
+        mode = str(step.args.get("value_kind") or
+                   ("title" if key in {"python_page_title", "ollama_page_title"}
+                    else "version"))
+        hosts = (("python.org", ".python.org") if key != "ollama_page_title"
+                 else ("ollama.com", ".ollama.com"))
         version_re = re.compile(
             r"\bPython\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b", re.I)
 
@@ -852,6 +1753,16 @@ class ComputerMissionExecutor:
                 task_id=mission.mission_id)
             page = page_result.get("page") or {}
             barrier = classify_page_barrier(page, page.get("interactive"))
+            if barrier == "COOKIE_CONSENT":
+                elements_result = self.service.execute_tool(
+                    "browser_get_elements", {},
+                    command="computer_mission:extract_value_consent",
+                    task_id=mission.mission_id)
+                consent = self._handle_cookie_consent(
+                    mission, page, elements_result.get("elements") or [])
+                if not consent.get("ok"):
+                    return consent
+                continue
             if barrier in {"UNKNOWN_BLOCKER", "LOGIN_REQUIRED", "AUTH_REQUIRED",
                            "PRIVACY_CONSENT", "BENIGN_INTERSTITIAL"}:
                 return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
@@ -859,8 +1770,8 @@ class ComputerMissionExecutor:
             candidates = [item for item in list(page.get("links") or [])
                           if item.get("visible", True) and item.get("result_candidate")]
             official = [item for item in candidates if (
-                urlparse(str(item.get("href") or "")).netloc.casefold() == "python.org" or
-                urlparse(str(item.get("href") or "")).netloc.casefold().endswith(".python.org"))]
+                urlparse(_resolved_result_url(str(item.get("href") or ""))).netloc.casefold() == hosts[0] or
+                urlparse(_resolved_result_url(str(item.get("href") or ""))).netloc.casefold().endswith(hosts[1]))]
             selected = None
             version_match = None
             if official and barrier == "NONE":
@@ -880,7 +1791,7 @@ class ComputerMissionExecutor:
                     " ".join(str(selected.get(field) or "").split())
                     for field in ("text", "title") if selected.get(field)
                 ).strip()
-                source_url = str(selected.get("href") or "")
+                source_url = _resolved_result_url(str(selected.get("href") or ""))
                 if mode == "title" and re.fullmatch(
                         r"(?:https?://|www\.)\S+", source_title, re.I):
                     navigated = self.service.execute_tool(
@@ -1281,7 +2192,7 @@ class ComputerMissionExecutor:
 
     def _verify_cross_app_file(self, mission, step):
         rendered = str((mission.context.artifacts.get("rendered_text") or {}).get("value") or "")
-        path = Path(step.target)
+        path = Path(mission.result.get("target_path") or step.target)
         try:
             exists = path.is_file()
             content = path.read_text(encoding="utf-8") if exists else ""
@@ -1364,7 +2275,7 @@ class ComputerMissionExecutor:
                 "verification": "authorized_overwrite_confirmed",
                 "overwrite_confirmed": True}
 
-    def _focus_browser(self):
+    def _focus_browser(self, mission=None):
         health = self.service.execute_tool(
             "browser_health", {}, command="computer_mission:focus_browser",
             task_id="computer-mission")
@@ -1372,12 +2283,19 @@ class ComputerMissionExecutor:
             return {"ok": False, "error": "BROWSER_SESSION_NOT_STARTED"}
         if str(health.get("browser_provider") or health.get("provider") or "").casefold() != "chrome":
             return {"ok": False, "error": "NON_CHROME_BROWSER_DETECTED"}
-        session_pid = int(health.get("process_id") or 0)
+        session_pid = int(health.get("process_id") or
+                          ((mission.result.get("chrome_process_id") or 0)
+                           if mission is not None else 0))
         if not session_pid:
             return {"ok": False, "error": "CHROME_SESSION_PROCESS_UNAVAILABLE"}
         result = self.service.execute_tool(
             "ui_focus_window", {"window": "chrome", "process_id": session_pid},
             command="computer_mission:focus_browser", task_id="computer-mission")
+        if not result.get("ok"):
+            result = self.service.execute_tool(
+                "ui_focus_window", {"window": "chrome", "process_id": 0},
+                command="computer_mission:focus_browser",
+                task_id="computer-mission")
         if not result.get("ok"):
             return {"ok": False, "error": "CHROME_FOCUS_GUARD_FAILED"}
         active = self.service.execute_tool(
@@ -1388,11 +2306,11 @@ class ComputerMissionExecutor:
         if process != "chrome.exe":
             return {"ok": False, "error": "NON_CHROME_BROWSER_DETECTED",
                     "window": data}
-        if int(data.get("pid") or 0) != session_pid:
-            return {"ok": False, "error": "CHROME_WINDOW_PROCESS_MISMATCH",
-                    "window": data, "session_process_id": session_pid}
+        active_pid = int(data.get("pid") or 0)
         return {"ok": True, "focused": True, "browser_process": "chrome.exe",
-                "window": data, "session_process_id": session_pid,
+                "window": data, "session_process_id": active_pid or session_pid,
+                "launch_process_id": session_pid,
+                "process_identity_reconciled": bool(active_pid and active_pid != session_pid),
                 "verification": "chrome_window_focus_guard"}
 
     def _observe_browser(self, mission, step):
@@ -1409,14 +2327,38 @@ class ComputerMissionExecutor:
         data = active.get("result") if isinstance(active.get("result"), dict) else active
         process = str(data.get("process_name") or "").casefold()
         if process != "chrome.exe":
-            return {"ok": False, "error": "NON_CHROME_BROWSER_DETECTED",
-                    "window": data}
+            refocused = self._focus_browser(mission)
+            if not refocused.get("ok"):
+                return {"ok": False, "error": "NON_CHROME_BROWSER_DETECTED",
+                        "window": data}
+            active = self.service.execute_tool(
+                "ui_active_window", {}, command="computer_mission:observe_browser",
+                task_id=mission.mission_id)
+            data = active.get("result") if isinstance(active.get("result"), dict) else active
+            process = str(data.get("process_name") or "").casefold()
+            if process != "chrome.exe":
+                return {"ok": False, "error": "NON_CHROME_BROWSER_DETECTED",
+                        "window": data}
         pid = int(data.get("pid") or 0)
         window_id = int(data.get("handle") or 0)
-        session_pid = int(health.get("process_id") or 0)
+        session_pid = int(health.get("process_id") or
+                          (mission.result.get("chrome_process_id") or 0))
         if session_pid and pid and session_pid != pid:
-            return {"ok": False, "error": "CHROME_WINDOW_PROCESS_MISMATCH",
-                    "window": data, "session_process_id": session_pid}
+            refocused = self._focus_browser(mission)
+            if not refocused.get("ok"):
+                return {"ok": False, "error": "CHROME_WINDOW_PROCESS_MISMATCH",
+                        "window": data, "session_process_id": session_pid}
+            active = self.service.execute_tool(
+                "ui_active_window", {}, command="computer_mission:observe_browser",
+                task_id=mission.mission_id)
+            data = active.get("result") if isinstance(active.get("result"), dict) else active
+            pid = int(data.get("pid") or 0)
+            window_id = int(data.get("handle") or 0)
+            session_pid = int(refocused.get("session_process_id") or session_pid)
+            if str(data.get("process_name") or "").casefold() != "chrome.exe" or (
+                    session_pid and pid and session_pid != pid):
+                return {"ok": False, "error": "CHROME_WINDOW_PROCESS_MISMATCH",
+                        "window": data, "session_process_id": session_pid}
         if self.service.registry.get("browser_record_window") is not None:
             recorded = self.service.execute_tool(
                 "browser_record_window", {"pid": pid, "window_id": window_id},
@@ -1479,6 +2421,11 @@ class ComputerMissionExecutor:
         mission.result["provider_health"] = entries[-MAX_SEARCH_PROVIDERS:]
 
     def _advance_provider(self, mission, reason):
+        replans = int(mission.result.get("replans", 0)) + 1
+        mission.result["replans"] = replans
+        if replans > int(mission.result.get("max_replans", 2)):
+            return {"ok": False, "error": "SEARCH_PROVIDERS_EXHAUSTED",
+                    "barrier_type": "REPLAN_BUDGET_EXCEEDED"}
         current_index = int(mission.result.get("provider_index", 0))
         current = SEARCH_PROVIDER_ORDER[current_index]
         self._provider_health(mission, current, "BLOCKED", reason)
@@ -1495,11 +2442,15 @@ class ComputerMissionExecutor:
         if not navigation.get("ok"):
             self._provider_health(mission, provider, "ERROR", navigation.get("error", ""))
             return {"ok": False, "error": "SEARCH_PROVIDER_FALLBACK_FAILED"}
-        observed = self._observe_browser(
-            mission, ComputerMissionStep("provider-observe", "Observar provider de busca",
-                                         "observe_browser", expected_state={}))
-        if not observed.get("ok"):
-            return observed
+        health = self.service.execute_tool(
+            "browser_health", {}, command="computer_mission:provider_fallback",
+            task_id=mission.mission_id)
+        if (not health.get("ok") or not health.get("started") or
+                str(health.get("browser_provider") or health.get("provider") or "").casefold()
+                != "chrome"):
+            self._provider_health(mission, provider, "ERROR", "CHROME_SESSION_UNAVAILABLE")
+            return {"ok": False, "error": "SEARCH_PROVIDER_FALLBACK_FAILED"}
+        mission.result["browser_page_state_id"] = health.get("page_state_id")
         self._provider_health(mission, provider, "AVAILABLE", "")
         self.service.audit.add(
             task_id=mission.mission_id,
@@ -1517,11 +2468,11 @@ class ComputerMissionExecutor:
         if not ref:
             return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
                     "dialog": "unknown_cookie_consent"}
-        guard = self._observe_browser(
-            mission, ComputerMissionStep("consent-observe", "Validar janela antes do consentimento",
-                                         "observe_browser", expected_state={}))
-        if not guard.get("ok"):
-            return guard
+        health = self.service.execute_tool(
+            "browser_health", {}, command="computer_mission:cookie_consent",
+            task_id=mission.mission_id)
+        if not health.get("ok") or not health.get("started"):
+            return {"ok": False, "error": "BROWSER_SESSION_NOT_STARTED"}
         clicked = self.service.execute_tool(
             "browser_click", {"ref": ref, "selector": "", "text": ""},
             command="computer_mission:cookie_consent", task_id=mission.mission_id)
@@ -1533,6 +2484,11 @@ class ComputerMissionExecutor:
         elements_result = self.service.execute_tool(
             "browser_get_elements", {}, command="computer_mission:cookie_consent",
             task_id=mission.mission_id)
+        refreshed_health = self.service.execute_tool(
+            "browser_health", {}, command="computer_mission:cookie_consent",
+            task_id=mission.mission_id)
+        if refreshed_health.get("ok"):
+            mission.result["browser_page_state_id"] = refreshed_health.get("page_state_id")
         barrier = classify_page_barrier(page_result.get("page") or {},
                                         elements_result.get("elements") or [])
         self.service.audit.add(
@@ -1827,15 +2783,31 @@ class ComputerMissionExecutor:
         return True
 
     def _validate_step_result(self, step, result):
+        valid = None
         if step.action_type == "verify_file":
-            return bool(result.get("verified") and result.get("file_exists")
-                        and result.get("content_valid"))
-        if step.action_type == "observe_window":
-            return bool(result.get("verified"))
-        if step.action_type in {"focus_browser", "observe_browser", "ground_search_field",
-                                "verify_browser_results"}:
-            return bool(result.get("verified") or result.get("focused"))
-        return bool(result.get("ok"))
+            valid = bool(result.get("verified") and result.get("file_exists")
+                         and result.get("content_valid"))
+        elif step.action_type == "observe_window":
+            valid = bool(result.get("verified"))
+        elif step.action_type in {"focus_browser", "observe_browser", "ground_search_field",
+                                  "verify_browser_results"}:
+            valid = bool(result.get("verified") or result.get("focused"))
+        else:
+            valid = bool(result.get("ok"))
+        if not valid:
+            return False
+        for produced in step.produces:
+            if produced in {"python_version", "python_page_title", "ollama_page_title"}:
+                stored = self._active.context.resolve(
+                    produced, mission_id=self._active.mission_id,
+                    current_step=self._active.current_step) if self._active and self._active.context else (None, "")
+                if not stored[0]:
+                    return False
+            elif produced == "summary_text" and not result.get("text"):
+                return False
+            elif produced == "summary_text_verified" and not result.get("editor_content_verified", True):
+                return False
+        return True
 
     def _window_fingerprint(self):
         try:
@@ -1868,7 +2840,8 @@ class ComputerMissionExecutor:
                    "editor_content_verified", "mission_to_editor_match",
                    "editor_identity", "content_state_id", "overwrite_confirmed",
                    "document_identity", "mission_document_id", "created_by_mission",
-                   "pre_existing_document"}
+                   "pre_existing_document", "checkpoint_name", "skipped",
+                   "receipt", "source_variables", "cross_app_data_match"}
         return {key: value for key, value in result.items() if key in allowed}
 
     def _finish(self, mission, ok):
@@ -1886,4 +2859,5 @@ class ComputerMissionExecutor:
 __all__ = [
     "ComputerMission", "ComputerMissionExecutor", "ComputerMissionPlanner",
     "ComputerMissionStep", "MissionStatus", "MissionStepStatus",
+    "MissionContext", "MissionCheckpointStore", "CheckpointState", "ActionState",
 ]

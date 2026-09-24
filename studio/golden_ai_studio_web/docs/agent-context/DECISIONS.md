@@ -30,3 +30,18 @@ estado de página e referências stale antes de agir. Consentimento de cookies, 
 verificação anti-bot não são aceitos, resolvidos nem contornados; esses estados terminam em
 `USER_CONFIRMATION_REQUIRED`. A missão real de busca OpenAI ficou bloqueada por esse estado
 externo, então a fase não é marcada como CLOSED.
+
+## 2026-09-24 — Computer Use 6D usa checkpoints lógicos duráveis
+
+Workflows longos reutilizam o `TaskDatabase` existente para `mission_checkpoints` e
+`mission_action_receipts`. Checkpoints persistem apenas estado lógico seguro, com schema version,
+integrity hash e context revision; coordenadas, screenshots, cookies, tokens e handles não são
+persistidos. O resume exige token explícito, revalida o mundo e evita repetir efeitos já
+verificados. Estado externo desconhecido é recuperado por verificação antes de qualquer retry.
+
+## 2026-09-24 — 6D real permanece PARTIAL na confirmação de Save As
+
+A missão real pausou em `CHECKPOINT_PYTHON_DONE`, retomou sem reexecutar Python, concluiu a
+pesquisa de Ollama e a transferência para o Notepad, e parou em `open-save-dialog` porque a
+escrita de `resumo_pesquisa.txt` não foi autorizada. O caminho não foi criado; qualquer
+continuação requer autorização explícita para o alvo exato.
