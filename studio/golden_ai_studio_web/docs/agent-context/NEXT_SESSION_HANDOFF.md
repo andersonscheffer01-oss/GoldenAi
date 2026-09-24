@@ -186,3 +186,34 @@ The real mission `Abra o Bloco de Notas, escreva Golden Jarvis funcionando, salv
 - SecurityManager confirmations and mission-scoped AuditLog entries were present.
 - `PATH_NOT_FOUND` is fail-closed, audited, bounded, and can dismiss only an exactly matched Windows path-error dialog before re-resolving the target.
 - Do not touch `device_registry.json`; do not push.
+
+## Computer Use 4D Browser Use
+
+Date: 2026-09-23
+
+Status: PARTIAL/BLOCKED. The implementation uses the existing Jarvis singleton and mission
+stack. It does not create a second planner, executor, SecurityManager, ToolRegistry, browser
+core, or AuditLog.
+
+Implemented and regression-tested:
+
+- visible Edge/Chromium provider selection without hardcoded browser installation paths;
+- UIA browser-window focus guard and active-process validation;
+- structured DOM/ARIA search-field grounding, including `textarea` fields;
+- grounded search submission with bounded navigation/content wait;
+- page-state tracking, stale-result protection, result extraction, and audit events;
+- fail-closed handling for cookie consent and anti-bot/verification markers;
+- no CAPTCHA solving, consent clicking, or anti-bot bypass.
+
+Real validation:
+
+- Edge opened and the correct `msedge.exe` window was focused;
+- Bing's search field was grounded and navigation state was observed;
+- Bing then exposed a consent dialog (`Aceitar`, `Rejeitar`, `Mais opções`), while a prior
+  Google attempt exposed anti-bot verification;
+- the mission did not extract three valid result titles and remains BLOCKED pending a permitted
+  benign consent decision or another authorized result page.
+
+Next action must remain within Browser Use 4D. Do not reopen OmniRoute/Groq/RTK work, do not
+touch `device_registry.json`, and do not push. If the user does not authorize the benign browser
+consent action, keep the phase partial/blocked rather than bypassing the barrier.

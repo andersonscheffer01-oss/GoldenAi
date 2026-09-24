@@ -97,3 +97,21 @@ Próximo: aguardar autorização; não iniciar M1.6.
 - `PATH_NOT_FOUND` is audited, bounded, re-resolves the Known Folder, and only dismisses a matching Windows error dialog.
 - Authorized result verified at the resolved Documents folder with exact content `Golden Jarvis funcionando`.
 - Focused Computer Use/UIA/Vision/Security regression: 172 passed, 30 subtests passed.
+
+## Computer Use 4D — Controlled Browser Use
+
+**Date:** 2026-09-23
+**Status:** PARTIAL — real mission blocked by browser consent/verification state
+
+- Browser Use extends the existing singleton BrowserSession, ToolRegistry, SecurityManager,
+  AuditLog, planner, and mission executor; no parallel Jarvis core was created.
+- Visible Edge launch, UIA window focus guard, structured field grounding, navigation
+  detection, stale-ref protection, bounded wait, and DOM/ARIA page extraction are wired
+  through the existing service.
+- The real mission opened Edge, focused the correct `msedge.exe` window, grounded the
+  textarea search field, and reached the search page state.
+- Bing exposed a cookie consent dialog (`Aceitar`, `Rejeitar`, `Mais opções`) and the
+  controlled flow stopped without clicking it. A prior Google attempt exposed an anti-bot
+  verification page. Neither CAPTCHA nor consent/verification barriers are bypassed.
+- The phase is not CLOSED because three valid result titles were not extracted from a
+  permitted result page. The safe outcome is `USER_CONFIRMATION_REQUIRED`/blocked.

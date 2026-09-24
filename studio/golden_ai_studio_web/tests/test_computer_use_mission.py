@@ -17,6 +17,10 @@ MISSION = (
     "salve como teste.txt e confirme que foi salvo."
 )
 
+BROWSER_MISSION = (
+    "Jarvis, abra o navegador, pesquise OpenAI e me diga o título dos três primeiros resultados."
+)
+
 
 class FakeRegistry:
     def __init__(self, names):
@@ -82,6 +86,69 @@ class FakeService:
                                  confirmed=True)
 
 
+class FakeBrowserService:
+    def __init__(self, wrong_window=False, popup=False, anti_bot=False):
+        self.registry = FakeRegistry({
+            "browser_open", "browser_navigate", "browser_health", "browser_get_elements",
+            "browser_search", "browser_get_page_info", "ui_active_window", "ui_focus_window",
+        })
+        self.cancellation = CancellationToken()
+        self.audit = SimpleNamespace(add=lambda **_kwargs: None)
+        self.calls = []
+        self.page_state_id = 1
+        self.wrong_window = wrong_window
+        self.popup = popup
+        self.anti_bot = anti_bot
+
+    def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False):
+        self.calls.append((name, dict(arguments), confirmed))
+        if name == "browser_open":
+            return {"ok": True, "started": True, "headless": False}
+        if name == "browser_navigate":
+            self.page_state_id += 1
+            return {"ok": True, "url": "https://www.google.com/", "title": "Google"}
+        if name == "browser_health":
+            return {"ok": True, "started": True, "headless": False,
+                    "current_url": "https://www.google.com/search?q=OpenAI",
+                    "page_title": "OpenAI - Google Search",
+                    "page_state_id": self.page_state_id}
+        if name == "ui_active_window":
+            if self.wrong_window:
+                return {"ok": True, "found": True, "title": "Codex",
+                        "process_name": "Codex.exe"}
+            return {"ok": True, "found": True, "title": "Google - Microsoft Edge",
+                    "process_name": "msedge.exe"}
+        if name == "ui_focus_window":
+            return {"ok": False} if self.wrong_window else {"ok": True, "focused": True}
+        if name == "browser_get_elements":
+            if self.popup:
+                return {"ok": True, "elements": [
+                    {"ref": "e2", "tag": "button", "text": "Aceitar"},
+                    {"ref": "e3", "tag": "button", "text": "Rejeitar"},
+                ]}
+            return {"ok": True, "elements": [
+                {"ref": "e1", "tag": "input", "input_type": "text",
+                 "aria_label": "Search", "placeholder": "Search"},
+            ]}
+        if name == "browser_search":
+            self.page_state_id += 1
+            return {"ok": True, "navigation_changed": True,
+                    "url": "https://www.google.com/search?q=OpenAI",
+                    "title": "OpenAI - Google Search", "page_state_id": self.page_state_id}
+        if name == "browser_get_page_info":
+            return {"ok": True, "page": {
+                "url": "https://www.google.com/search?q=OpenAI",
+                "title": "OpenAI - Google Search",
+                "text": "Verify you are human" if self.anti_bot else "",
+                "links": [
+                    {"text": "OpenAI official", "href": "https://openai.com/"},
+                    {"text": "OpenAI API", "href": "https://platform.openai.com/"},
+                    {"text": "OpenAI Wikipedia", "href": "https://en.wikipedia.org/wiki/OpenAI"},
+                ],
+            }}
+        return {"ok": False, "error": "unexpected_tool"}
+
+
 def test_planner_creates_bounded_registered_steps(tmp_path):
     service = FakeService(tmp_path)
     mission = ComputerMissionPlanner(service.registry, documents_dir=tmp_path).plan(MISSION)
@@ -92,6 +159,59 @@ def test_planner_creates_bounded_registered_steps(tmp_path):
     assert mission.risk_level == "WRITE"
     assert [step.action_type for step in mission.steps][-1] == "verify_file"
     assert mission.steps[-1].expected_state["content"] == "Golden Jarvis funcionando"
+
+
+def test_browser_planner_reuses_registered_browser_capabilities():
+    service = FakeBrowserService()
+    mission = ComputerMissionPlanner(service.registry).plan(BROWSER_MISSION)
+    assert mission.result["browser_mission"] is True
+    assert mission.result["search_query"] == "OpenAI"
+    assert [step.action_type for step in mission.steps] == [
+        "browser_open", "browser_navigate", "focus_browser", "observe_browser",
+        "ground_search_field", "browser_search", "observe_browser",
+        "browser_get_page_info", "verify_browser_results",
+    ]
+
+
+def test_browser_executor_grounds_search_and_extracts_three_titles():
+    service = FakeBrowserService()
+    executor = ComputerMissionExecutor(service)
+    result = executor.run(BROWSER_MISSION, task_id="browser-mission-test")
+    assert result["ok"] is True
+    assert result["mission"]["status"] == MissionStatus.COMPLETED.value
+    assert result["mission"]["result"]["result_count"] == 3
+    assert result["mission"]["result"]["titles"] == [
+        "OpenAI official", "OpenAI API", "OpenAI Wikipedia"]
+    assert any(name == "browser_search" and args["ref"] == "e1"
+               for name, args, _ in service.calls)
+
+
+def test_browser_executor_blocks_when_focus_guard_fails():
+    service = FakeBrowserService(wrong_window=True)
+    executor = ComputerMissionExecutor(service)
+    result = executor.run(BROWSER_MISSION, task_id="browser-focus-test")
+    assert result["ok"] is False
+    assert result["mission"]["status"] == MissionStatus.BLOCKED.value
+    assert result["mission"]["error"] == "ACTION_LOOP_DETECTED"
+
+
+def test_browser_executor_stops_for_unexpected_consent_popup():
+    service = FakeBrowserService(popup=True)
+    executor = ComputerMissionExecutor(service)
+    result = executor.run(BROWSER_MISSION, task_id="browser-popup-test")
+    assert result["ok"] is False
+    assert result["mission"]["status"] == MissionStatus.WAITING_CONFIRMATION.value
+    assert result["mission"]["error"] == "USER_CONFIRMATION_REQUIRED"
+
+
+def test_browser_executor_stops_for_anti_bot_verification():
+    service = FakeBrowserService(anti_bot=True)
+    executor = ComputerMissionExecutor(service)
+    result = executor.run(BROWSER_MISSION, task_id="browser-anti-bot-test")
+
+    assert result["ok"] is False
+    assert result["mission"]["status"] == MissionStatus.WAITING_CONFIRMATION.value
+    assert result["mission"]["error"] == "USER_CONFIRMATION_REQUIRED"
 
 
 def test_executor_runs_one_step_at_a_time_and_verifies_file(tmp_path):

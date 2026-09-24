@@ -28,6 +28,7 @@ EXTERNAL CONTENT:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 import urllib.parse
@@ -332,9 +333,11 @@ class BrowserSession:
     - Automatic cleanup on failure
     """
 
-    def __init__(self, headless: bool = True, timeout_ms: int = _DEFAULT_TIMEOUT_MS):
+    def __init__(self, headless: bool = True, timeout_ms: int = _DEFAULT_TIMEOUT_MS,
+                 provider: str = "default"):
         self.headless = headless
         self.timeout_ms = timeout_ms
+        self.provider = str(provider or "default").casefold()
         self._playwright = None
         self._browser = None
         self._context = None
@@ -344,6 +347,9 @@ class BrowserSession:
         self._nav_index: int = -1
         self._started = False
         self._started_at: float = 0.0
+        self._last_action = ""
+        self._last_observation: dict[str, Any] = {}
+        self._page_state_id = 0
 
     @property
     def is_started(self) -> bool:
@@ -367,7 +373,20 @@ class BrowserSession:
         try:
             from playwright.sync_api import sync_playwright
             self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(headless=self.headless)
+            launch_kwargs = {"headless": self.headless}
+            channel = {"edge": "msedge", "chrome": "chrome"}.get(self.provider)
+            if self.provider == "default" and not self.headless:
+                channel = "msedge"
+            if channel:
+                launch_kwargs["channel"] = channel
+            try:
+                self._browser = self._playwright.chromium.launch(**launch_kwargs)
+            except Exception:
+                if not self.headless and channel:
+                    launch_kwargs.pop("channel", None)
+                    self._browser = self._playwright.chromium.launch(**launch_kwargs)
+                else:
+                    raise
             self._context = self._browser.new_context(
                 viewport={"width": 1280, "height": 720},
                 user_agent=(
@@ -379,8 +398,11 @@ class BrowserSession:
             self._page = self._context.new_page()
             self._started = True
             self._started_at = time.time()
+            self._page_state_id = 0
+            self._last_action = "start"
             logger.info("Browser session started (headless=%s)", self.headless)
-            return {"ok": True, "message": "Browser started", "headless": self.headless}
+            return {"ok": True, "message": "Browser started", "headless": self.headless,
+                    "provider": self.provider}
         except ImportError:
             return {"ok": False, "error": "Playwright not installed. Run: pip install playwright && python -m playwright install chromium"}
         except Exception as e:
@@ -475,6 +497,10 @@ class BrowserSession:
 
             # Reset element refs for new page
             self._element_refs.reset(final_url)
+            self._page_state_id += 1
+            self._last_action = "navigate"
+            self._last_observation = {"url": final_url, "title": title,
+                                      "page_state_id": self._page_state_id}
 
             return {
                 "ok": True,
@@ -504,6 +530,8 @@ class BrowserSession:
             self._nav_index -= 1
             final_url = self._page.url
             self._element_refs.reset(final_url)
+            self._page_state_id += 1
+            self._last_action = "back"
             return {"ok": True, "url": final_url, "title": self._page.title() or ""}
         except Exception as e:
             return {"ok": False, "error": "NAVIGATION_FAILED", "message": str(e)[:200]}
@@ -522,6 +550,8 @@ class BrowserSession:
             self._nav_index += 1
             final_url = self._page.url
             self._element_refs.reset(final_url)
+            self._page_state_id += 1
+            self._last_action = "forward"
             return {"ok": True, "url": final_url, "title": self._page.title() or ""}
         except Exception as e:
             return {"ok": False, "error": "NAVIGATION_FAILED", "message": str(e)[:200]}
@@ -749,6 +779,73 @@ class BrowserSession:
                 return {"ok": False, "error": "TIMEOUT", "message": "Type timed out"}
             return {"ok": False, "error": "TYPE_FAILED", "message": error_str[:200]}
 
+    def search(self, query: str, ref: str = "") -> dict[str, Any]:
+        """Fill a freshly grounded search field and submit it with Enter."""
+        if not str(query or "").strip():
+            return {"ok": False, "error": "SEARCH_QUERY_EMPTY"}
+        typed = self.type_text(ref=ref, text=str(query), clear=True)
+        if not typed.get("ok"):
+            return typed
+        try:
+            before = {"url": self._page.url, "title": self._page.title() or ""}
+            selector = self._build_selector(self._element_refs.get(ref) or {}) if ref else ""
+            if not selector:
+                return {"ok": False, "error": "SEARCH_FIELD_STALE"}
+            self._page.locator(selector).press("Enter", timeout=self.timeout_ms)
+            self._last_action = "search"
+            result = self.wait_for_navigation(before=before, timeout_ms=5000,
+                                              require_content=True)
+            if result.get("ok"):
+                return result
+            submit = self._page.locator(
+                'button[type="submit"], input[type="submit"]')
+            if submit.count() > 0:
+                submit.first.click(timeout=self.timeout_ms)
+                return self.wait_for_navigation(before=before, timeout_ms=15000,
+                                                require_content=True)
+            return result
+        except Exception as exc:
+            return {"ok": False, "error": "SEARCH_EXECUTION_FAILED",
+                    "message": str(exc)[:200]}
+
+    def wait_for_navigation(self, before: Optional[dict[str, str]] = None,
+                            timeout_ms: int = 15000,
+                            require_content: bool = False) -> dict[str, Any]:
+        """Wait for URL/title or visible body state to change, with cancellation-free timeout."""
+        err = self._require_started()
+        if err:
+            return {"ok": False, "error": err}
+        before = before or {"url": self._page.url, "title": self._page.title() or ""}
+        deadline = time.monotonic() + max(0.1, min(float(timeout_ms) / 1000, 30.0))
+        while time.monotonic() < deadline:
+            try:
+                current = {"url": self._page.url, "title": self._page.title() or ""}
+                if current != before:
+                    if require_content:
+                        try:
+                            self._page.wait_for_load_state("domcontentloaded", timeout=2000)
+                        except Exception:
+                            pass
+                        content_deadline = min(deadline, time.monotonic() + 8.0)
+                        while time.monotonic() < content_deadline:
+                            try:
+                                body_text = self._page.locator("body").inner_text(timeout=500)
+                                link_count = self._page.locator("a[href]").count()
+                                if len(str(body_text or "").strip()) >= 20 or link_count >= 3:
+                                    break
+                            except Exception:
+                                pass
+                            time.sleep(0.15)
+                    self._page_state_id += 1
+                    self._last_observation = {**current, "page_state_id": self._page_state_id}
+                    return {"ok": True, "navigation_changed": True, **current,
+                            "page_state_id": self._page_state_id}
+            except Exception:
+                pass
+            time.sleep(0.15)
+        return {"ok": False, "error": "NAVIGATION_TIMEOUT",
+                "before": before, "url": self._page.url}
+
     def scroll(self, direction: str = "down", amount: int = 500) -> dict[str, Any]:
         """Scroll the page."""
         err = self._require_started()
@@ -852,11 +949,15 @@ class BrowserSession:
             "ok": True,
             "started": self._started,
             "headless": self.headless,
+            "provider": self.provider,
             "current_url": self.current_url,
             "page_title": self._page.title() if self._page and not self._page.is_closed() else "",
             "element_refs_count": self._element_refs.count,
             "nav_history_length": len(self._nav_history),
             "uptime_seconds": int(time.time() - self._started_at) if self._started else 0,
+            "page_state_id": self._page_state_id,
+            "last_action": self._last_action,
+            "last_observation": dict(self._last_observation),
         }
 
 
@@ -883,16 +984,23 @@ class _BrowserThread:
     Uses a work queue so all BrowserSession calls execute in one thread.
     """
 
-    def __init__(self):
+    def __init__(self, headless: bool = True, provider: str = "default"):
         self._session: Optional[BrowserSession] = None
         self._thread: Optional[threading.Thread] = None
         self._queue: queue.Queue = queue.Queue()
         self._started = False
         self._ready = threading.Event()
+        self._headless = bool(headless)
+        self._provider = str(provider or "default")
 
     def _run_loop(self):
         """Target for the dedicated thread — processes work items."""
-        self._session = BrowserSession(headless=True)
+        try:
+            self._session = BrowserSession(headless=self._headless, provider=self._provider)
+        except TypeError as exc:
+            if "provider" not in str(exc):
+                raise
+            self._session = BrowserSession(headless=self._headless)
         self._started = True
         self._ready.set()
         try:
@@ -964,11 +1072,19 @@ def get_session() -> BrowserSession:
     return _browser_thread._session
 
 
-def get_browser_thread() -> _BrowserThread:
+def get_browser_thread(headless: Optional[bool] = None,
+                       provider: Optional[str] = None) -> _BrowserThread:
     """Get the browser thread dispatcher."""
     global _browser_thread
     if _browser_thread is None:
-        _browser_thread = _BrowserThread()
+        _browser_thread = _BrowserThread(headless=True if headless is None else headless,
+                                         provider=provider or "default")
+    elif headless is not None and provider is not None and (
+          _browser_thread._headless != bool(headless) or
+          _browser_thread._provider.casefold() != str(provider or "default").casefold()):
+        if _browser_thread._started:
+            _browser_thread.stop()
+        _browser_thread = _BrowserThread(headless=headless, provider=provider)
     if not _browser_thread._started:
         _browser_thread.start()
     return _browser_thread

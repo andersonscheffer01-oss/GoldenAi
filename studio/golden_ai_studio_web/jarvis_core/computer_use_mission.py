@@ -8,6 +8,7 @@ required.
 from __future__ import annotations
 
 import re
+import os
 import threading
 import time
 import uuid
@@ -17,6 +18,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .windows_known_folders import documents_dir as known_documents_dir
+
+
+DEFAULT_SEARCH_HOME = os.getenv("JARVIS_BROWSER_SEARCH_HOME", "https://www.bing.com")
 
 
 class MissionStatus(str, Enum):
@@ -110,6 +114,7 @@ class ComputerMissionPlanner:
 
     MAX_STEPS = 30
     _NOTEPAD_RE = re.compile(r"\b(bloco\s+de\s+notas|notepad)\b", re.I)
+    _BROWSER_RE = re.compile(r"\b(navegador|browser|chrome|edge)\b", re.I)
     _SAVE_RE = re.compile(r"\bsalv(?:e|ar|a)\s+(?:como\s+)?([\w.-]+)", re.I)
 
     def __init__(self, registry, documents_dir: Optional[Path] = None):
@@ -127,6 +132,8 @@ class ComputerMissionPlanner:
     def can_plan(self, request: str) -> bool:
         text = str(request or "")
         low = text.casefold()
+        if self._BROWSER_RE.search(text):
+            return bool(re.search(r"\b(pesquis|buscar|busque|procure)\w*\b", low))
         return bool(self._NOTEPAD_RE.search(text) and
                     re.search(r"\b(escrev|digit|salv|confirme|funcionando)\w*\b", low))
 
@@ -134,6 +141,8 @@ class ComputerMissionPlanner:
         if not self.can_plan(request):
             raise ValueError("Missão Computer Use não reconhecida.")
         text = str(request).strip()
+        if self._BROWSER_RE.search(text):
+            return self._plan_browser_search(text)
         match = self._SAVE_RE.search(text)
         filename = match.group(1) if match else "teste.txt"
         filename = Path(filename).name
@@ -196,6 +205,51 @@ class ComputerMissionPlanner:
         ]
         return ComputerMission(str(uuid.uuid4()), text, MissionStatus.PENDING,
                                time.time(), steps, max_steps=self.MAX_STEPS)
+
+    def _plan_browser_search(self, text: str) -> ComputerMission:
+        match = re.search(
+            r"\b(?:pesquis(?:e|ar)?|busque|buscar|procure)\s+(.+?)(?=\s+e\s+me\s+diga|\s+e\s+abra|$)",
+            text, re.I)
+        query = (match.group(1).strip(" \t,\"'") if match else "")
+        if not query:
+            raise ValueError("Consulta de navegador vazia.")
+        tool_names = {
+            "browser_open", "browser_navigate", "browser_health", "browser_get_elements",
+            "browser_search", "browser_get_page_info", "ui_active_window", "ui_focus_window",
+        }
+        missing = sorted(name for name in tool_names if self.registry.get(name) is None)
+        if missing:
+            raise ValueError("Capacidades não registradas: " + ", ".join(missing))
+
+        def step(step_id, description, action_type, target="", expected=None, args=None):
+            return ComputerMissionStep(step_id, description, action_type, target,
+                                       expected or {}, args or {})
+
+        steps = [
+            step("open-browser", "Abrir navegador visível controlado", "browser_open",
+                 target="browser", args={"visible": True, "provider": "default"}),
+            step("navigate-search-home", "Abrir página inicial de pesquisa", "browser_navigate",
+                 target=DEFAULT_SEARCH_HOME, args={"url": DEFAULT_SEARCH_HOME}),
+            step("focus-browser", "Confirmar foco no navegador", "focus_browser",
+                 target="browser", expected={"browser_process": True}),
+            step("observe-browser", "Confirmar sessão e janela do navegador", "observe_browser",
+                 target="browser", expected={"browser_process": True}),
+            step("ground-search-field", "Localizar campo de busca por elementos estruturados",
+                 "ground_search_field", target="search-field"),
+            step("execute-search", "Executar busca textual", "browser_search",
+                 target="search-field", args={"query": query, "ref": ""}),
+            step("observe-results", "Detectar mudança real de página", "observe_browser",
+                 target="results", expected={"page_changed": True}),
+            step("read-visible-results", "Ler conteúdo visível estruturado", "browser_get_page_info",
+                 target="page"),
+            step("verify-three-results", "Validar três títulos de resultados", "verify_browser_results",
+                 target="results", expected={"minimum": 3}),
+        ]
+        mission = ComputerMission(str(uuid.uuid4()), text, MissionStatus.PENDING,
+                                  time.time(), steps, max_steps=self.MAX_STEPS)
+        mission.result["browser_mission"] = True
+        mission.result["search_query"] = query
+        return mission
 
 
 class ComputerMissionExecutor:
@@ -279,6 +333,15 @@ class ComputerMissionExecutor:
                 result = self._verify_file(step)
             elif step.action_type == "observe_window":
                 result = self._observe_window(step)
+            elif step.action_type == "focus_browser":
+                result = self._focus_browser()
+            elif step.action_type == "observe_browser":
+                result = self._observe_browser(mission, step)
+            elif step.action_type == "ground_search_field":
+                result = self._ground_search_field(mission)
+            elif step.action_type == "verify_browser_results":
+                step.status = MissionStepStatus.VERIFYING
+                result = self._verify_browser_results(mission, step)
             else:
                 result = self._execute_tool_step(mission, step, task_id, preconfirmed)
                 preconfirmed = None
@@ -290,6 +353,18 @@ class ComputerMissionExecutor:
                 self._audit_step(mission, step, result, "waiting_confirmation")
                 return self._finish(mission, False)
             if not result.get("ok"):
+                if result.get("error") == "USER_CONFIRMATION_REQUIRED":
+                    mission.status = MissionStatus.WAITING_CONFIRMATION
+                    mission.error = "USER_CONFIRMATION_REQUIRED"
+                    step.status = MissionStepStatus.WAITING_CONFIRMATION
+                    self._audit_step(mission, step, result, "user_confirmation_required")
+                    return self._finish(mission, False)
+                if result.get("error") in {"NAVIGATION_TIMEOUT", "SEARCH_EXECUTION_FAILED"}:
+                    mission.status = MissionStatus.BLOCKED
+                    mission.error = str(result.get("error"))
+                    step.status = MissionStepStatus.BLOCKED
+                    self._audit_step(mission, step, result, "blocked")
+                    return self._finish(mission, False)
                 if self._is_path_not_found(result):
                     self._audit_step(mission, step, result, "path_not_found")
                     if self._recover_path_not_found(mission, step, result):
@@ -324,14 +399,26 @@ class ComputerMissionExecutor:
             mission.status = MissionStatus.OBSERVING
 
         mission.status = MissionStatus.COMPLETED
-        mission.result = {"mission_completed": True,
-                          "file_exists": bool(mission.steps[-1].result.get("file_exists")),
-                          "content_valid": bool(mission.steps[-1].result.get("content_valid"))}
+        if mission.result.get("browser_mission"):
+            mission.result.update({"mission_completed": True,
+                                   "result_count": len(mission.result.get("titles", []))})
+        else:
+            mission.result = {"mission_completed": True,
+                              "file_exists": bool(mission.steps[-1].result.get("file_exists")),
+                              "content_valid": bool(mission.steps[-1].result.get("content_valid"))}
         return self._finish(mission, True)
 
     def _execute_tool_step(self, mission, step, task_id, preconfirmed):
         if preconfirmed and preconfirmed[0] is step:
             return preconfirmed[1]
+        if step.action_type == "browser_search":
+            ref = str(mission.result.get("search_ref") or "")
+            if not ref:
+                return {"ok": False, "error": "SEARCH_FIELD_NOT_GROUNDED"}
+            step.args["ref"] = ref
+            guard = self._observe_browser(mission, step)
+            if not guard.get("ok"):
+                return guard
         if step.action_type in self._ACTION_TOOLS:
             guard = self._observe_window(step)
             if not guard.get("ok"):
@@ -340,6 +427,118 @@ class ComputerMissionExecutor:
         return self.service.execute_tool(step.action_type, step.args,
                                           command=f"computer_mission:{mission.mission_id}",
                                           task_id=mission.mission_id)
+
+    def _focus_browser(self):
+        for process in ("msedge", "chrome", "chromium", "firefox"):
+            result = self.service.execute_tool(
+                "ui_focus_window", {"window": process},
+                command="computer_mission:focus_browser", task_id="computer-mission")
+            if result.get("ok"):
+                return {"ok": True, "focused": True, "browser_process": process,
+                        "verification": "browser_window_focus_guard"}
+        return {"ok": False, "error": "CORRECT_BROWSER_WINDOW_NOT_FOCUSED"}
+
+    def _observe_browser(self, mission, step):
+        health = self.service.execute_tool(
+            "browser_health", {}, command="computer_mission:observe_browser",
+            task_id=mission.mission_id)
+        if not health.get("ok") or not health.get("started"):
+            return {"ok": False, "error": "BROWSER_SESSION_NOT_STARTED"}
+        active = self.service.execute_tool(
+            "ui_active_window", {}, command="computer_mission:observe_browser",
+            task_id=mission.mission_id)
+        data = active.get("result") if isinstance(active.get("result"), dict) else active
+        process = str(data.get("process_name") or "").casefold()
+        if not any(name in process for name in ("msedge", "chrome", "chromium", "firefox")):
+            return {"ok": False, "error": "CORRECT_BROWSER_WINDOW_NOT_FOCUSED"}
+        state_id = health.get("page_state_id")
+        previous = mission.result.get("browser_page_state_id")
+        if step.expected_state.get("page_changed") and previous is not None and state_id == previous:
+            return {"ok": False, "error": "NAVIGATION_STATE_NOT_CHANGED"}
+        mission.result["browser_page_state_id"] = state_id
+        mission.result["browser_url"] = health.get("current_url", "")
+        mission.result["browser_title"] = health.get("page_title", "")
+        return {"ok": True, "verified": True,
+                "verification": "browser_window_and_session_state",
+                "window": data, "health": health}
+
+    def _ground_search_field(self, mission):
+        result = self.service.execute_tool(
+            "browser_get_elements", {}, command="computer_mission:ground_search_field",
+            task_id=mission.mission_id)
+        elements = list(result.get("elements") or [])
+        popup_terms = ("aceitar", "rejeitar", "accept", "reject", "consent")
+        popup = [item for item in elements if any(
+            term in " ".join(str(item.get(key) or "").casefold()
+                              for key in ("text", "aria_label", "placeholder"))
+            for term in popup_terms)]
+        if popup:
+            return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
+                    "dialog": "browser_consent_or_privacy_popup"}
+        candidates = [item for item in elements
+                      if str(item.get("tag")) in {"input", "textarea"}]
+        search_terms = ("search", "busca", "query", "pesquisar")
+        preferred = [item for item in candidates if any(
+            term in " ".join(str(item.get(key) or "").casefold()
+                              for key in ("aria_label", "placeholder", "text"))
+            for term in search_terms)]
+        selected = (preferred or [item for item in candidates
+                                  if str(item.get("input_type") or "text").casefold() in
+                                  {"", "text", "search"} or
+                                  str(item.get("tag")) == "textarea"])
+        if not result.get("ok") or not selected:
+            return {"ok": False, "error": "SEARCH_FIELD_NOT_FOUND"}
+        ref = str(selected[0].get("ref") or "")
+        if not ref:
+            return {"ok": False, "error": "SEARCH_FIELD_UNGROUNDED"}
+        mission.result["search_ref"] = ref
+        return {"ok": True, "verified": True, "ref": ref,
+                "verification": "structured_search_field_grounding"}
+
+    def _verify_browser_results(self, mission, step):
+        result = self.service.execute_tool(
+            "browser_get_page_info", {}, command="computer_mission:verify_results",
+            task_id=mission.mission_id)
+        page = result.get("page") or {}
+        links = list(page.get("links") or [])
+        page_url = str(page.get("url") or "")
+        page_text = str(page.get("text") or "").casefold()
+        blocked_markers = ("tráfego incomum", "unusual traffic", "captcha",
+                           "verify you are human", "verifique se é você",
+                           "detected automated traffic")
+        if any(marker in page_text for marker in blocked_markers):
+            return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
+                    "dialog": "browser_anti_bot_or_verification"}
+        try:
+            page_host = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(page_url).netloc
+        except Exception:
+            page_host = ""
+        excluded = {"images", "videos", "maps", "news", "shopping", "sign in", "more"}
+        titles = []
+        sources = []
+        for link in links:
+            title = " ".join(str(link.get("text") or "").split())
+            href = str(link.get("href") or "")
+            try:
+                host = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(href).netloc
+            except Exception:
+                host = ""
+            if (len(title) < 3 or title.casefold() in excluded or
+                    not href.startswith(("http://", "https://")) or host == page_host):
+                continue
+            if title not in titles:
+                titles.append(title)
+                sources.append(href)
+            if len(titles) >= int(step.expected_state.get("minimum", 3)):
+                break
+        ok = bool(result.get("ok")) and len(titles) >= 3
+        if ok:
+            mission.result.update({"titles": titles[:3], "source_urls": sources[:3],
+                                   "page_title": page.get("title", ""),
+                                   "page_url": page_url})
+        return {"ok": ok, "verified": ok, "titles": titles[:3],
+                "source_urls": sources[:3],
+                "error": "THREE_RESULTS_NOT_EXTRACTED" if not ok else ""}
 
     def _observe_window(self, step):
         result = self.service.execute_tool("ui_active_window", {},
@@ -434,6 +633,9 @@ class ComputerMissionExecutor:
                         and result.get("content_valid"))
         if step.action_type == "observe_window":
             return bool(result.get("verified"))
+        if step.action_type in {"focus_browser", "observe_browser", "ground_search_field",
+                                "verify_browser_results"}:
+            return bool(result.get("verified") or result.get("focused"))
         return bool(result.get("ok"))
 
     def _window_fingerprint(self):

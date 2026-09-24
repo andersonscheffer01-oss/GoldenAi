@@ -20,3 +20,13 @@ Missões de arquivo não montam `C:\\Users\\<nome>\\Documents`. No Windows, o de
 Memórias recuperadas nunca recebem autoridade de system prompt. O Brain recebe apenas Top-K
 limitado e rotulado como dado não confiável. Sem `nomic-embed-text`, o fallback é busca lexical
 declarada como degradada; vetores artificiais não representam busca semântica.
+
+## 2026-09-23 — Browser Use 4D permanece controlado e fail-closed
+
+Browser Use reutiliza a sessão Playwright visível e o mesmo `JarvisService`,
+`ToolRegistry`, `SecurityManager`, `AuditLog`, `ComputerMissionPlanner` e
+`ComputerMissionExecutor`. Grounding usa elementos DOM/ARIA e o executor valida janela,
+estado de página e referências stale antes de agir. Consentimento de cookies, CAPTCHA e
+verificação anti-bot não são aceitos, resolvidos nem contornados; esses estados terminam em
+`USER_CONFIRMATION_REQUIRED`. A missão real de busca OpenAI ficou bloqueada por esse estado
+externo, então a fase não é marcada como CLOSED.

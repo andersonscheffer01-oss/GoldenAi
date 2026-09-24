@@ -35,6 +35,7 @@ class SkillsRouter:
             "browser": (Route.BROWSER, (
                 "open_url", "browser_open", "browser_navigate", "browser_get_page_info",
                 "browser_read_page", "browser_get_elements", "browser_click", "browser_type",
+                "browser_search", "browser_wait_for_navigation",
                 "browser_scroll", "browser_back", "browser_forward", "browser_screenshot",
                 "browser_close", "browser_health",
             ), "MEDIUM", ModelProfile.GENERAL),

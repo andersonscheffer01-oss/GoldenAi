@@ -490,8 +490,9 @@ class JarvisService:
             *UI_AUTOMATION_TOOLS,
 
             # --- BROWSER (Playwright V1) ---
-            Tool("browser_open", "Inicia o navegador Playwright (headless)", self._browser_open,
-                 Risk.LOW, timeout=15, category="browser"),
+            Tool("browser_open", "Inicia o navegador Playwright controlado", self._browser_open,
+                 Risk.LOW, timeout=15,
+                 parameters={"visible": bool, "provider": str}, category="browser"),
             Tool("browser_navigate", "Navega para uma URL no navegador", self._browser_navigate,
                  Risk.MEDIUM, timeout=30, parameters={"url": str}, category="browser"),
             Tool("browser_get_page_info", "Extrai informações estruturadas da página (DOM/ARIA)",
@@ -507,6 +508,12 @@ class JarvisService:
                  self._browser_type, Risk.LOW, timeout=15,
                  parameters={"ref": str, "selector": str, "text": str, "clear": bool},
                  category="browser"),
+            Tool("browser_search", "Pesquisa texto em campo identificado e aguarda navegação.",
+                 self._browser_search, Risk.LOW, timeout=30,
+                 parameters={"query": str, "ref": str}, category="browser"),
+            Tool("browser_wait_for_navigation", "Aguarda mudança observável de navegação.",
+                 self._browser_wait_for_navigation, Risk.LOW, timeout=20,
+                 parameters={"timeout_ms": int}, category="browser"),
             Tool("browser_scroll", "Rola a página (down/up/top/bottom)",
                  self._browser_scroll, Risk.LOW, timeout=10,
                  parameters={"direction": str, "amount": int}, category="browser"),
@@ -2102,9 +2109,9 @@ class JarvisService:
     # HANDLERS — BROWSER (Playwright V1)
     # ═══════════════════════════════════════════════════════════════
 
-    def _browser_open(self):
+    def _browser_open(self, visible=False, provider="default"):
         from .browser import get_browser_thread
-        bt = get_browser_thread()
+        bt = get_browser_thread(headless=not bool(visible), provider=provider)
         return bt.submit("start")
 
     def _browser_navigate(self, url=""):
@@ -2130,6 +2137,14 @@ class JarvisService:
     def _browser_type(self, ref="", selector="", text="", clear=True):
         from .browser import get_browser_thread
         return get_browser_thread().submit("type_text", ref=ref, selector=selector, text=text, clear=clear)
+
+    def _browser_search(self, query="", ref=""):
+        from .browser import get_browser_thread
+        return get_browser_thread().submit("search", query=query, ref=ref)
+
+    def _browser_wait_for_navigation(self, timeout_ms=15000):
+        from .browser import get_browser_thread
+        return get_browser_thread().submit("wait_for_navigation", timeout_ms=timeout_ms)
 
     def _browser_scroll(self, direction="down", amount=500):
         from .browser import get_browser_thread
