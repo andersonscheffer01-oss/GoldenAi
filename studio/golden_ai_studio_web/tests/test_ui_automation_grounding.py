@@ -83,6 +83,34 @@ def test_active_window_schema(monkeypatch):
     assert result["backend"] == "uia"
 
 
+def test_focus_window_selects_requested_process_when_chrome_is_ambiguous(monkeypatch):
+    unrelated = _FakeWrapper("MEGA - Google Chrome", "Window",
+                             (0, 0, 800, 600), handle=201, pid=101)
+    session = _FakeWrapper("Google - Google Chrome", "Window",
+                           (0, 0, 800, 600), handle=202, pid=202)
+    class _Desktop:
+        def windows(self, top_level_only=True):
+            return [unrelated, session]
+
+        def window(self, handle):
+            return next(item for item in (unrelated, session)
+                        if item.handle == handle)
+
+    focused = []
+    session.set_focus = lambda: focused.append(session.handle)
+    unrelated.set_focus = lambda: focused.append(unrelated.handle)
+    monkeypatch.setattr(uia, "_desktop", lambda: _Desktop())
+    monkeypatch.setattr(uia, "_window_exists", lambda _handle: True)
+    monkeypatch.setattr(uia, "_foreground_handle", lambda: 202)
+    monkeypatch.setattr(uia, "_process_name", lambda _pid: "chrome.exe")
+
+    result = uia.ui_focus_window("chrome", process_id=202)
+
+    assert result["ok"] is True
+    assert result["window"]["pid"] == 202
+    assert focused == [202]
+
+
 def test_ui_find_element_and_bounds_validation(monkeypatch):
     _fake_tree(monkeypatch)
 
@@ -110,6 +138,65 @@ def test_ui_list_is_limited_and_text_protects_password(monkeypatch):
     assert protected["text"] is None
     assert plain["protected"] is False
     assert plain["text"] == "Nome"
+
+
+def test_editor_read_returns_content_and_document_identity(monkeypatch):
+    root = _FakeWrapper("Sem título - Bloco de notas", "Window",
+                        (0, 0, 800, 600), children=[])
+    editor = _FakeWrapper("Golden Jarvis funcionando", "Document",
+                          (20, 80, 780, 560), handle=101, pid=55)
+    root._children = [editor]
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_window_exists", lambda _handle: True)
+    monkeypatch.setattr(uia, "_window_pid", lambda _handle: 55)
+    monkeypatch.setattr(uia, "_process_name", lambda _pid: "notepad.exe")
+
+    result = uia.ui_read_editor(expected_process="notepad")
+
+    assert result["verified"] is True
+    assert result["text"] == "Golden Jarvis funcionando"
+    assert result["editor"]["document_identity"]
+    assert result["editor"]["content_state_id"]
+
+
+def test_editor_read_rejects_wrong_process(monkeypatch):
+    _fake_tree(monkeypatch)
+    result = uia.ui_read_editor(expected_process="chrome")
+    assert result["found"] is False
+    assert result["reason"] == "process_mismatch"
+
+
+def test_dialog_classifier_distinguishes_unsaved_document(monkeypatch):
+    root = _FakeWrapper("criar_features.py - Bloco de notas", "Window",
+                        (0, 0, 800, 600), children=[])
+    root._children = [
+        _FakeWrapper("Salvar", "Button", (10, 10, 100, 40)),
+        _FakeWrapper("Não salvar", "Button", (110, 10, 220, 40)),
+        _FakeWrapper("Cancelar", "Button", (230, 10, 340, 40)),
+    ]
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_process_name", lambda _pid: "notepad.exe")
+
+    result = uia.ui_classify_dialog("notepad")
+
+    assert result["dialog_type"] == "UNSAVED_DOCUMENT_DIALOG"
+    assert {item["text"] for item in result["visible_controls"]} >= {
+        "Salvar", "Não salvar", "Cancelar"}
+
+
+def test_dialog_classifier_distinguishes_save_as_and_overwrite(monkeypatch):
+    root = _FakeWrapper("Salvar como", "Window", (0, 0, 800, 600), children=[])
+    root._children = [_FakeWrapper("Nome", "Edit", (10, 10, 300, 40))]
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    assert uia.ui_classify_dialog("notepad")["dialog_type"] == "SAVE_AS_DIALOG"
+
+    root.element_info.name = "Confirmar Salvar como"
+    root._children = [
+        _FakeWrapper("pesquisa_python.txt já existe. Substituir?", "Text",
+                     (10, 10, 400, 40)),
+        _FakeWrapper("Cancelar", "Button", (10, 50, 120, 80)),
+    ]
+    assert uia.ui_classify_dialog("notepad")["dialog_type"] == "FILE_OVERWRITE_DIALOG"
 
 
 def test_ui_target_stale_and_window_changed(monkeypatch):
@@ -175,7 +262,9 @@ def test_hybrid_prioritizes_uia_and_blocks_disagreement(monkeypatch):
 def test_ui_tools_are_read_only_and_use_canonical_security_manager(tmp_path):
     service = JarvisService(str(tmp_path))
     names = {"ui_active_window", "ui_find_element", "ui_list_elements",
-             "ui_get_element_text", "hybrid_find_ui_target"}
+             "ui_get_element_text", "ui_read_editor", "ui_focus_editor",
+             "ui_classify_dialog",
+             "hybrid_find_ui_target"}
 
     catalog_names = {item["name"] for item in service.registry.public_catalog()}
     assert names <= catalog_names

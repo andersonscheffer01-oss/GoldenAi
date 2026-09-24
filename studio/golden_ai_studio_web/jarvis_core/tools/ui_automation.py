@@ -7,6 +7,7 @@ SecurityManager before calling the existing mouse/keyboard tools.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import os
 import time
 from collections import deque
@@ -24,6 +25,10 @@ _RELEVANT_CONTROL_TYPES = {
     "button", "menuitem", "edit", "combobox", "checkbox", "radiobutton",
     "tabitem", "hyperlink", "document",
 }
+_PATH_NOT_FOUND_MARKERS = (
+    "caminho especificado", "path specified", "cannot find the path",
+    "sistema não pode encontrar",
+)
 
 
 def _timestamp() -> str:
@@ -155,6 +160,23 @@ def _window_wrapper(window: Optional[Any] = None):
         return None
     handle = _foreground_handle()
     return desktop.window(handle=handle) if handle else None
+
+
+def _window_wrapper_for_process(window: Optional[Any], process_id: int):
+    """Resolve a top-level UIA window only within the requested process."""
+    desktop = _desktop()
+    wanted = str(window or "").strip().casefold()
+    for candidate in desktop.windows(top_level_only=True):
+        pid = int(_safe_call(candidate, "process_id", 0) or 0)
+        if pid != int(process_id):
+            continue
+        if not wanted:
+            return candidate
+        title = str(_safe_call(candidate, "window_text", "") or "")
+        process = _process_name(pid)
+        if wanted in title.casefold() or wanted in process.casefold():
+            return candidate
+    return None
 
 
 def _window_record(wrapper: Any) -> dict[str, Any]:
@@ -334,6 +356,225 @@ def ui_get_element_text(target: str, control_type: Optional[str] = None,
         return {"found": False, "reason": str(exc)[:200], "source": "windows_uia"}
 
 
+def _control_value(wrapper: Any) -> str:
+    """Read an editor value through the UIA value pattern when available."""
+    for name in ("get_value", "window_text"):
+        value = _safe_call(wrapper, name, None)
+        if value is not None and str(value) != "":
+            return str(value)
+    try:
+        pattern = wrapper.get_value_pattern()
+        value = getattr(pattern, "value", "")
+        return str(value() if callable(value) else value or "")
+    except Exception:
+        return ""
+
+
+def _editor_candidates(root: Any, window_info: dict[str, Any]):
+    candidates = []
+    for wrapper in _walk(root):
+        control_type = _control_type(wrapper).casefold()
+        if control_type not in {"edit", "document"}:
+            continue
+        record = _element_record(wrapper, window_info)
+        if not record or not record.get("enabled") or not record.get("visible"):
+            continue
+        if _is_protected(wrapper, record):
+            continue
+        text = _control_value(wrapper)
+        # A document control is preferred to a generic edit control.  Among
+        # equal controls, the largest visible editor is the least ambiguous.
+        area = (record["bounds"]["x2"] - record["bounds"]["x1"]) * (
+            record["bounds"]["y2"] - record["bounds"]["y1"])
+        priority = 0 if control_type == "document" else 1
+        candidates.append((priority, -area, record, wrapper, text))
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return candidates
+
+
+def _path_not_found_dialog(root: Any) -> tuple[Optional[Any], Optional[Any]]:
+    """Find the exact Windows path dialog and its nearby OK control."""
+    marker_seen = False
+    marker_wrapper = None
+    ok_wrapper = None
+    for wrapper in _walk(root):
+        if not _safe_call(wrapper, "is_visible", False):
+            continue
+        name = _element_name(wrapper).casefold()
+        if any(marker in name for marker in _PATH_NOT_FOUND_MARKERS):
+            marker_seen = True
+            marker_wrapper = wrapper
+            continue
+        if marker_seen and name.strip().casefold() == "ok":
+            ok_wrapper = wrapper
+            # Windows 11 Notepad exposes the clickable Button and a nested
+            # TextBlock with the same label.  Prefer the clickable parent.
+            if _control_type(wrapper).casefold() == "text":
+                try:
+                    parent = wrapper.parent()
+                    if (_element_name(parent).strip().casefold() == "ok" and
+                            _control_type(parent).casefold() == "button"):
+                        ok_wrapper = parent
+                except Exception:
+                    pass
+            break
+    return marker_wrapper, ok_wrapper
+
+
+def _editor_record(record: dict[str, Any], text: str) -> dict[str, Any]:
+    identity = record.get("identity")
+    identity_text = repr(identity)
+    content_state_id = hashlib.sha256(
+        (f"{record.get('handle')}|{identity_text}|{text}").encode("utf-8")
+    ).hexdigest()[:24]
+    return {
+        **record,
+        "text": text,
+        "document_identity": identity_text,
+        "content_state_id": content_state_id,
+    }
+
+
+def ui_read_editor(window: Optional[Any] = None,
+                   expected_process: str = "") -> dict[str, Any]:
+    """Resolve and read the active app's visible editor/document control."""
+    try:
+        root = _window_wrapper(window)
+        if root is None:
+            return {"found": False, "verified": False, "reason": "window_not_found",
+                    "source": "windows_uia"}
+        window_info = _window_record(root)
+        wanted_process = str(expected_process or "").casefold()
+        actual_process = str(window_info.get("process_name") or "").casefold()
+        if wanted_process and wanted_process not in actual_process:
+            return {"found": False, "verified": False,
+                    "reason": "process_mismatch", "window": window_info,
+                    "source": "windows_uia"}
+        marker, _ = _path_not_found_dialog(root)
+        if marker is not None:
+            return {"found": False, "verified": False,
+                    "reason": "path_not_found_dialog", "path_error_dialog": True,
+                    "window": window_info, "source": "windows_uia"}
+        candidates = _editor_candidates(root, window_info)
+        if not candidates:
+            return {"found": False, "verified": False,
+                    "reason": "editor_not_found", "window": window_info,
+                    "source": "windows_uia"}
+        _, _, record, _, text = candidates[0]
+        editor = _editor_record(record, text)
+        return {"found": True, "verified": True, "window": window_info,
+                "editor": editor, "text": text, "empty": text == "",
+                "source": "windows_uia", "verification": "editor_content_read"}
+    except Exception as exc:
+        return {"found": False, "verified": False, "reason": str(exc)[:200],
+                "source": "windows_uia"}
+
+
+def ui_focus_editor(window: Optional[Any] = None,
+                    expected_process: str = "") -> dict[str, Any]:
+    """Resolve, focus, and reread a visible editor without fixed selectors."""
+    try:
+        root = _window_wrapper(window)
+        if root is None:
+            return {"ok": False, "found": False, "reason": "window_not_found",
+                    "source": "windows_uia"}
+        window_info = _window_record(root)
+        wanted_process = str(expected_process or "").casefold()
+        actual_process = str(window_info.get("process_name") or "").casefold()
+        if wanted_process and wanted_process not in actual_process:
+            return {"ok": False, "found": False, "reason": "process_mismatch",
+                    "window": window_info, "source": "windows_uia"}
+        marker, _ = _path_not_found_dialog(root)
+        if marker is not None:
+            return {"ok": False, "found": False, "reason": "path_not_found_dialog",
+                    "path_error_dialog": True, "window": window_info,
+                    "source": "windows_uia"}
+        candidates = _editor_candidates(root, window_info)
+        if not candidates:
+            return {"ok": False, "found": False, "reason": "editor_not_found",
+                    "window": window_info, "source": "windows_uia"}
+        _, _, record, wrapper, _ = candidates[0]
+        focus = getattr(wrapper, "set_focus", None)
+        if not callable(focus):
+            return {"ok": False, "found": True, "reason": "focus_unavailable",
+                    "editor": record, "window": window_info,
+                    "source": "windows_uia"}
+        focus()
+        click_input = getattr(wrapper, "click_input", None)
+        if callable(click_input):
+            # Modern Notepad exposes the editor as RichEditD2DPT/Document;
+            # set_focus can activate the window without placing the caret.
+            # Click the freshly grounded control, never a fixed coordinate.
+            click_input()
+        active = ui_active_window()
+        if int(active.get("handle") or 0) != int(window_info.get("handle") or 0):
+            return {"ok": False, "found": True, "reason": "focus_not_confirmed",
+                    "editor": record, "window": window_info,
+                    "source": "windows_uia"}
+        refreshed = ui_read_editor(window_info.get("handle"), expected_process)
+        if not refreshed.get("found"):
+            return {"ok": False, "found": True, "reason": "editor_reread_failed",
+                    "editor": record, "window": window_info,
+                    "source": "windows_uia"}
+        return {"ok": True, "found": True, "focused": True,
+                "window": refreshed.get("window", window_info),
+                "editor": refreshed.get("editor"), "text": refreshed.get("text", ""),
+                "empty": refreshed.get("empty", True),
+                "source": "windows_uia", "verification": "editor_focus_and_read"}
+    except Exception as exc:
+        return {"ok": False, "found": False, "reason": str(exc)[:200],
+                "source": "windows_uia"}
+
+
+def ui_classify_dialog(window: Optional[Any] = None) -> dict[str, Any]:
+    """Classify a visible dialog without acting on it."""
+    try:
+        root = _window_wrapper(window)
+        if root is None:
+            return {"found": False, "dialog_type": "NONE",
+                    "reason": "window_not_found", "source": "windows_uia"}
+        window_info = _window_record(root)
+        visible = []
+        for wrapper in _walk(root):
+            if not _safe_call(wrapper, "is_visible", False):
+                continue
+            name = " ".join(str(_element_name(wrapper) or "").split())
+            if name:
+                visible.append({"text": name, "control_type": _control_type(wrapper),
+                                "identity": _runtime_id(wrapper)})
+        texts = [item["text"] for item in visible]
+        lowered = " ".join(texts).casefold()
+        title = str(window_info.get("title") or "")
+        title_low = title.casefold()
+        has_cancel = any(text.casefold() in {"cancelar", "cancel"} for text in texts)
+        has_dont_save = any("não salvar" in text.casefold() or
+                            "nao salvar" in text.casefold() or
+                            "don't save" in text.casefold() or
+                            "do not save" in text.casefold() for text in texts)
+        has_save = any(text.casefold() in {"salvar", "save"} for text in texts)
+        has_edit = any(item["control_type"].casefold() in {"edit", "combobox"}
+                       for item in visible)
+        if has_save and has_dont_save and has_cancel:
+            dialog_type = "UNSAVED_DOCUMENT_DIALOG"
+        elif any(marker in lowered for marker in
+                 ("substituir", "replace", "já existe", "ja existe", "already exists")):
+            dialog_type = "FILE_OVERWRITE_DIALOG"
+        elif ("salvar como" in title_low or "save as" in title_low) and has_edit:
+            dialog_type = "SAVE_AS_DIALOG"
+        else:
+            dialog_type = "NONE"
+        editor = ui_read_editor(window_info.get("handle"), window_info.get("process_name", ""))
+        editor_data = editor.get("editor") if editor.get("found") else None
+        return {"found": dialog_type != "NONE", "dialog_type": dialog_type,
+                "dialog_title": title, "visible_controls": visible[:100],
+                "owner_window": window_info,
+                "owner_document": editor_data,
+                "source": "windows_uia", "verification": "dialog_classified"}
+    except Exception as exc:
+        return {"found": False, "dialog_type": "UNKNOWN",
+                "reason": str(exc)[:200], "source": "windows_uia"}
+
+
 def _find_first_control(control_type: str, window: Optional[Any] = None):
     root = _window_wrapper(window)
     if root is None:
@@ -350,10 +591,11 @@ def _find_first_control(control_type: str, window: Optional[Any] = None):
                   "source": "windows_uia", "window_title": window_info["title"]}
 
 
-def ui_focus_window(window: Optional[Any] = None) -> dict[str, Any]:
+def ui_focus_window(window: Optional[Any] = None, process_id: int = 0) -> dict[str, Any]:
     """Focus a freshly resolved window without clicking by coordinates."""
     try:
-        wrapper = _window_wrapper(window)
+        wrapper = (_window_wrapper_for_process(window, process_id)
+                   if int(process_id or 0) else _window_wrapper(window))
         if wrapper is None:
             return {"ok": False, "found": False, "reason": "window_not_found",
                     "source": "windows_uia"}
@@ -404,33 +646,82 @@ def ui_focus_element(target: str = "", control_type: Optional[str] = None,
                 "source": "windows_uia"}
 
 
-def ui_dismiss_path_not_found() -> dict[str, Any]:
+def ui_invoke_element(target: str = "", control_type: Optional[str] = None,
+                      window: Optional[Any] = None) -> dict[str, Any]:
+    """Invoke a freshly grounded UIA control without coordinate clicks."""
+    try:
+        wrapper, record = _find_with_wrapper(target, control_type, window)
+        if wrapper is None or not record.get("found"):
+            return {**record, "ok": False}
+        if not record.get("enabled") or not record.get("visible"):
+            return {**record, "ok": False, "reason": "element_not_actionable"}
+        valid = validate_ui_target(record, coordinate_mapping_validated=True)
+        if not valid.get("valid"):
+            return {**record, "ok": False, "reason": valid.get("reason")}
+        root = _window_wrapper(window)
+        root_focus = getattr(root, "set_focus", None) if root is not None else None
+        if callable(root_focus):
+            root_focus()
+            time.sleep(0.05)
+        focus = getattr(wrapper, "set_focus", None)
+        if callable(focus):
+            focus()
+            time.sleep(0.05)
+        invoke = getattr(wrapper, "invoke", None)
+        if not callable(invoke):
+            return {**record, "ok": False, "reason": "invoke_unavailable"}
+        invoke()
+        return {**record, "ok": True, "invoked": True,
+                "verification": "uia_invoke"}
+    except Exception as exc:
+        return {"ok": False, "found": False, "reason": str(exc)[:200],
+                "source": "windows_uia"}
+
+
+def ui_dismiss_path_not_found(window: Optional[Any] = None) -> dict[str, Any]:
     """Close only a Windows path-not-found dialog after exact title matching."""
     try:
-        active = ui_active_window()
-        title = str(active.get("title") or "").casefold()
-        markers = ("caminho especificado", "path specified", "cannot find the path",
-                   "sistema não pode encontrar")
-        if not any(marker in title for marker in markers):
+        root = _window_wrapper(window)
+        if root is None:
             return {"ok": False, "reason": "path_not_found_dialog_not_confirmed",
                     "source": "windows_uia"}
-        wrapper, record = _find_with_wrapper("OK", "Button", active.get("handle"))
-        if wrapper is None:
+        window_info = _window_record(root)
+        marker, wrapper = _path_not_found_dialog(root)
+        if marker is None or wrapper is None:
             return {"ok": False, "reason": "path_not_found_ok_button_not_found",
-                    "source": "windows_uia", "window": active}
+                    "source": "windows_uia", "window": window_info}
+        record = _element_record(wrapper, window_info)
+        if record is None:
+            return {"ok": False, "reason": "path_not_found_ok_button_not_found",
+                    "source": "windows_uia", "window": window_info}
         valid = validate_ui_target(record, coordinate_mapping_validated=True)
         if not valid.get("valid"):
             return {"ok": False, "reason": valid.get("reason"),
                     "source": "windows_uia"}
+        root_focus = getattr(root, "set_focus", None)
+        if callable(root_focus):
+            root_focus()
+            time.sleep(0.05)
+        set_focus = getattr(wrapper, "set_focus", None)
+        if callable(set_focus):
+            set_focus()
+            time.sleep(0.05)
         invoke = getattr(wrapper, "invoke", None)
+        invoked = False
         if callable(invoke):
-            invoke()
-        else:
-            click = getattr(wrapper, "click_input", None)
-            if not callable(click):
-                return {"ok": False, "reason": "path_not_found_ok_action_unavailable",
-                        "source": "windows_uia"}
-            click()
+            try:
+                invoke()
+                invoked = True
+            except Exception:
+                invoked = False
+        if not invoked:
+            return {"ok": False, "reason": "path_not_found_ok_action_unavailable",
+                    "source": "windows_uia"}
+        time.sleep(0.1)
+        refreshed_root = _window_wrapper(window)
+        if refreshed_root is not None and _path_not_found_dialog(refreshed_root)[0] is not None:
+            return {"ok": False, "reason": "path_not_found_dialog_still_present",
+                    "source": "windows_uia"}
         return {"ok": True, "dismissed": True,
                 "verification": "exact_path_not_found_dialog", "source": "windows_uia"}
     except Exception as exc:
@@ -538,8 +829,22 @@ def _ui_get_text_tool(target: str, control_type: Optional[str] = None,
     return ui_get_element_text(target, control_type, window)
 
 
-def _ui_focus_window_tool(window: Optional[Any] = None):
-    return ui_focus_window(window)
+def _ui_read_editor_tool(window: Optional[Any] = None,
+                          expected_process: str = ""):
+    return ui_read_editor(window, expected_process)
+
+
+def _ui_focus_editor_tool(window: Optional[Any] = None,
+                          expected_process: str = ""):
+    return ui_focus_editor(window, expected_process)
+
+
+def _ui_classify_dialog_tool(window: Optional[Any] = None):
+    return ui_classify_dialog(window)
+
+
+def _ui_focus_window_tool(window: Optional[Any] = None, process_id: int = 0):
+    return ui_focus_window(window, process_id)
 
 
 def _ui_focus_element_tool(target: str = "", control_type: Optional[str] = None,
@@ -547,8 +852,13 @@ def _ui_focus_element_tool(target: str = "", control_type: Optional[str] = None,
     return ui_focus_element(target, control_type, window)
 
 
-def _ui_dismiss_path_not_found_tool():
-    return ui_dismiss_path_not_found()
+def _ui_invoke_element_tool(target: str = "", control_type: Optional[str] = None,
+                            window: Optional[Any] = None):
+    return ui_invoke_element(target, control_type, window)
+
+
+def _ui_dismiss_path_not_found_tool(window: Optional[Any] = None):
+    return ui_dismiss_path_not_found(window)
 
 
 def _hybrid_find_tool(target: str, control_type: Optional[str] = None,
@@ -570,15 +880,31 @@ UI_AUTOMATION_TOOLS = (
          _ui_get_text_tool, Risk.MEDIUM,
          parameters={"target": str, "control_type": str, "window": str},
          category="computer_use"),
+    Tool("ui_read_editor", "Resolve e lê o conteúdo real de um editor UIA.",
+         _ui_read_editor_tool, Risk.MEDIUM,
+         parameters={"window": str, "expected_process": str},
+         category="computer_use"),
+    Tool("ui_focus_editor", "Resolve e foca o editor UIA da janela ativa.",
+         _ui_focus_editor_tool, Risk.MEDIUM,
+         parameters={"window": str, "expected_process": str},
+         category="computer_use"),
+    Tool("ui_classify_dialog", "Classifica diálogos visíveis sem executar ações.",
+         _ui_classify_dialog_tool, Risk.LOW,
+         parameters={"window": str}, category="computer_use"),
     Tool("ui_focus_window", "Foca uma janela resolvida via Windows UIA.",
          _ui_focus_window_tool, Risk.LOW,
-         parameters={"window": str}, category="computer_use"),
+         parameters={"window": str, "process_id": int}, category="computer_use"),
     Tool("ui_focus_element", "Foca um controle resolvido via Windows UIA.",
          _ui_focus_element_tool, Risk.MEDIUM,
          parameters={"target": str, "control_type": str, "window": str},
          category="computer_use"),
+    Tool("ui_invoke_element", "Invoca um controle resolvido via Windows UIA.",
+         _ui_invoke_element_tool, Risk.HIGH, confirmation=True,
+         parameters={"target": str, "control_type": str, "window": str},
+         category="computer_use"),
     Tool("ui_dismiss_path_not_found", "Fecha somente o diálogo confirmado de caminho inexistente.",
-         _ui_dismiss_path_not_found_tool, Risk.MEDIUM, category="computer_use"),
+         _ui_dismiss_path_not_found_tool, Risk.MEDIUM,
+         parameters={"window": str}, category="computer_use"),
     Tool("hybrid_find_ui_target", "Busca UIA primeiro e usa visão local como fallback.",
          _hybrid_find_tool, Risk.MEDIUM,
          parameters={"target": str, "control_type": str, "window": str},
@@ -589,6 +915,7 @@ UI_AUTOMATION_TOOLS = (
 __all__ = [
     "UI_AUTOMATION_TOOLS", "ui_active_window", "ui_find_element",
     "ui_list_elements", "ui_get_element_text", "validate_ui_target",
+    "ui_read_editor", "ui_focus_editor", "ui_classify_dialog",
     "ui_focus_window", "ui_focus_element", "ui_dismiss_path_not_found",
-    "hybrid_find_ui_target",
+    "ui_invoke_element", "hybrid_find_ui_target",
 ]
