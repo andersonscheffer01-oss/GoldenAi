@@ -683,6 +683,7 @@ class ComputerMissionExecutor:
                 host = ""
             lowered = title.casefold()
             if (len(title) < 3 or lowered in excluded or
+                    re.fullmatch(r"(?:https?://|www\.)\S+", title, re.I) or
                     any(marker in lowered for marker in ("sponsored", "patrocinado", "anúncio", "anuncio")) or
                     not href.startswith(("http://", "https://")) or host == page_host):
                 continue

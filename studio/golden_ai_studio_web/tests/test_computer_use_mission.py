@@ -220,6 +220,27 @@ def test_browser_executor_grounds_search_and_extracts_three_titles():
         "OpenAI official", "OpenAI API", "OpenAI Wikipedia"]
     assert any(name == "browser_search" and args["ref"] == "e1"
                for name, args, _ in service.calls)
+    assert any(name == "browser_wait_for_results" for name, _, _ in service.calls)
+
+
+def test_browser_extractor_rejects_url_as_result_title():
+    service = FakeBrowserService()
+    executor = ComputerMissionExecutor(service)
+    mission = ComputerMissionPlanner(service.registry).plan(BROWSER_MISSION)
+    page = {
+        "url": "https://duckduckgo.com/?q=OpenAI",
+        "title": "OpenAI at DuckDuckGo",
+        "text": "OpenAI search results",
+        "links": [
+            {"text": "OpenAI official", "href": "https://openai.com/",
+             "visible": True, "result_candidate": True},
+            {"text": "https://openai.com", "href": "https://openai.com/about/",
+             "visible": True, "result_candidate": True},
+        ],
+    }
+    result = executor._extract_browser_results(mission, page, minimum=2)
+    assert result["ok"] is False
+    assert result["titles"] == ["OpenAI official"]
 
 
 def test_browser_executor_blocks_when_focus_guard_fails():
