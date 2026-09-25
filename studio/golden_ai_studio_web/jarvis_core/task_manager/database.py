@@ -2,15 +2,18 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
 from ..orchestrator.models import DataClassification, PlanStep, Route
+from .background import (BackgroundTask, BackgroundTaskStatus, MisfirePolicy,
+                          RunStatus, TriggerType)
 from .models import StepRecord, StepStatus, TaskPlan, TaskRecord, TaskStatus
 
 
 class TaskDatabase:
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, path):
         self.path = Path(path)
@@ -39,8 +42,6 @@ class TaskDatabase:
         with self._lock, self.connect() as db:
             db.execute("CREATE TABLE IF NOT EXISTS task_schema_version(version INTEGER NOT NULL)")
             row = db.execute("SELECT version FROM task_schema_version ORDER BY version DESC LIMIT 1").fetchone()
-            if row and int(row[0]) >= self.SCHEMA_VERSION:
-                return
             db.execute("""CREATE TABLE IF NOT EXISTS tasks(
                 id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
                 status TEXT NOT NULL, data_classification TEXT NOT NULL,
@@ -59,6 +60,67 @@ class TaskDatabase:
                 timestamp REAL NOT NULL, event TEXT NOT NULL, details TEXT NOT NULL)""")
             db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_steps_task_position ON task_steps(task_id,position)")
+            current = int(row[0]) if row else 0
+            if current < 2:
+                db.executescript("""
+                    CREATE TABLE IF NOT EXISTS background_tasks(
+                        task_id TEXT PRIMARY KEY,
+                        user_request TEXT NOT NULL,
+                        task_type TEXT NOT NULL,
+                        trigger_type TEXT NOT NULL,
+                        trigger_config TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        next_run_at REAL,
+                        last_run_at REAL,
+                        timezone TEXT NOT NULL,
+                        enabled INTEGER NOT NULL,
+                        run_count INTEGER NOT NULL,
+                        max_runs INTEGER,
+                        misfire_policy TEXT NOT NULL,
+                        security_scope TEXT NOT NULL,
+                        schema_version INTEGER NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS task_runs(
+                        run_id TEXT PRIMARY KEY,
+                        task_id TEXT NOT NULL,
+                        scheduled_for REAL NOT NULL,
+                        status TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        started_at REAL,
+                        finished_at REAL,
+                        mission_id TEXT,
+                        claim_token TEXT,
+                        claimed_by TEXT,
+                        claim_expires_at REAL,
+                        error_code TEXT,
+                        error_message TEXT,
+                        UNIQUE(task_id, scheduled_for),
+                        FOREIGN KEY(task_id) REFERENCES background_tasks(task_id)
+                    );
+                    CREATE TABLE IF NOT EXISTS task_approvals(
+                        approval_id TEXT PRIMARY KEY,
+                        task_id TEXT NOT NULL,
+                        run_id TEXT NOT NULL,
+                        mission_id TEXT,
+                        scope TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        granted_at REAL NOT NULL,
+                        expires_at REAL NOT NULL,
+                        single_use INTEGER NOT NULL,
+                        consumed_at REAL,
+                        status TEXT NOT NULL,
+                        FOREIGN KEY(task_id) REFERENCES background_tasks(task_id),
+                        FOREIGN KEY(run_id) REFERENCES task_runs(run_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_background_due
+                        ON background_tasks(enabled, status, next_run_at);
+                    CREATE INDEX IF NOT EXISTS idx_runs_claim
+                        ON task_runs(status, claim_expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_approvals_scope
+                        ON task_approvals(task_id, run_id, status);
+                """)
             db.execute("DELETE FROM task_schema_version")
             db.execute("INSERT INTO task_schema_version(version) VALUES(?)", (self.SCHEMA_VERSION,))
 
@@ -146,6 +208,161 @@ class TaskDatabase:
                     self._event_db(db, task_id, "task_interrupted", {"reason": "process_restart"})
         return ids
 
+    # Persistent background-task store. All scheduler claims happen inside
+    # BEGIN IMMEDIATE transactions so two service processes cannot own a run.
+    def create_background_task(self, task: BackgroundTask):
+        with self._lock, self.connect() as db:
+            db.execute("""INSERT INTO background_tasks(
+                task_id,user_request,task_type,trigger_type,trigger_config,status,
+                created_at,updated_at,next_run_at,last_run_at,timezone,enabled,
+                run_count,max_runs,misfire_policy,security_scope,schema_version)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (task.task_id, task.user_request, task.task_type, task.trigger_type.value,
+                 self._dump(task.trigger_config), task.status.value, task.created_at,
+                 task.updated_at, task.next_run_at, task.last_run_at, task.timezone,
+                 int(task.enabled), task.run_count, task.max_runs, task.misfire_policy.value,
+                 self._dump(task.security_scope), task.schema_version))
+        return task.task_id
+
+    def get_background_task(self, task_id):
+        with self.connect(rows=True) as db:
+            row = db.execute("SELECT * FROM background_tasks WHERE task_id=?", (task_id,)).fetchone()
+            return self._background_task(row) if row else None
+
+    def list_background_tasks(self, limit=200, enabled=None):
+        sql, params = "SELECT * FROM background_tasks", []
+        if enabled is not None:
+            sql += " WHERE enabled=?"
+            params.append(int(bool(enabled)))
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 1000)))
+        with self.connect(rows=True) as db:
+            return [self._background_task(row) for row in db.execute(sql, params).fetchall()]
+
+    def update_background_task(self, task_id, **fields):
+        allowed = {"status", "updated_at", "next_run_at", "last_run_at", "enabled",
+                   "run_count", "max_runs", "trigger_config", "security_scope"}
+        values = {key: value for key, value in fields.items() if key in allowed}
+        if "status" in values:
+            values["status"] = getattr(values["status"], "value", values["status"])
+        for key in ("trigger_config", "security_scope"):
+            if key in values:
+                values[key] = self._dump(values[key])
+        values.setdefault("updated_at", time.time())
+        if "enabled" in values:
+            values["enabled"] = int(bool(values["enabled"]))
+        with self._lock, self.connect() as db:
+            columns = ",".join(f"{key}=?" for key in values)
+            db.execute(f"UPDATE background_tasks SET {columns} WHERE task_id=?",
+                       tuple(values.values()) + (task_id,))
+
+    def ensure_task_run(self, task_id, scheduled_for, now=None):
+        now = time.time() if now is None else float(now)
+        run_id = str(uuid.uuid4())
+        with self._lock, self.connect(rows=True) as db:
+            db.execute("""INSERT OR IGNORE INTO task_runs(
+                run_id,task_id,scheduled_for,status,created_at)
+                VALUES(?,?,?,?,?)""", (run_id, task_id, float(scheduled_for),
+                                        RunStatus.PENDING.value, now))
+            row = db.execute("SELECT * FROM task_runs WHERE task_id=? AND scheduled_for=?",
+                             (task_id, float(scheduled_for))).fetchone()
+            return dict(row)
+
+    def get_task_run(self, run_id):
+        with self.connect(rows=True) as db:
+            row = db.execute("SELECT * FROM task_runs WHERE run_id=?", (run_id,)).fetchone()
+            return dict(row) if row else None
+
+    def list_task_runs(self, task_id, limit=100):
+        with self.connect(rows=True) as db:
+            return [dict(row) for row in db.execute(
+                "SELECT * FROM task_runs WHERE task_id=? ORDER BY scheduled_for DESC LIMIT ?",
+                (task_id, max(1, min(int(limit), 500)))).fetchall()]
+
+    def claim_task_run(self, run_id, worker_id, now, lease_seconds=30.0):
+        token = str(uuid.uuid4())
+        now = float(now)
+        with self._lock, self.connect(rows=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM task_runs WHERE run_id=?", (run_id,)).fetchone()
+            if not row:
+                return None
+            row = dict(row)
+            if row["status"] in {RunStatus.COMPLETED.value, RunStatus.CANCELLED.value,
+                                  RunStatus.WAITING_CONFIRMATION.value,
+                                  RunStatus.WAITING_USER_IDLE.value}:
+                return None
+            if row["mission_id"] and row["status"] in {RunStatus.CLAIMED.value,
+                                                         RunStatus.RUNNING.value}:
+                # A durable mission may be resumed by its existing owner; never
+                # create a second mission merely because its scheduler lease expired.
+                return None
+            active_claim = (row["claim_token"] and row["claim_expires_at"]
+                            and float(row["claim_expires_at"]) > now
+                            and row["claimed_by"] != worker_id)
+            if active_claim:
+                return None
+            db.execute("""UPDATE task_runs SET status=?,claim_token=?,claimed_by=?,
+                claim_expires_at=? WHERE run_id=?""",
+                       (RunStatus.CLAIMED.value, token, worker_id,
+                        now + float(lease_seconds), run_id))
+            result = db.execute("SELECT * FROM task_runs WHERE run_id=?", (run_id,)).fetchone()
+            return dict(result)
+
+    def update_task_run(self, run_id, **fields):
+        allowed = {"status", "started_at", "finished_at", "mission_id", "claim_token",
+                    "claimed_by", "claim_expires_at", "error_code", "error_message"}
+        values = {key: value for key, value in fields.items() if key in allowed}
+        if "status" in values:
+            values["status"] = getattr(values["status"], "value", values["status"])
+        if not values:
+            return
+        with self._lock, self.connect() as db:
+            columns = ",".join(f"{key}=?" for key in values)
+            db.execute(f"UPDATE task_runs SET {columns} WHERE run_id=?",
+                       tuple(values.values()) + (run_id,))
+
+    def recover_background_runs(self, now, lease_timeout=0.0):
+        """Release stale claims without duplicating durable mission states."""
+        cutoff = float(now) - float(lease_timeout)
+        with self._lock, self.connect() as db:
+            cursor = db.execute("""UPDATE task_runs SET status=?,claim_token=NULL,
+                claimed_by=NULL,claim_expires_at=NULL,error_code=?,error_message=?
+                WHERE status IN (?,?) AND (claim_expires_at IS NULL OR claim_expires_at<?)
+                AND mission_id IS NULL""", (RunStatus.PENDING.value, "STALE_CLAIM",
+                    "claim recovered after restart", RunStatus.CLAIMED.value,
+                    RunStatus.RUNNING.value, cutoff))
+            return cursor.rowcount
+
+    def create_task_approval(self, task_id, run_id, scope, target, granted_at,
+                             expires_at, mission_id=None, single_use=True):
+        approval_id = str(uuid.uuid4())
+        with self._lock, self.connect() as db:
+            db.execute("""INSERT INTO task_approvals(
+                approval_id,task_id,run_id,mission_id,scope,target,granted_at,
+                expires_at,single_use,status) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (approval_id, task_id, run_id, mission_id, scope, target,
+                 float(granted_at), float(expires_at), int(bool(single_use)), "ACTIVE"))
+        return approval_id
+
+    def consume_task_approval(self, approval_id, task_id, run_id, scope, target, now):
+        with self._lock, self.connect(rows=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM task_approvals WHERE approval_id=?",
+                             (approval_id,)).fetchone()
+            if not row or row["task_id"] != task_id or row["run_id"] != run_id:
+                return False
+            if row["status"] != "ACTIVE" or float(row["expires_at"]) < float(now):
+                return False
+            if row["scope"] != scope or row["target"] != target:
+                return False
+            if row["single_use"] and row["consumed_at"] is not None:
+                return False
+            if row["single_use"]:
+                db.execute("UPDATE task_approvals SET consumed_at=?,status='CONSUMED' WHERE approval_id=?",
+                           (float(now), approval_id))
+            return True
+
     def _update(self, table, key, identity, values):
         with self._lock, self.connect() as db:
             columns = ",".join(f"{name}=?" for name in values)
@@ -178,3 +395,16 @@ class TaskDatabase:
             row["status"], bool(row["cancellable"]), bool(row["background"]))
         return StepRecord(row["task_id"], step, row["position"], StepStatus(row["status"]),
             row["started_at"], row["finished_at"], row["error"], self._load(row["result"]))
+
+    def _background_task(self, row):
+        return BackgroundTask(
+            task_id=row["task_id"], user_request=row["user_request"], task_type=row["task_type"],
+            trigger_type=TriggerType(row["trigger_type"]),
+            trigger_config=self._load(row["trigger_config"], {}),
+            status=BackgroundTaskStatus(row["status"]), created_at=row["created_at"],
+            updated_at=row["updated_at"], next_run_at=row["next_run_at"],
+            last_run_at=row["last_run_at"], timezone=row["timezone"],
+            enabled=bool(row["enabled"]), run_count=row["run_count"],
+            max_runs=row["max_runs"], misfire_policy=MisfirePolicy(row["misfire_policy"]),
+            security_scope=self._load(row["security_scope"], {}),
+            schema_version=row["schema_version"])

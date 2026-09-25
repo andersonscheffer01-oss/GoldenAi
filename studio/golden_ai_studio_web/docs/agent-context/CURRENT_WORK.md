@@ -226,3 +226,24 @@ Próximo: aguardar autorização; não iniciar M1.6.
 - No real 6D.3 mission was started because the user reported active computer use. The next
   step is a new mission from zero only after the user authorizes a stable idle session;
   current stop marker: `REAL_USER_SESSION_REQUIRED`.
+# Computer Use 7D.1 - Internal Background Scheduler
+
+**Date:** 2026-09-25
+**Status:** STRUCTURAL IMPLEMENTATION PASS - real Windows validation deferred
+
+- Persistent background tasks reuse `jarvis/golden_tasks.db` through the existing
+  `TaskDatabase`; schema v1 migrates additively to v2 with `background_tasks`,
+  `task_runs`, and `task_approvals`.
+- `BackgroundTaskScheduler` is the single internal scheduler owned by the existing
+  `TaskManager`/`JarvisService`. It has no direct GUI, mouse, keyboard, browser, or
+  process-launch path; dispatch is delegated to the canonical mission/security flow.
+- Supported triggers are IMMEDIATE, AT_TIME, AFTER_DELAY, RECURRING, USER_IDLE, and
+  CONDITION. Recurrence supports DAILY, WEEKLY, and INTERVAL. Conditions are an
+  allow-listed registry with injected providers and no eval/exec/shell/PowerShell.
+- SQLite `BEGIN IMMEDIATE` claims, leases, unique `(task_id, scheduled_for)` occurrences,
+  startup recovery, scoped single-use approvals, cancellation, enable/disable, and
+  audit events prevent duplicate dispatch and unsafe resume.
+- `SystemClock` and `FakeClock` keep scheduling deterministic and testable.
+- Automated structural/integrated validation passed: `87 passed, 8 subtests` in the
+  7D.1 scheduler plus existing TaskManager and Computer Use 6D collections.
+- No real Windows action was executed in 7D.1. Final gate: `REAL_USER_SESSION_REQUIRED`.

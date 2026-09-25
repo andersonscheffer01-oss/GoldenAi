@@ -180,6 +180,7 @@ class JarvisService:
         self.task_manager = TaskManager(base_dir)
         from .computer_use_mission import ComputerMissionExecutor
         self.computer_missions = ComputerMissionExecutor(self)
+        self.task_manager.start_scheduler(self._launch_background_task)
         self.orchestrator = CentralOrchestrator(self.registry, audit=self.audit)
         self.runtime = JarvisRuntimeCoordinator(self.orchestrator, self,
                                                 task_manager=self.task_manager)
@@ -310,6 +311,10 @@ class JarvisService:
                 _browser_thread.stop()
         except Exception:
             pass
+
+    def _launch_background_task(self, task, run):
+        """Route scheduled missions through the canonical mission/security path."""
+        return self.run_computer_mission(task.user_request, task_id=task.task_id)
 
     # ═══════════════════════════════════════════════════════════════
     # REGISTRO DE FERRAMENTAS

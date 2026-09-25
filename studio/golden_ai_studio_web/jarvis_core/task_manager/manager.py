@@ -1,4 +1,5 @@
 import re
+import time
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -6,6 +7,9 @@ from pathlib import Path
 from ..audit import AuditLog
 from ..orchestrator.models import DataClassification
 from .database import TaskDatabase
+from .background import (BackgroundTask, BackgroundTaskStatus, MisfirePolicy,
+                          TriggerType)
+from .scheduler import BackgroundTaskScheduler
 from .models import TaskStatus
 from .planner import PlannerContracts
 from .runner import BackgroundJobRunner
@@ -19,6 +23,7 @@ class TaskManager:
         self.database = TaskDatabase(self.base_dir / "jarvis" / self.DB_NAME)
         self.runner = BackgroundJobRunner(self.database, max_workers=max_workers)
         self.audit = AuditLog(self.base_dir / "golden_runtime.db")
+        self.scheduler = BackgroundTaskScheduler(self.database, audit=self.audit)
 
     def create(self, plan):
         plan = PlannerContracts.validate(plan)
@@ -55,7 +60,59 @@ class TaskManager:
     def events(self, task_id, limit=100):
         return self.database.events(task_id, limit)
 
+    def schedule_background(self, user_request, task_type="computer_use",
+                            trigger_type=TriggerType.IMMEDIATE, trigger_config=None,
+                            timezone="UTC", max_runs=None,
+                            misfire_policy=MisfirePolicy.RUN_ONCE_WHEN_AVAILABLE,
+                            security_scope=None):
+        trigger_type = TriggerType(trigger_type)
+        misfire_policy = MisfirePolicy(misfire_policy)
+        self._validate_background_config(trigger_config or {}, security_scope or {})
+        now = time.time()
+        task = BackgroundTask.new(
+            user_request=user_request, task_type=task_type, trigger_type=trigger_type,
+            trigger_config=trigger_config, created_at=now, updated_at=now,
+            timezone=timezone, max_runs=max_runs, misfire_policy=misfire_policy,
+            security_scope=security_scope or {})
+        self.database.create_background_task(task)
+        self._audit(task.task_id, "background_task_scheduled", {
+            "trigger_type": trigger_type.value, "task_type": task_type})
+        return task.task_id
+
+    def background(self, task_id):
+        return self.database.get_background_task(task_id)
+
+    def background_runs(self, task_id, limit=100):
+        return self.database.list_task_runs(task_id, limit)
+
+    def start_scheduler(self, launcher):
+        self.scheduler.launcher = launcher
+        self.scheduler.start()
+
+    def tick_scheduler(self):
+        return self.scheduler.tick()
+
+    def cancel_background(self, task_id):
+        return self.scheduler.cancel(task_id)
+
+    def disable_background(self, task_id):
+        return self.scheduler.disable(task_id)
+
+    def enable_background(self, task_id):
+        return self.scheduler.enable(task_id)
+
+    def create_background_approval(self, task_id, run_id, scope, target,
+                                   expires_at, mission_id=None, single_use=True):
+        return self.database.create_task_approval(
+            task_id, run_id, scope, target, time.time(), expires_at,
+            mission_id=mission_id, single_use=single_use)
+
+    def consume_background_approval(self, approval_id, task_id, run_id, scope, target):
+        return self.database.consume_task_approval(
+            approval_id, task_id, run_id, scope, target, time.time())
+
     def shutdown(self, wait=True):
+        self.scheduler.stop(wait=wait)
         self.runner.shutdown(wait=wait)
 
     @staticmethod
@@ -69,6 +126,22 @@ class TaskManager:
                     raise ValueError("Segredo ou binário não pode ser persistido no plano.")
                 if isinstance(value, str) and (value.lower().startswith("data:") or len(value) > 8000):
                     raise ValueError("Payload grande ou binário não pode ser persistido no plano.")
+
+    @staticmethod
+    def _validate_background_config(*configs):
+        secret = re.compile(r"(?i)(password|passwd|senha|token|secret|api[_-]?key|authorization|cookie|credential)")
+        def visit(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if secret.search(str(key)):
+                        raise ValueError("Segredo não pode ser persistido em tarefa agendada.")
+                    visit(child)
+            elif isinstance(value, (bytes, bytearray)):
+                raise ValueError("Binário não pode ser persistido em tarefa agendada.")
+            elif isinstance(value, str) and (value.lower().startswith("data:") or len(value) > 8000):
+                raise ValueError("Payload grande não pode ser persistido em tarefa agendada.")
+        for config in configs:
+            visit(config)
 
     def _audit(self, task_id, event, details=None):
         self.audit.add(task_id=task_id, command=event, tool="task_manager",

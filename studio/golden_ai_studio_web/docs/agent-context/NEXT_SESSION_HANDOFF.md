@@ -327,3 +327,27 @@ Date: 2026-09-24
   checkpoint, reconstruct with a new executor, then continue to Notepad and revalidate the
   exact target under SecurityManager.
 - Preserve `device_registry.json` and unrelated dirty files. No push.
+# Computer Use 7D.1 Handoff
+
+**Date:** 2026-09-25
+**Status:** `COMPUTER_USE_7D_INFRA: PASS`; overall phase `PARTIAL`
+
+The next session must preserve these invariants:
+
+- `TaskDatabase` is the only durable task store. Schema version is 2 and migration
+  preserves schema-v1 tasks.
+- `TaskManager.scheduler` is the only scheduler. Do not add a second scheduler,
+  database, worker, SecurityManager, or AuditLog.
+- `task_runs` claims are atomic and lease-based. `(task_id, scheduled_for)` is the
+  duplicate-occurrence guard. Existing mission IDs are never duplicated after restart.
+- `task_approvals` are scoped to task/run/mission/scope/target and single-use by default.
+- Trigger conditions are allow-listed and provider-injected. No eval, exec, shell, or
+  PowerShell is part of condition evaluation.
+- The scheduler only delegates to the existing mission path; all real work remains
+  subject to SecurityManager, confirmation, foreground arbitration, stale-target
+  protection, and AuditLog.
+- Automated validation passed: `87 passed, 8 subtests`. No real Windows action was
+  run because the user was active. Resume only at `REAL_USER_SESSION_REQUIRED` after
+  explicit authorization for a new real mission.
+- Do not touch `device_registry.json`, runtime DBs, build/dist, logs, or unrelated dirty
+  files. Do not push.

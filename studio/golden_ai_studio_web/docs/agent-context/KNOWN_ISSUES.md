@@ -41,3 +41,15 @@
 - The prior real 6D mission remains historical state only. A future validation must create a
   new mission from zero, research Python and Ollama again, persist the Python checkpoint,
   reconstruct through a new executor, and revalidate the exact authorized target before Save As.
+# Computer Use 7D.1
+
+- Internal background scheduling infrastructure is implemented and structurally
+  validated, but no real scheduled Windows mission was started in this phase.
+- Real foreground, keyboard, mouse, Chrome, Notepad, file-save, and user-idle
+  validation must wait for an explicit stable user session. Stop marker:
+  `REAL_USER_SESSION_REQUIRED`.
+- Scheduled mission execution is intentionally routed through the existing
+  `JarvisService.run_computer_mission` and `SecurityManager`; the scheduler never
+  grants approvals or bypasses foreground/user-activity guards.
+- Runtime SQLite files, build/dist artifacts, logs, uploads, and `device_registry.json`
+  remain outside the 7D.1 commit scope.
