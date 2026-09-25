@@ -159,6 +159,20 @@ def test_cancel_disable_enable_and_secret_rejection(tmp_path):
         manager.shutdown()
 
 
+def test_task_manager_persists_absolute_after_delay_at_creation(tmp_path):
+    from jarvis_core.task_manager import TaskManager
+    manager = TaskManager(tmp_path)
+    try:
+        before = __import__("time").time()
+        task_id = manager.schedule_background("x", trigger_type=TriggerType.AFTER_DELAY,
+                                              trigger_config={"seconds": 120})
+        task = manager.background(task_id)
+        assert task.next_run_at is not None
+        assert before + 119 <= task.next_run_at <= __import__("time").time() + 121
+    finally:
+        manager.shutdown()
+
+
 def test_claims_are_atomic_and_expired_claims_recover(tmp_path):
     path = tmp_path / "tasks.db"
     first, second = TaskDatabase(path), TaskDatabase(path)

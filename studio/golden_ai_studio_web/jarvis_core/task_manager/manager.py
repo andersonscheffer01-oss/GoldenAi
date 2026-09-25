@@ -69,9 +69,20 @@ class TaskManager:
         misfire_policy = MisfirePolicy(misfire_policy)
         self._validate_background_config(trigger_config or {}, security_scope or {})
         now = time.time()
+        trigger_config = dict(trigger_config or {})
+        next_run_at = None
+        if trigger_type == TriggerType.IMMEDIATE:
+            next_run_at = now
+        elif trigger_type == TriggerType.AFTER_DELAY:
+            next_run_at = now + float(trigger_config.get("seconds", trigger_config.get("delay", 0)))
+        elif trigger_type == TriggerType.AT_TIME:
+            next_run_at = float(trigger_config.get("timestamp", trigger_config.get("at", now)))
+        elif trigger_type in {TriggerType.USER_IDLE, TriggerType.CONDITION}:
+            next_run_at = now
         task = BackgroundTask.new(
             user_request=user_request, task_type=task_type, trigger_type=trigger_type,
             trigger_config=trigger_config, created_at=now, updated_at=now,
+            next_run_at=next_run_at,
             timezone=timezone, max_runs=max_runs, misfire_policy=misfire_policy,
             security_scope=security_scope or {})
         self.database.create_background_task(task)
