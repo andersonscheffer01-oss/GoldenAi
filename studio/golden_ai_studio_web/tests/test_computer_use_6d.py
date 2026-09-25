@@ -405,6 +405,57 @@ class ForegroundProbe(ProbeService):
         return super().execute_tool(name, arguments, command, task_id, confirmed)
 
 
+class QuietForegroundProbe(ForegroundProbe):
+    def __init__(self, database, *, ages, **kwargs):
+        super().__init__(database, **kwargs)
+        self.registry.names.add("ui_user_activity")
+        self.ages = list(ages)
+
+    def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False):
+        if name == "ui_user_activity":
+            self.calls.append((name, dict(arguments), confirmed))
+            age = self.ages.pop(0) if self.ages else 5000
+            return {"ok": True, "user_active": age < 1500,
+                    "last_user_input_age_ms": age,
+                    "threshold_ms": arguments.get("threshold_ms")}
+        return super().execute_tool(name, arguments, command, task_id, confirmed)
+
+
+class DurableMissionPlanner:
+    def __init__(self, *, seed_context):
+        self.seed_context = seed_context
+
+    def plan(self, request):
+        mission = ComputerMission(
+            "durable-real-mission", request, MissionStatus.PENDING, time.time(),
+            [
+                ComputerMissionStep("python-search", "Python", "logical_action"),
+                ComputerMissionStep(
+                    "checkpoint-python", "Checkpoint Python", "checkpoint",
+                    args={"name": "CHECKPOINT_PYTHON_DONE"},
+                    requires=("python-search",),
+                ),
+                ComputerMissionStep(
+                    "ollama-search", "Ollama", "logical_action",
+                    requires=("checkpoint-python",),
+                ),
+            ],
+            max_steps=10,
+        )
+        if self.seed_context:
+            mission.context.store_variable(
+                "python_version", "Python 3.14.7", kind="OBSERVED_VALUE",
+                source_app="chrome", source_type="browser_result",
+                source_url="https://www.python.org/downloads/latest/",
+            )
+            mission.context.store_variable(
+                "ollama_page_title", "Ollama", kind="OBSERVED_VALUE",
+                source_app="chrome", source_type="browser_result",
+                source_url="https://ollama.com/",
+            )
+        return mission
+
+
 def _foreground_pause_mission(request="request"):
     mission = ComputerMission(
         "foreground-pause-mission", request, MissionStatus.PENDING, time.time(),
@@ -490,6 +541,185 @@ def test_explicit_resume_after_user_pause_rechecks_foreground(tmp_path):
     assert resumed["ok"] is True
     assert resumed["mission"]["status"] == MissionStatus.COMPLETED.value
     assert resumed["mission"]["current_step"] == 1
+
+
+def test_missions_have_scoped_tokens_even_when_latest_checkpoint_changes(tmp_path):
+    store_a = MissionCheckpointStore(TaskDatabase(tmp_path / "golden_tasks.db"))
+    context_a = MissionContext("mission-a", "request-a")
+    context_b = MissionContext("mission-b", "request-b")
+    checkpoint_a = store_a.save_checkpoint(
+        mission_id="mission-a", mission_version=0, name="A",
+        current_step=1, next_step=1, context_revision=0,
+        snapshot={"mission_id": "mission-a", "user_request": "request-a",
+                  "context": context_a.checkpoint_snapshot()},
+    )
+    checkpoint_b = store_a.save_checkpoint(
+        mission_id="mission-b", mission_version=0, name="B",
+        current_step=2, next_step=2, context_revision=0,
+        snapshot={"mission_id": "mission-b", "user_request": "request-b",
+                  "context": context_b.checkpoint_snapshot()},
+    )
+
+    loaded_a, error_a = store_a.load_resume_token(checkpoint_a["resume_token"])
+    loaded_b, error_b = store_a.load_resume_token(checkpoint_b["resume_token"])
+
+    assert error_a == ""
+    assert error_b == ""
+    assert loaded_a["mission_id"] == "mission-a"
+    assert loaded_b["mission_id"] == "mission-b"
+    assert loaded_a["checkpoint_id"] != loaded_b["checkpoint_id"]
+    assert store_a.load_resume_token("mission-a:missing-checkpoint")[1] == (
+        "RESUME_TOKEN_NOT_FOUND")
+
+
+def test_mission_context_provenance_and_receipts_survive_new_executor_instance(tmp_path):
+    database_path = tmp_path / "golden_tasks.db"
+    service_a = ProbeService(TaskDatabase(database_path), process="chrome.exe")
+    planner_a = DurableMissionPlanner(seed_context=True)
+    executor_a = ComputerMissionExecutor(service_a, planner_a)
+    paused = executor_a.run(
+        "durable request", pause_after_checkpoint="CHECKPOINT_PYTHON_DONE",
+    )
+    assert paused["mission"]["status"] == MissionStatus.PAUSED.value
+    token = paused["mission"]["resume_token"]
+    assert token
+
+    service_b = ProbeService(TaskDatabase(database_path), process="chrome.exe")
+    executor_b = ComputerMissionExecutor(
+        service_b, DurableMissionPlanner(seed_context=False))
+    resumed = executor_b.resume("durable-real-mission", token)
+
+    assert resumed["ok"] is True
+    assert resumed["mission"]["status"] == MissionStatus.COMPLETED.value
+    context = resumed["mission"]["context"]
+    assert context["variables"]["python_version"]["value"] == "Python 3.14.7"
+    assert context["variables"]["ollama_page_title"]["value"] == "Ollama"
+    assert context["source_provenance"]["python_version"]["source_url"] == (
+        "https://www.python.org/downloads/latest/")
+    assert context["source_provenance"]["ollama_page_title"]["source_url"] == (
+        "https://ollama.com/")
+    assert [name for name, _, _ in service_a.calls].count("logical_action") == 1
+    assert [name for name, _, _ in service_b.calls].count("logical_action") == 1
+    assert executor_b.persistence.receipts_for_mission(
+        "durable-real-mission") == []
+
+
+def test_action_receipts_survive_store_reconstruction(tmp_path):
+    database_path = tmp_path / "golden_tasks.db"
+    store_a = MissionCheckpointStore(TaskDatabase(database_path))
+    store_a.save_receipt(
+        mission_id="mission-a", step_id="write", action_type="ui_type_editor",
+        target="notepad-editor", result_state=ActionState.VERIFIED,
+        result={"verified": True},
+    )
+    store_b = MissionCheckpointStore(TaskDatabase(database_path))
+
+    receipt = store_b.receipt("mission-a", "write")
+
+    assert receipt["mission_id"] == "mission-a"
+    assert receipt["result_state"] == ActionState.VERIFIED.value
+    assert receipt["result"]["verified"] is True
+
+
+def test_mission_record_tampering_invalidates_resume_token(tmp_path):
+    database = TaskDatabase(tmp_path / "golden_tasks.db")
+    store = MissionCheckpointStore(database)
+    context = MissionContext("mission-integrity", "request")
+    record = store.save_checkpoint(
+        mission_id="mission-integrity", mission_version=0, name="pause",
+        current_step=0, next_step=0, context_revision=0,
+        snapshot={"mission_id": "mission-integrity", "user_request": "request",
+                  "context": context.checkpoint_snapshot()},
+    )
+
+    with database.connect() as db:
+        db.execute(
+            "UPDATE mission_records SET snapshot=? WHERE mission_id=?",
+            ('{"mission_id":"mission-integrity","tampered":true}',
+             "mission-integrity"),
+        )
+
+    mission, mission_error = store.load_mission("mission-integrity")
+    resumed, resume_error = store.load_resume_token(record["resume_token"])
+
+    assert mission is None
+    assert mission_error == "MISSION_RECORD_INVALID"
+    assert resumed is None
+    assert resume_error == "RESUME_TOKEN_NOT_FOUND"
+
+
+def test_resume_waits_for_quiet_window_and_resets_on_new_input(tmp_path):
+    database = TaskDatabase(tmp_path / "golden_tasks.db")
+    service = QuietForegroundProbe(
+        database, ages=[0, 100, 0, 2000], user_active=True,
+        owner="USER_EXTERNAL_APP", focused=False,
+    )
+    executor = ComputerMissionExecutor(
+        service, FixedPlanner(lambda request: _foreground_pause_mission(request)))
+    paused = executor.run("request")
+    token = paused["mission"]["resume_token"]
+
+    service.user_active = False
+    service.owner = "JARVIS_TARGET"
+    service.focused = True
+    resumed = executor.resume("foreground-pause-mission", token)
+
+    assert resumed["ok"] is True
+    assert resumed["mission"]["status"] == MissionStatus.COMPLETED.value
+    activity_calls = [item for item in service.calls if item[0] == "ui_user_activity"]
+    assert len(activity_calls) == 4
+    assert any(event["status"] == "WAITING_FOR_USER_IDLE"
+               for event in service.audit_events)
+    assert any(event["status"] == "QUIET_WINDOW_RESET"
+               for event in service.audit_events)
+
+
+def test_cancel_during_resume_quiet_window_fails_closed_without_actions(tmp_path):
+    class CancelDuringQuietProbe(QuietForegroundProbe):
+        def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False):
+            result = super().execute_tool(name, arguments, command, task_id, confirmed)
+            if name == "ui_user_activity":
+                self.cancellation.request_cancel()
+            return result
+
+    database = TaskDatabase(tmp_path / "golden_tasks.db")
+    service = CancelDuringQuietProbe(
+        database, ages=[0], user_active=True,
+        owner="USER_EXTERNAL_APP", focused=False,
+    )
+    executor = ComputerMissionExecutor(
+        service, FixedPlanner(lambda request: _foreground_pause_mission(request)))
+    paused = executor.run("request")
+    token = paused["mission"]["resume_token"]
+
+    service.user_active = False
+    service.owner = "JARVIS_TARGET"
+    service.focused = True
+    resumed = executor.resume("foreground-pause-mission", token)
+
+    assert resumed["ok"] is False
+    assert resumed["mission"]["status"] == MissionStatus.CANCELLED.value
+    assert [name for name, _, _ in service.calls].count("logical_action") == 0
+    assert any(event["status"] == "MISSION_CANCELLED"
+               for event in service.audit_events)
+
+
+def test_explicit_cancel_persists_terminal_mission_state(tmp_path):
+    database = TaskDatabase(tmp_path / "golden_tasks.db")
+    service = ProbeService(database)
+    planner = FixedPlanner(lambda request: _foreground_pause_mission(request))
+    executor = ComputerMissionExecutor(service, planner)
+    mission = planner.plan("request")
+    executor._active = mission
+    executor._missions[mission.mission_id] = mission
+    executor._persist_mission(mission, audit=False)
+
+    assert executor.cancel_current_mission() is True
+
+    stored, error = executor.persistence.load_mission(mission.mission_id)
+    assert error == ""
+    assert stored["status"] == MissionStatus.CANCELLED.value
+    assert stored["pause_reason"] == "OPERATOR_CANCELLED"
 
 
 def test_app_closed_is_classified_as_recoverable_without_research_rerun(tmp_path):

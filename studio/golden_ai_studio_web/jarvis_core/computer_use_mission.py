@@ -11,6 +11,7 @@ import re
 import base64
 import hashlib
 import json
+import os
 import threading
 import time
 import uuid
@@ -39,6 +40,7 @@ class MissionStatus(str, Enum):
     BLOCKED = "BLOCKED"
     WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
     PAUSED = "PAUSED"
+    WAITING_FOR_USER_IDLE = "WAITING_FOR_USER_IDLE"
     RESUMING = "RESUMING"
     RECOVERING = "RECOVERING"
     CANCELLED = "CANCELLED"
@@ -86,6 +88,12 @@ class WorldStateChangeType(str, Enum):
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
+MISSION_STORE_SCHEMA_VERSION = 1
+DEFAULT_RESUME_QUIET_WINDOW_MS = max(
+    500, int(os.getenv("JARVIS_RESUME_QUIET_WINDOW_MS", "1500")))
+DEFAULT_RESUME_MAX_WAIT_MS = max(
+    DEFAULT_RESUME_QUIET_WINDOW_MS,
+    int(os.getenv("JARVIS_RESUME_MAX_WAIT_MS", "30000")))
 _CHECKPOINT_RUNTIME_KEYS = {
     "bounds", "center", "handle", "window_id", "pid", "process_id",
     "identity", "runtime_id", "coordinate_mapping_verified", "screenshot",
@@ -366,6 +374,7 @@ class MissionCheckpointStore:
     def __init__(self, task_database=None):
         self.database = task_database
         self._memory_checkpoints: dict[str, dict[str, Any]] = {}
+        self._memory_missions: dict[str, dict[str, Any]] = {}
         self._memory_receipts: dict[tuple[str, str], dict[str, Any]] = {}
         if self.database is not None:
             self._ensure_schema()
@@ -381,8 +390,6 @@ class MissionCheckpointStore:
                     "SELECT version FROM mission_checkpoint_schema "
                     "ORDER BY version DESC LIMIT 1"
                 ).fetchone()
-                if row and int(row[0]) >= CHECKPOINT_SCHEMA_VERSION:
-                    return
                 db.execute(
                     "CREATE TABLE IF NOT EXISTS mission_checkpoints("
                     "checkpoint_id TEXT PRIMARY KEY, mission_id TEXT NOT NULL,"
@@ -403,9 +410,25 @@ class MissionCheckpointStore:
                     "started_at REAL NOT NULL, verified_at REAL, result_state TEXT NOT NULL,"
                     "result TEXT NOT NULL, UNIQUE(mission_id, step_id))"
                 )
-                db.execute("DELETE FROM mission_checkpoint_schema")
-                db.execute("INSERT INTO mission_checkpoint_schema(version) VALUES(?)",
-                           (CHECKPOINT_SCHEMA_VERSION,))
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS mission_records("
+                    "mission_id TEXT PRIMARY KEY, mission_type TEXT NOT NULL,"
+                    "user_request TEXT NOT NULL, status TEXT NOT NULL,"
+                    "created_at REAL NOT NULL, updated_at REAL NOT NULL,"
+                    "current_step INTEGER NOT NULL, next_step INTEGER NOT NULL,"
+                    "checkpoint_id TEXT, context_revision INTEGER NOT NULL,"
+                    "pause_reason TEXT NOT NULL, schema_version INTEGER NOT NULL,"
+                    "snapshot TEXT NOT NULL, integrity_hash TEXT NOT NULL)"
+                )
+                db.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_mission_records_status "
+                    "ON mission_records(status, updated_at)"
+                )
+                if not row or int(row[0]) < CHECKPOINT_SCHEMA_VERSION:
+                    db.execute("DELETE FROM mission_checkpoint_schema")
+                    db.execute(
+                        "INSERT INTO mission_checkpoint_schema(version) VALUES(?)",
+                        (CHECKPOINT_SCHEMA_VERSION,))
 
     @staticmethod
     def _canonical(snapshot: dict[str, Any]) -> str:
@@ -419,14 +442,116 @@ class MissionCheckpointStore:
                   f"{cls._canonical(snapshot)}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    @classmethod
+    def _mission_integrity_hash(cls, mission_id: str,
+                                snapshot: dict[str, Any]) -> str:
+        payload = f"{MISSION_STORE_SCHEMA_VERSION}:{mission_id}:" \
+                  f"{cls._canonical(snapshot)}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def save_mission(self, *, mission_id: str, mission_type: str,
+                     user_request: str, status: str, created_at: float,
+                     updated_at: float, current_step: int, next_step: int,
+                     checkpoint_id: str, context_revision: int,
+                     pause_reason: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Upsert one logical mission record in the existing task database."""
+        safe_snapshot = _checkpoint_safe(snapshot)
+        record = {
+            "mission_id": str(mission_id),
+            "mission_type": str(mission_type or "computer_use"),
+            "user_request": str(user_request or ""),
+            "status": str(status),
+            "created_at": float(created_at),
+            "updated_at": float(updated_at),
+            "current_step": int(current_step),
+            "next_step": int(next_step),
+            "checkpoint_id": str(checkpoint_id or ""),
+            "context_revision": int(context_revision),
+            "pause_reason": str(pause_reason or ""),
+            "schema_version": MISSION_STORE_SCHEMA_VERSION,
+            "snapshot": safe_snapshot,
+        }
+        record["integrity_hash"] = self._mission_integrity_hash(
+            record["mission_id"], safe_snapshot)
+        if self.database is None:
+            self._memory_missions[record["mission_id"]] = record
+            return dict(record)
+        self._ensure_schema()
+        values = (
+            record["mission_id"], record["mission_type"], record["user_request"],
+            record["status"], record["created_at"], record["updated_at"],
+            record["current_step"], record["next_step"], record["checkpoint_id"],
+            record["context_revision"], record["pause_reason"],
+            record["schema_version"], self._canonical(safe_snapshot),
+            record["integrity_hash"],
+        )
+        with getattr(self.database, "_lock", threading.RLock()):
+            with self.database.connect() as db:
+                existing = db.execute(
+                    "SELECT mission_id FROM mission_records WHERE mission_id=?",
+                    (record["mission_id"],)).fetchone()
+                if existing:
+                    db.execute(
+                        "UPDATE mission_records SET mission_type=?,user_request=?,"
+                        "status=?,created_at=?,updated_at=?,current_step=?,next_step=?,"
+                        "checkpoint_id=?,context_revision=?,pause_reason=?,"
+                        "schema_version=?,snapshot=?,integrity_hash=? WHERE mission_id=?",
+                        values[1:] + (record["mission_id"],))
+                else:
+                    db.execute(
+                        "INSERT INTO mission_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        values)
+        return dict(record)
+
+    def load_mission(self, mission_id: str) -> tuple[Optional[dict[str, Any]], str]:
+        if self.database is None:
+            record = self._memory_missions.get(str(mission_id))
+        else:
+            self._ensure_schema()
+            with self.database.connect(rows=True) as db:
+                record = db.execute(
+                    "SELECT * FROM mission_records WHERE mission_id=?",
+                    (str(mission_id),)).fetchone()
+            record = dict(record) if record else None
+        if record is None:
+            return None, "MISSION_NOT_FOUND"
+        record = dict(record)
+        try:
+            record["snapshot"] = (record["snapshot"] if
+                                   isinstance(record.get("snapshot"), dict) else
+                                   json.loads(record.get("snapshot") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None, "MISSION_RECORD_INVALID"
+        if int(record.get("schema_version") or 0) != MISSION_STORE_SCHEMA_VERSION:
+            return None, "MISSION_RECORD_INVALID"
+        if self._mission_integrity_hash(str(record["mission_id"]),
+                                        record["snapshot"]) != record.get("integrity_hash"):
+            return None, "MISSION_RECORD_INVALID"
+        return record, ""
+
     def save_checkpoint(self, *, mission_id: str, mission_version: int,
                         name: str, current_step: int, next_step: int,
                         context_revision: int, snapshot: dict[str, Any],
                         pause_reason: str = "",
-                        state: CheckpointState = CheckpointState.VALID) -> dict[str, Any]:
+                        state: CheckpointState = CheckpointState.VALID,
+                        mission_record: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         checkpoint_id = str(uuid.uuid4())
         safe_snapshot = _checkpoint_safe(snapshot)
         created_at = time.time()
+        if mission_record is None:
+            mission_record = {
+                "mission_id": str(mission_id),
+                "mission_type": "computer_use",
+                "user_request": str(safe_snapshot.get("user_request") or ""),
+                "status": str(safe_snapshot.get("status") or MissionStatus.PENDING.value),
+                "created_at": created_at,
+                "updated_at": created_at,
+                "current_step": int(current_step),
+                "next_step": int(next_step),
+                "context_revision": int(context_revision),
+                "pause_reason": str(pause_reason or ""),
+                "snapshot": safe_snapshot,
+            }
         digest = self._integrity_hash(checkpoint_id, mission_id, safe_snapshot)
         record = {
             "checkpoint_id": checkpoint_id,
@@ -446,6 +571,10 @@ class MissionCheckpointStore:
         if self.database is None:
             record["state"] = state.value
             self._memory_checkpoints[checkpoint_id] = record
+            if mission_record:
+                stored = dict(mission_record)
+                stored["checkpoint_id"] = checkpoint_id
+                self.save_mission(**stored)
         else:
             self._ensure_schema()
             with getattr(self.database, "_lock", threading.RLock()):
@@ -462,6 +591,41 @@ class MissionCheckpointStore:
                         "UPDATE mission_checkpoints SET state=? WHERE checkpoint_id=?",
                         (state.value, checkpoint_id),
                     )
+                    if mission_record:
+                        stored = dict(mission_record)
+                        stored["checkpoint_id"] = checkpoint_id
+                        safe_mission = _checkpoint_safe(stored.get("snapshot") or {})
+                        mission_digest = self._mission_integrity_hash(
+                            str(stored["mission_id"]), safe_mission)
+                        mission_values = (
+                            str(stored["mission_id"]),
+                            str(stored.get("mission_type") or "computer_use"),
+                            str(stored.get("user_request") or ""),
+                            str(stored.get("status") or MissionStatus.PENDING.value),
+                            float(stored.get("created_at") or created_at),
+                            float(stored.get("updated_at") or created_at),
+                            int(stored.get("current_step") or 0),
+                            int(stored.get("next_step") or 0),
+                            checkpoint_id,
+                            int(stored.get("context_revision") or 0),
+                            str(stored.get("pause_reason") or ""),
+                            MISSION_STORE_SCHEMA_VERSION,
+                            self._canonical(safe_mission), mission_digest,
+                        )
+                        existing = db.execute(
+                            "SELECT mission_id FROM mission_records WHERE mission_id=?",
+                            (mission_values[0],)).fetchone()
+                        if existing:
+                            db.execute(
+                                "UPDATE mission_records SET mission_type=?,user_request=?,"
+                                "status=?,created_at=?,updated_at=?,current_step=?,next_step=?,"
+                                "checkpoint_id=?,context_revision=?,pause_reason=?,"
+                                "schema_version=?,snapshot=?,integrity_hash=? WHERE mission_id=?",
+                                mission_values[1:] + (mission_values[0],))
+                        else:
+                            db.execute(
+                                "INSERT INTO mission_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                mission_values)
             record["state"] = state.value
         record["resume_token"] = f"{mission_id}:{checkpoint_id}"
         return record
@@ -516,7 +680,17 @@ class MissionCheckpointStore:
         parts = str(token or "").split(":", 1)
         if len(parts) != 2 or not all(parts):
             return None, "RESUME_TOKEN_INVALID"
-        return self.load(parts[1], parts[0])
+        mission_id, checkpoint_id = parts
+        checkpoint, error = self.load(checkpoint_id, mission_id)
+        if error:
+            return None, "RESUME_TOKEN_NOT_FOUND" if error in {
+                "CHECKPOINT_NOT_FOUND", "CHECKPOINT_INVALID",
+                "RESUME_MISSION_MISMATCH"} else error
+        mission, mission_error = self.load_mission(mission_id)
+        if mission_error:
+            return None, "RESUME_TOKEN_NOT_FOUND"
+        checkpoint["mission_record"] = mission
+        return checkpoint, ""
 
     def latest(self, mission_id: str) -> tuple[Optional[dict[str, Any]], str]:
         if self.database is None:
@@ -1110,6 +1284,11 @@ class ComputerMissionExecutor:
             self._cancel.clear()
             self._pause_requested.clear()
             self._pause_reason = ""
+        persisted = self._persist_mission(mission)
+        if not persisted.get("ok"):
+            mission.status = MissionStatus.BLOCKED
+            mission.error = persisted.get("error", "MISSION_PERSIST_FAILED")
+            return self._finish(mission, False)
         started_checkpoint = self._create_checkpoint(
             mission, "CHECKPOINT_MISSION_STARTED", "")
         if not started_checkpoint.get("ok"):
@@ -1119,6 +1298,70 @@ class ComputerMissionExecutor:
         self._audit_mission(mission, "MISSION_STARTED", {
             "checkpoint_id": started_checkpoint.get("checkpoint_id")})
         return self._run_from_current(mission, task_id)
+
+    def _wait_for_resume_quiet(self, mission, task_id: str) -> dict[str, Any]:
+        """Wait for observed quiet after an explicit resume request."""
+        registry = getattr(self.service, "registry", None)
+        if not registry or not registry.get("ui_user_activity"):
+            return {"ok": True, "verification": "resume_quiet_window_unavailable"}
+        quiet_ms = DEFAULT_RESUME_QUIET_WINDOW_MS
+        max_wait_ms = DEFAULT_RESUME_MAX_WAIT_MS
+        mission.status = MissionStatus.WAITING_FOR_USER_IDLE
+        mission.error = "WAITING_FOR_USER_IDLE"
+        mission.result.update({
+            "explicit_resume_requested": True,
+            "resume_requested_at": time.time(),
+            "required_quiet_window_ms": quiet_ms,
+            "quiet_window_max_wait_ms": max_wait_ms,
+        })
+        self._persist_mission(mission, pause_reason="USER_ACTIVITY")
+        self._audit_mission(mission, "WAITING_FOR_USER_IDLE", {
+            "required_quiet_window_ms": quiet_ms,
+            "max_wait_ms": max_wait_ms,
+        })
+        started = time.monotonic()
+        previous_age = None
+        while True:
+            if self._cancel.is_set() or self.service.cancellation.is_cancelled():
+                mission.status = MissionStatus.CANCELLED
+                mission.error = "Cancelamento solicitado pelo operador."
+                self._persist_mission(mission, pause_reason="USER_ACTIVITY")
+                self._audit_mission(mission, "MISSION_CANCELLED", {
+                    "during": "WAITING_FOR_USER_IDLE"})
+                return self._cancelled_result()
+            activity = self.service.execute_tool(
+                "ui_user_activity", {"threshold_ms": quiet_ms},
+                command=f"computer_mission:{mission.mission_id}:resume_quiet_window",
+                task_id=task_id)
+            age = activity.get("last_user_input_age_ms")
+            mission.result["last_user_input_age_ms"] = age
+            if (previous_age is not None and age is not None and
+                    int(age) < int(previous_age)):
+                self._audit_mission(mission, "QUIET_WINDOW_RESET", {
+                    "last_user_input_age_ms": age})
+            previous_age = age
+            if (activity.get("ok") and age is not None and
+                    int(age) >= quiet_ms):
+                mission.result["quiet_window_satisfied"] = True
+                self._audit_mission(mission, "QUIET_WINDOW_SATISFIED", {
+                    "last_user_input_age_ms": age,
+                    "required_quiet_window_ms": quiet_ms,
+                })
+                return {"ok": True, "verification": "quiet_window_satisfied",
+                        "last_user_input_age_ms": age}
+            if (time.monotonic() - started) * 1000 >= max_wait_ms:
+                mission.status = MissionStatus.PAUSED
+                mission.error = "MISSION_PAUSED_FOR_USER_ACTIVITY"
+                mission.result["pause_reason"] = "USER_ACTIVITY"
+                self._persist_mission(mission, pause_reason="USER_ACTIVITY")
+                self._audit_mission(mission, "MISSION_PAUSED_FOR_USER_ACTIVITY", {
+                    "reason": "quiet_window_not_satisfied",
+                    "last_user_input_age_ms": age,
+                })
+                return {"ok": False, "error": "USER_ACTIVITY_DETECTED",
+                        "pause_reason": "USER_ACTIVITY",
+                        "last_user_input_age_ms": age}
+            self._cancel.wait(0.05)
 
     def resume(self, mission_id: str, token: str, task_id: str = "desktop") -> dict[str, Any]:
         with self._lock:
@@ -1164,13 +1407,21 @@ class ComputerMissionExecutor:
 
         checkpoint, error = self.persistence.load_resume_token(token)
         if error or not checkpoint or checkpoint.get("mission_id") != str(mission_id):
-            return {"ok": False, "error": error or "RESUME_TOKEN_INVALID"}
+            return {"ok": False, "error": error or "RESUME_TOKEN_NOT_FOUND"}
         if checkpoint.get("checkpoint_id") != mission.result.get("checkpoint_id"):
-            mission = self._restore_from_checkpoint(checkpoint)
+            try:
+                mission = self._restore_from_checkpoint(checkpoint)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
             with self._lock:
                 self._missions[mission.mission_id] = mission
                 self._active = mission
+        quiet = self._wait_for_resume_quiet(mission, task_id)
+        if not quiet.get("ok"):
+            return self._finish(mission, False)
         mission.status = MissionStatus.RESUMING
+        mission.error = ""
+        self._persist_mission(mission, pause_reason="")
         self._audit_mission(mission, "MISSION_RESUME_REQUESTED", {
             "checkpoint_id": checkpoint.get("checkpoint_id")})
         revalidated = self._revalidate_world(mission, task_id)
@@ -1203,6 +1454,7 @@ class ComputerMissionExecutor:
                 return {"ok": False, "error": "NO_ACTIVE_MISSION"}
             self._pause_reason = str(reason)
             self._pause_requested.set()
+            self._persist_mission(mission, pause_reason=reason)
             return {"ok": True, "pause_requested": True,
                     "mission_id": mission.mission_id}
 
@@ -1219,6 +1471,9 @@ class ComputerMissionExecutor:
             mission.error = "Cancelamento solicitado pelo operador."
             if mission.current_step < len(mission.steps):
                 mission.steps[mission.current_step].status = MissionStepStatus.CANCELLED
+            self._persist_mission(mission, pause_reason="OPERATOR_CANCELLED")
+            self._audit_mission(mission, "MISSION_CANCELLED", {
+                "reason": "operator_requested"})
             return True
 
     def current(self) -> Optional[dict[str, Any]]:
@@ -1234,6 +1489,16 @@ class ComputerMissionExecutor:
             risk=mission.risk_level, status=event,
             result=_checkpoint_safe(details or {}),
         )
+
+    @staticmethod
+    def _mission_type(mission) -> str:
+        if mission.result.get("long_workflow"):
+            return "computer_use_6d"
+        if mission.result.get("multi_app_mission"):
+            return "computer_use_multi_app"
+        if mission.result.get("browser_mission"):
+            return "computer_use_browser"
+        return "computer_use"
 
     def _checkpoint_snapshot(self, mission) -> dict[str, Any]:
         context = mission.context.checkpoint_snapshot() if mission.context else {}
@@ -1261,6 +1526,45 @@ class ComputerMissionExecutor:
             "context_revision": int(context.get("context_version") or 0),
         }
 
+    def _mission_record_payload(self, mission, checkpoint_id: str = "",
+                                pause_reason: str = "") -> dict[str, Any]:
+        snapshot = self._checkpoint_snapshot(mission)
+        return {
+            "mission_id": mission.mission_id,
+            "mission_type": self._mission_type(mission),
+            "user_request": mission.user_request,
+            "status": mission.status.value,
+            "created_at": mission.created_at,
+            "updated_at": time.time(),
+            "current_step": mission.current_step,
+            "next_step": mission.current_step,
+            "checkpoint_id": checkpoint_id or str(
+                mission.result.get("checkpoint_id") or ""),
+            "context_revision": int(snapshot.get("context_revision") or 0),
+            "pause_reason": pause_reason or str(
+                mission.result.get("pause_reason") or ""),
+            "snapshot": snapshot,
+        }
+
+    def _persist_mission(self, mission, *, checkpoint_id: str = "",
+                         pause_reason: str = "", audit: bool = True) -> dict[str, Any]:
+        try:
+            payload = self._mission_record_payload(
+                mission, checkpoint_id=checkpoint_id, pause_reason=pause_reason)
+            record = self.persistence.save_mission(**payload)
+            if audit:
+                self._audit_mission(mission, "MISSION_PERSISTED", {
+                    "status": mission.status.value,
+                    "checkpoint_id": record.get("checkpoint_id") or None,
+                    "context_revision": record.get("context_revision"),
+                })
+            return {"ok": True, **record}
+        except Exception as exc:
+            if audit:
+                self._audit_mission(mission, "MISSION_PERSIST_FAILED", {
+                    "error": str(exc)[:200]})
+            return {"ok": False, "error": "MISSION_PERSIST_FAILED"}
+
     def _create_checkpoint(self, mission, name: str, pause_reason: str,
                            state: CheckpointState = CheckpointState.VALID) -> dict[str, Any]:
         try:
@@ -1275,10 +1579,21 @@ class ComputerMissionExecutor:
                 snapshot=snapshot,
                 pause_reason=pause_reason,
                 state=state,
+                mission_record=self._mission_record_payload(
+                    mission, pause_reason=pause_reason),
             )
             mission.result.setdefault("completed_checkpoints", []).append(name)
             mission.result["checkpoint_id"] = record["checkpoint_id"]
             mission.result["resume_token"] = record["resume_token"]
+            durable = self._persist_mission(
+                mission, checkpoint_id=record["checkpoint_id"],
+                pause_reason=pause_reason, audit=False)
+            if not durable.get("ok"):
+                return durable
+            self._audit_mission(mission, "CHECKPOINT_DURABLY_COMMITTED", {
+                "checkpoint_id": record["checkpoint_id"],
+                "name": name,
+            })
             self._audit_mission(mission, "CHECKPOINT_CREATED", {
                 "checkpoint_id": record["checkpoint_id"], "name": name,
                 "state": record["state"], "pause_reason": pause_reason,
@@ -3263,6 +3578,12 @@ class ComputerMissionExecutor:
         return {key: value for key, value in result.items() if key in allowed}
 
     def _finish(self, mission, ok):
+        self._persist_mission(
+            mission,
+            checkpoint_id=str(mission.result.get("checkpoint_id") or ""),
+            pause_reason=str(mission.result.get("pause_reason") or ""),
+            audit=False,
+        )
         with self._lock:
             if self._active is mission and mission.status in {MissionStatus.COMPLETED,
                                                                MissionStatus.FAILED,

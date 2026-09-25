@@ -64,3 +64,15 @@ ou mouse. Com `USER_EXTERNAL_APP` e input recente, a missão cria checkpoint, re
 `USER_ACTIVITY_DETECTED` e pausa; não tenta minimizar, fechar, focar ou digitar no aplicativo
 externo. Recuperação automática é limitada a dois focos e resume somente por comando explícito.
 `ui_type_editor` rejeita input quando HWND ou `foreground_epoch` mudam antes da escrita.
+
+## 2026-09-24 — Computer Use 6D.3 usa registro durável de missão
+
+O registro durável de uma missão reutiliza o `TaskDatabase` existente e é gravado junto com
+o checkpoint lógico quando há transição de etapa. O conteúdo é sanitizado, versionado e
+protegido por hash; tokens são resolvidos por `mission_id` e `checkpoint_id`, sem fallback
+para o checkpoint mais recente de outra missão. Um novo executor reconstrói o plano e o
+`MissionContext` persistido, incluindo proveniência, antes de continuar.
+
+Resume explícito passa por uma quiet window observada pelo `ui_user_activity`. Nova atividade
+reinicia a janela, cancelamento encerra de forma durável e não existe auto-resume. Como a
+sessão estava em uso durante esta implementação, a missão real 6D.3 não foi iniciada.

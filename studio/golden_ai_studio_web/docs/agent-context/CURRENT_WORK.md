@@ -204,3 +204,25 @@ Próximo: aguardar autorização; não iniciar M1.6.
 - Regression: `251 passed, 1 skipped` in the focused Computer Use/UIA/security/browser set
   after the final test addition; the broader relevant set previously passed `250 passed,
   1 skipped`.
+
+## Computer Use 6D.3 — Durable Mission Store and Safe Resume
+
+**Date:** 2026-09-24
+**Status:** STRUCTURAL IMPLEMENTATION PASS — real mission deferred for user activity
+
+- The existing `TaskDatabase` now stores a schema-versioned `mission_records` row alongside
+  logical checkpoints and action receipts. Records include mission identity, request, status,
+  step position, checkpoint, context revision, pause reason, safe snapshot and integrity hash.
+- Resume tokens remain mission-scoped (`mission_id:checkpoint_id`); missing, mismatched or
+  tampered mission/checkpoint state fails closed as `RESUME_TOKEN_NOT_FOUND`.
+- A new executor reconstructs the planner, MissionContext, provenance, step state and receipts
+  from the existing database. Runtime coordinates, handles, screenshots, cookies, tokens and
+  browser profiles are excluded from durable snapshots.
+- Explicit resume observes `ui_user_activity` through the existing `GetLastInputInfo` path,
+  waits for one configurable quiet window, resets on new input, supports cancellation, and
+  never auto-resumes from background activity.
+- Structural regression: `277 passed, 1 skipped` in the integrated non-real suite; focused
+  6D/mission regression: `55 passed`.
+- No real 6D.3 mission was started because the user reported active computer use. The next
+  step is a new mission from zero only after the user authorizes a stable idle session;
+  current stop marker: `REAL_USER_SESSION_REQUIRED`.

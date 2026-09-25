@@ -301,3 +301,29 @@ Date: 2026-09-24
   document from the persisted MissionContext without re-running Python or Ollama research.
 - Focused regression after 6D.2: `251 passed, 1 skipped`; no push. Preserve
   `device_registry.json` and unrelated worktree changes.
+
+## Computer Use 6D.3 Handoff
+
+Date: 2026-09-24
+
+6D.3 structural work is in `jarvis_core/computer_use_mission.py`, with regression coverage in
+`tests/test_computer_use_6d.py`. It reuses `jarvis/golden_tasks.db` through the existing
+`TaskDatabase`; no second workflow database or executor was introduced.
+
+- `mission_records` persists mission identity, request, status, current/next step, checkpoint,
+  context revision, pause reason, safe snapshot and integrity hash.
+- Checkpoint writes and mission records are committed in the existing persistence transaction.
+  Resume tokens are scoped and tamper/mismatch errors fail closed.
+- A new executor can reconstruct a paused mission, its MissionContext/provenance, step state
+  and action receipts from the store. Explicit resume observes a configurable quiet window,
+  resets on new input and is cancellable.
+- Structural validation: `277 passed, 1 skipped` integrated non-real suite; `55 passed`
+  focused 6D/mission suite. `test_browser_real.py` was deliberately not run.
+- No real mission was started because the user reported active computer use. Stop now at
+  `REAL_USER_SESSION_REQUIRED`; do not open/focus apps or send keyboard/mouse input until an
+  explicit user authorization for a new real mission arrives.
+- Do not reuse the historical 6D mission or its authorization. The eventual real test must
+  create a new mission from zero, research Python and Ollama again, pause at the Python
+  checkpoint, reconstruct with a new executor, then continue to Notepad and revalidate the
+  exact target under SecurityManager.
+- Preserve `device_registry.json` and unrelated dirty files. No push.

@@ -34,3 +34,10 @@
 - The current 6D.2 implementation is not CLOSED: the previous long mission has no active
   in-memory instance in the current service process, and the authorized
   `resumo_pesquisa.txt` has not been written.
+- Computer Use 6D.3 structural persistence is implemented and tested, but its new real
+  long-mission validation is intentionally deferred while the user is active on the desktop.
+  Do not open applications, focus windows, send input, or reuse the old authorization until
+  `REAL_USER_SESSION_REQUIRED` is cleared by explicit user authorization.
+- The prior real 6D mission remains historical state only. A future validation must create a
+  new mission from zero, research Python and Ollama again, persist the Python checkpoint,
+  reconstruct through a new executor, and revalidate the exact authorized target before Save As.
