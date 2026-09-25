@@ -188,6 +188,32 @@ def test_foreground_state_distinguishes_background_target_and_user_owner(monkeyp
     assert result["user_active"] is True
 
 
+def test_foreground_state_identifies_owned_child_dialog(monkeypatch):
+    root = _FakeWrapper("* resumo - Bloco de notas", "Window",
+                        (0, 0, 800, 600), handle=411, pid=55)
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_window_exists", lambda _handle: True)
+    monkeypatch.setattr(uia, "_process_present", lambda _name: True)
+    monkeypatch.setattr(uia, "_window_minimized", lambda _handle: False)
+    monkeypatch.setattr(uia, "_window_visible", lambda _handle: True)
+    monkeypatch.setattr(uia, "_window_owner_handle",
+                        lambda handle: 411 if handle == 412 else 0)
+    monkeypatch.setattr(uia, "ui_active_window", lambda: {
+        "found": True, "handle": 412, "pid": 55,
+        "process_name": "Notepad.exe", "title": "Salvar como",
+    })
+    monkeypatch.setattr(uia, "ui_user_activity", lambda _threshold: {
+        "ok": True, "user_active": True, "last_user_input_age_ms": 80,
+        "threshold_ms": 2000,
+    })
+
+    result = uia.ui_foreground_state("notepad", "notepad")
+
+    assert result["window_state"] == "WINDOW_EXISTS_BACKGROUND"
+    assert result["foreground_owner"] == "JARVIS_TARGET_DIALOG"
+    assert result["user_active"] is True
+
+
 def test_foreground_state_distinguishes_minimized_target_when_user_idle(monkeypatch):
     root = _FakeWrapper("Sem título - Bloco de notas", "Window",
                         (0, 0, 800, 600), handle=403, pid=55)

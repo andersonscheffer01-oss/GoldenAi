@@ -121,6 +121,19 @@ def _window_pid(handle: int) -> int:
         return 0
 
 
+def _window_owner_handle(handle: int) -> int:
+    """Return the Win32 owner of a top-level window, when available."""
+    if not handle or os.name != "nt":
+        return 0
+    try:
+        # GW_OWNER identifies owned dialogs without treating unrelated windows
+        # from the same process as part of the mission surface.
+        return int(ctypes.windll.user32.GetWindow(
+            ctypes.c_void_p(handle), 4) or 0)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return 0
+
+
 def _process_name(pid: int) -> str:
     if not pid:
         return ""
@@ -366,6 +379,10 @@ def ui_foreground_state(window: Optional[Any] = None,
         active_process = str(active.get("process_name") or "").casefold()
         if target_handle and target_handle == active_handle:
             owner = "JARVIS_TARGET"
+        elif (target_handle and active_handle and
+              active_process == str(process_name or "").casefold() and
+              _window_owner_handle(active_handle) == target_handle):
+            owner = "JARVIS_TARGET_DIALOG"
         elif active_process in _SYSTEM_DIALOG_PROCESSES:
             owner = "SYSTEM_DIALOG"
         elif active_handle and activity.get("user_active"):

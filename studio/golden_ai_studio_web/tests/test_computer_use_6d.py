@@ -421,6 +421,138 @@ class QuietForegroundProbe(ForegroundProbe):
         return super().execute_tool(name, arguments, command, task_id, confirmed)
 
 
+class BackgroundRecoveryProbe(ForegroundProbe):
+    def __init__(self, database, *, ages=None, focus_ok=True,
+                 editor_identity="(42, 329544)", **kwargs):
+        super().__init__(database, focus_ok=focus_ok, **kwargs)
+        self.registry.names.update({
+            "ui_user_activity", "ui_read_editor", "ui_list_elements",
+        })
+        self.ages = list(ages or [])
+        self.target_handle = 123
+        self.target_pid = 10
+        self.editor_identity = editor_identity
+        self.editor_text = (
+            "Versão estável do Python: Python 3.14.7\n"
+            "Título principal do Ollama: Ollama"
+        )
+        self.editor_reads = 0
+        self.security = SimpleNamespace(decision=lambda _tool: "allow")
+
+    def _activity(self):
+        age = self.ages.pop(0) if self.ages else 5000
+        return {"ok": True, "user_active": age < 1500,
+                "last_user_input_age_ms": age, "threshold_ms": 1500}
+
+    def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False):
+        if name == "ui_user_activity":
+            self.calls.append((name, dict(arguments), confirmed))
+            return self._activity()
+        if name == "ui_foreground_state":
+            self.calls.append((name, dict(arguments), confirmed))
+            activity = self._activity()
+            return {
+                "ok": True, "process_present": True, "window_present": True,
+                "window_focused": self.focused,
+                "window_state": ("WINDOW_EXISTS_FOREGROUND" if self.focused
+                                  else "WINDOW_EXISTS_BACKGROUND"),
+                "foreground_owner": "JARVIS_TARGET" if self.focused else self.owner,
+                "foreground_epoch": 7 if self.focused else 6,
+                "user_active": activity["user_active"],
+                "last_user_input_age_ms": activity["last_user_input_age_ms"],
+                "target_window": {"handle": self.target_handle, "pid": self.target_pid},
+            }
+        if name == "ui_active_window":
+            self.calls.append((name, dict(arguments), confirmed))
+            return {
+                "ok": True, "found": True,
+                "process_name": "notepad.exe" if self.focused else "explorer.exe",
+                "title": "* pesquisa_python.txt - Bloco de notas" if self.focused else "Explorer",
+                "pid": self.target_pid if self.focused else 20,
+                "handle": self.target_handle if self.focused else 999,
+            }
+        if name == "ui_focus_window":
+            self.focus_calls += 1
+            self.calls.append((name, dict(arguments), confirmed))
+            if self.focus_ok:
+                self.focused = True
+            return {"ok": self.focus_ok, "focused": self.focus_ok,
+                    **({} if self.focus_ok else {"error": "FOCUS_ACQUIRE_FAILED"})}
+        if name == "ui_read_editor":
+            self.editor_reads += 1
+            self.calls.append((name, dict(arguments), confirmed))
+            return {
+                "ok": True, "found": True, "verified": True,
+                "text": self.editor_text,
+                "window": {"handle": self.target_handle, "pid": self.target_pid},
+                "editor": {"document_identity": self.editor_identity,
+                            "content_state_id": "content-1"},
+            }
+        if name == "ui_list_elements":
+            self.calls.append((name, dict(arguments), confirmed))
+            return {"ok": True, "elements": []}
+        return super().execute_tool(name, arguments, command, task_id, confirmed)
+
+
+def _owned_background_mission():
+    template = (
+        "Versão estável do Python: {{python_version}}\n"
+        "Título principal do Ollama: {{ollama_page_title}}"
+    )
+    mission = ComputerMission(
+        "background-recovery-mission", "request", MissionStatus.PENDING,
+        time.time(), [
+            ComputerMissionStep(
+                "verify-editor-pre-save", "Verify editor", "verify_editor_pre_save",
+                app="notepad", args={"template": template},
+            ),
+            ComputerMissionStep(
+                "open-save-dialog", "Open Save As", "keyboard_hotkey",
+                app="notepad", args={"keys": ["ctrl", "shift", "s"]},
+            ),
+        ], current_step=1, max_steps=10,
+    )
+    mission.context.current_app = "notepad"
+    mission.context.store_variable(
+        "python_version", "Python 3.14.7", kind="OBSERVED_VALUE",
+        source_app="chrome", source_type="browser_result",
+        source_url="https://www.python.org/downloads/latest/",
+    )
+    mission.context.store_variable(
+        "ollama_page_title", "Ollama", kind="OBSERVED_VALUE",
+        source_app="chrome", source_type="browser_result",
+        source_url="https://ollama.com/",
+    )
+    mission.context.artifacts.update({
+        "mission_document_id": "(42, 329544)",
+        "mission_window_id": 123,
+        "mission_document_created_by_mission": True,
+        "rendered_text": {"value": "Versão estável do Python: Python 3.14.7\n"
+                                  "Título principal do Ollama: Ollama"},
+    })
+    mission.result["document_ownership"] = "OWNED_BY_CURRENT_MISSION"
+    mission.result["target_path"] = "C:\\temp\\resumo_pesquisa.txt"
+    mission.result["filename"] = "resumo_pesquisa.txt"
+    return mission
+
+
+def test_long_research_template_uses_real_line_breaks():
+    registry = Registry(
+        "browser_open", "browser_navigate", "browser_health", "browser_get_elements",
+        "browser_search", "browser_get_page_info", "browser_click",
+        "browser_record_window", "browser_wait_for_results", "ui_active_window",
+        "ui_focus_window", "ui_focus_element", "ui_focus_editor", "ui_read_editor",
+        "ui_invoke_element", "ui_classify_dialog", "ui_list_elements", "open_program",
+        "keyboard_type", "keyboard_hotkey", "keyboard_press",
+    )
+    mission = ComputerMissionPlanner(registry).plan(LONG_MISSION)
+    step = next(item for item in mission.steps if item.step_id == "type-summary")
+    template = str(step.args["template"])
+
+    assert "\n" in template
+    assert "\\n" not in template
+
+
 class DurableMissionPlanner:
     def __init__(self, *, seed_context):
         self.seed_context = seed_context
@@ -518,8 +650,129 @@ def test_background_target_is_contention_not_app_closed(tmp_path):
         mission.mission_id,
     )
 
-    assert change is WorldStateChangeType.WINDOW_EXISTS_BACKGROUND
+    assert change is WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_UNKNOWN
     assert change is not WorldStateChangeType.APP_CLOSED
+
+
+def test_idle_owned_background_window_is_recoverable_and_revalidates_editor(tmp_path):
+    service = BackgroundRecoveryProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        ages=[5000, 5000, 5000, 5000, 5000],
+        user_active=False, owner="UNKNOWN", focused=False,
+    )
+    mission = _owned_background_mission()
+    executor = ComputerMissionExecutor(service, FixedPlanner(lambda _request: mission))
+
+    result = executor._revalidate_world(mission, "background-recovery-mission")
+
+    assert result["ok"] is True
+    assert result["world_state_change_type"] == (
+        WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_RECOVERABLE.value)
+    assert result["focus_recovery_attempts"] == 1
+    assert service.focus_calls == 1
+    assert service.editor_reads >= 2
+    assert any(event["status"] == "BACKGROUND_WINDOW_RECOVERED"
+               for event in service.audit_events)
+
+
+def test_background_window_with_recent_activity_never_focuses(tmp_path):
+    service = BackgroundRecoveryProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        ages=[0, 0, 0], user_active=True,
+        owner="USER_EXTERNAL_APP", focused=False,
+    )
+    mission = _owned_background_mission()
+    executor = ComputerMissionExecutor(service, FixedPlanner(lambda _request: mission))
+
+    result = executor._revalidate_world(mission, "background-user-active")
+
+    assert result["ok"] is False
+    assert result["error"] == "USER_ACTIVITY_DETECTED"
+    assert service.focus_calls == 0
+
+
+def test_unowned_background_window_is_not_recoverable(tmp_path):
+    service = BackgroundRecoveryProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        user_active=False, owner="UNKNOWN", focused=False,
+    )
+    mission = _owned_background_mission()
+    mission.result["document_ownership"] = "PRE_EXISTING_DOCUMENT_PROTECTED"
+    executor = ComputerMissionExecutor(service, FixedPlanner(lambda _request: mission))
+
+    result = executor._revalidate_world(mission, "background-unowned")
+
+    assert result["ok"] is False
+    assert result["error"] == "WORLD_STATE_CHANGED"
+    assert result["world_state_change_type"] == (
+        WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_UNKNOWN.value)
+    assert service.focus_calls == 0
+
+
+def test_background_focus_recovery_is_bounded_and_blocks_on_failure(tmp_path):
+    service = BackgroundRecoveryProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        user_active=False, owner="UNKNOWN", focused=False, focus_ok=False,
+    )
+    mission = _owned_background_mission()
+    executor = ComputerMissionExecutor(service, FixedPlanner(lambda _request: mission))
+
+    result = executor._revalidate_world(mission, "background-focus-failure")
+
+    assert result["ok"] is False
+    assert result["error"] == "FOCUS_RECOVERY_FAILED"
+    assert result["focus_recovery_attempts"] == 2
+    assert service.focus_calls == 2
+    assert service.editor_reads == 0
+
+
+def test_new_activity_before_focus_aborts_recovery(tmp_path):
+    service = BackgroundRecoveryProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        ages=[5000, 5000, 0], user_active=False,
+        owner="UNKNOWN", focused=False,
+    )
+    mission = _owned_background_mission()
+    executor = ComputerMissionExecutor(service, FixedPlanner(lambda _request: mission))
+
+    result = executor._revalidate_world(mission, "background-activity-before-focus")
+
+    assert result["ok"] is False
+    assert result["error"] == "USER_ACTIVITY_DETECTED"
+    assert service.focus_calls == 0
+
+
+def test_new_activity_after_focus_aborts_before_editor_or_save(tmp_path):
+    service = BackgroundRecoveryProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        ages=[5000, 5000, 5000, 5000, 0], user_active=False,
+        owner="UNKNOWN", focused=False,
+    )
+    mission = _owned_background_mission()
+    executor = ComputerMissionExecutor(service, FixedPlanner(lambda _request: mission))
+
+    result = executor._revalidate_world(mission, "background-activity-after-focus")
+
+    assert result["ok"] is False
+    assert result["error"] == "USER_ACTIVITY_DETECTED"
+    assert service.focus_calls == 1
+    assert service.editor_reads == 0
+
+
+def test_background_recovery_rejects_changed_document_identity(tmp_path):
+    service = BackgroundRecoveryProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        user_active=False, owner="UNKNOWN", focused=False,
+        editor_identity="(42, 999999)",
+    )
+    mission = _owned_background_mission()
+    executor = ComputerMissionExecutor(service, FixedPlanner(lambda _request: mission))
+
+    result = executor._revalidate_world(mission, "background-stale-document")
+
+    assert result["ok"] is False
+    assert result["error"] == "STALE_DOCUMENT"
+    assert service.focus_calls == 1
 
 
 def test_explicit_resume_after_user_pause_rechecks_foreground(tmp_path):

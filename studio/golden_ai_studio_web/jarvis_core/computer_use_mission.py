@@ -77,6 +77,9 @@ class WorldStateChangeType(str, Enum):
     APP_CLOSED = "APP_CLOSED"
     WINDOW_MISSING = "WINDOW_MISSING"
     WINDOW_EXISTS_BACKGROUND = "WINDOW_EXISTS_BACKGROUND"
+    WINDOW_EXISTS_BACKGROUND_RECOVERABLE = "WINDOW_EXISTS_BACKGROUND_RECOVERABLE"
+    WINDOW_EXISTS_BACKGROUND_USER_ACTIVE = "WINDOW_EXISTS_BACKGROUND_USER_ACTIVE"
+    WINDOW_EXISTS_BACKGROUND_UNKNOWN = "WINDOW_EXISTS_BACKGROUND_UNKNOWN"
     WINDOW_MINIMIZED = "WINDOW_MINIMIZED"
     WINDOW_OCCLUDED = "WINDOW_OCCLUDED"
     FOREGROUND_CONTENTION = "FOREGROUND_CONTENTION"
@@ -1136,7 +1139,7 @@ class ComputerMissionPlanner:
             step("type-summary", "Escrever resumo com os valores observados",
                   "type_mission_template", "notepad-editor",
                   expected={"process": "notepad"},
-                  args={"template": "Versão estável do Python: {{python_version}}\\n"
+                  args={"template": "Versão estável do Python: {{python_version}}\n"
                                 "Título principal do Ollama: {{ollama_page_title}}",
                         "source_variables": ["python_version", "ollama_page_title"]},
                   app="notepad", requires=("check-overwrite",),
@@ -1764,6 +1767,14 @@ class ComputerMissionExecutor:
                     if recovered.get("ok"):
                         return recovered
                     return recovered
+                if change == WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_RECOVERABLE:
+                    return self._recover_background_notepad(
+                        mission, task_id, observed)
+                if change == WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_USER_ACTIVE:
+                    return {"ok": False, "error": "USER_ACTIVITY_DETECTED",
+                            "pause_reason": "USER_ACTIVITY",
+                            "world_state_change_type": change.value,
+                            "detail": observed}
                 if change == WorldStateChangeType.FOREGROUND_CONTENTION:
                     return {"ok": False, "error": "FOREGROUND_CONTENTION",
                             "pause_reason": "FOREGROUND_CONTENTION",
@@ -1808,7 +1819,11 @@ class ComputerMissionExecutor:
             if foreground.get("ok"):
                 state = str(foreground.get("window_state") or "")
                 if state == "WINDOW_EXISTS_BACKGROUND":
-                    return WorldStateChangeType.WINDOW_EXISTS_BACKGROUND
+                    if foreground.get("user_active"):
+                        return WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_USER_ACTIVE
+                    if self._background_recovery_allowed(mission):
+                        return WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_RECOVERABLE
+                    return WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_UNKNOWN
                 if state == "WINDOW_MINIMIZED":
                     return WorldStateChangeType.WINDOW_MINIMIZED
                 if state == "WINDOW_OCCLUDED":
@@ -1829,6 +1844,130 @@ class ComputerMissionExecutor:
         if reason in {"window_not_found", "process_mismatch", "editor_not_found"}:
             return WorldStateChangeType.APP_CLOSED
         return WorldStateChangeType.UNKNOWN
+
+    def _background_recovery_allowed(self, mission) -> bool:
+        """Return whether a background target is provably mission-owned and safe."""
+        artifacts = mission.context.artifacts if mission.context else {}
+        if (mission.result.get("document_ownership") != "OWNED_BY_CURRENT_MISSION" or
+                not artifacts.get("mission_document_id") or
+                not artifacts.get("mission_document_created_by_mission")):
+            return False
+        unknown = [receipt for receipt in self.persistence.receipts_for_mission(
+            mission.mission_id)
+                   if receipt.get("result_state") == ActionState.IN_FLIGHT_UNKNOWN.value]
+        if unknown:
+            return False
+        tool = self.service.registry.get("ui_focus_window") if getattr(
+            self.service, "registry", None) else None
+        security = getattr(self.service, "security", None)
+        if tool is None:
+            return False
+        if security is not None and security.decision(tool) == "deny":
+            return False
+        return True
+
+    def _recover_background_notepad(self, mission, task_id, observed):
+        """Recover one owned idle background window without bypassing guards."""
+        if not self._background_recovery_allowed(mission):
+            return {"ok": False, "error": "WINDOW_EXISTS_BACKGROUND_UNKNOWN",
+                    "world_state_change_type":
+                    WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_UNKNOWN.value}
+        artifacts = mission.context.artifacts
+        expected_handle = int(artifacts.get("mission_window_id") or 0)
+        attempts = 0
+        self._audit_mission(mission, "BACKGROUND_WINDOW_RECOVERY_STARTED", {
+            "expected_window_id": expected_handle,
+            "max_attempts": self.MAX_FOCUS_RECOVERY_ATTEMPTS,
+        })
+        for attempt in range(1, self.MAX_FOCUS_RECOVERY_ATTEMPTS + 1):
+            attempts = attempt
+            activity = self.service.execute_tool(
+                "ui_user_activity", {"threshold_ms": DEFAULT_RESUME_QUIET_WINDOW_MS},
+                command=f"computer_mission:{mission.mission_id}:focus_recovery_activity",
+                task_id=task_id)
+            if not activity.get("ok"):
+                return {"ok": False, "error": "FOREGROUND_STATE_UNAVAILABLE",
+                        "focus_recovery_attempts": attempts}
+            if activity.get("user_active"):
+                self._audit_mission(mission, "USER_ACTIVITY_DETECTED", {
+                    "phase": "before_focus_recovery",
+                    "focus_recovery_attempts": attempts,
+                })
+                return {"ok": False, "error": "USER_ACTIVITY_DETECTED",
+                        "pause_reason": "USER_ACTIVITY",
+                        "focus_recovery_attempts": attempts}
+            foreground = self._foreground_guard(mission, task_id, "notepad")
+            if not foreground.get("ok"):
+                return {**foreground, "focus_recovery_attempts": attempts}
+            target = foreground.get("target_window") or {}
+            target_handle = int(target.get("handle") or 0)
+            if expected_handle and target_handle and target_handle != expected_handle:
+                return {"ok": False, "error": "STALE_DOCUMENT",
+                        "focus_recovery_attempts": attempts,
+                        "expected_window_id": expected_handle,
+                        "current_window_id": target_handle}
+            self._audit_mission(mission, "FOCUS_RECOVERY_ATTEMPT", {
+                "attempt": attempts, "window_id": target_handle or expected_handle,
+            })
+            focused = self.service.execute_tool(
+                "ui_focus_window", {"window": "notepad",
+                                     "process_id": int(target.get("pid") or 0)},
+                command=f"computer_mission:{mission.mission_id}:focus_recovery",
+                task_id=task_id)
+            if focused.get("confirmation_required"):
+                return focused
+            after_activity = self.service.execute_tool(
+                "ui_user_activity", {"threshold_ms": DEFAULT_RESUME_QUIET_WINDOW_MS},
+                command=f"computer_mission:{mission.mission_id}:focus_recovery_post_activity",
+                task_id=task_id)
+            if not after_activity.get("ok"):
+                return {"ok": False, "error": "FOREGROUND_STATE_UNAVAILABLE",
+                        "focus_recovery_attempts": attempts}
+            if after_activity.get("user_active"):
+                return {"ok": False, "error": "USER_ACTIVITY_DETECTED",
+                        "pause_reason": "USER_ACTIVITY",
+                        "focus_recovery_attempts": attempts}
+            verified = self._foreground_guard(mission, task_id, "notepad")
+            active = self.service.execute_tool(
+                "ui_active_window", {},
+                command=f"computer_mission:{mission.mission_id}:focus_recovery_verify",
+                task_id=task_id)
+            active_data = active.get("result") if isinstance(
+                active.get("result"), dict) else active
+            active_process = str(active_data.get("process_name") or "").casefold()
+            if (focused.get("ok") and verified.get("window_focused") and
+                    verified.get("window_state") == "WINDOW_EXISTS_FOREGROUND" and
+                    active_process == "notepad.exe"):
+                ownership = self._assert_mission_document(mission, task_id)
+                if not ownership.get("ok"):
+                    return {"ok": False, "error": "STALE_DOCUMENT",
+                            "focus_recovery_attempts": attempts,
+                            "detail": ownership}
+                verify_step = next((step for step in mission.steps
+                                    if step.step_id == "verify-editor-pre-save"), None)
+                if verify_step is None:
+                    return {"ok": False, "error": "EDITOR_REVALIDATION_UNAVAILABLE",
+                            "focus_recovery_attempts": attempts}
+                editor = self._verify_editor_content(
+                    mission, verify_step, task_id, pre_save=True)
+                if not editor.get("ok"):
+                    return {**editor, "focus_recovery_attempts": attempts}
+                self._audit_mission(mission, "BACKGROUND_WINDOW_RECOVERED", {
+                    "focus_recovery_attempts": attempts,
+                    "mission_document_id": artifacts.get("mission_document_id"),
+                })
+                return {"ok": True, "verified": True,
+                        "verification": "background_window_recovered_and_editor_reverified",
+                        "world_state_change_type":
+                        WorldStateChangeType.WINDOW_EXISTS_BACKGROUND_RECOVERABLE.value,
+                        "focus_recovery_attempts": attempts,
+                        "editor_content_verified": True,
+                        "mission_to_editor_match": True}
+        self._audit_mission(mission, "FOCUS_RECOVERY_FAILED", {
+            "focus_recovery_attempts": attempts})
+        return {"ok": False, "error": "FOCUS_RECOVERY_FAILED",
+                "pause_reason": "FOREGROUND_CONTENTION",
+                "focus_recovery_attempts": attempts}
 
     def _recovery_context_validation(self, mission):
         context = mission.context
