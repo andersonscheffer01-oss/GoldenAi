@@ -244,6 +244,6 @@ Próximo: aguardar autorização; não iniciar M1.6.
   startup recovery, scoped single-use approvals, cancellation, enable/disable, and
   audit events prevent duplicate dispatch and unsafe resume.
 - `SystemClock` and `FakeClock` keep scheduling deterministic and testable.
-- Automated structural/integrated validation passed: `87 passed, 8 subtests` in the
+- Automated structural/integrated validation passed: `90 passed, 8 subtests` in the
   7D.1 scheduler plus existing TaskManager and Computer Use 6D collections.
 - No real Windows action was executed in 7D.1. Final gate: `REAL_USER_SESSION_REQUIRED`.

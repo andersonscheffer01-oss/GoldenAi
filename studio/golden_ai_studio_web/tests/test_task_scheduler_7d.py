@@ -218,6 +218,46 @@ def test_waiting_confirmation_is_durable_and_has_no_second_dispatch(tmp_path):
     assert store.list_task_runs(task.task_id)[0]["status"] == RunStatus.WAITING_CONFIRMATION.value
 
 
+def test_waiting_confirmation_survives_scheduler_restart(tmp_path):
+    clock = FakeClock(100)
+    store = TaskDatabase(tmp_path / "tasks.db")
+    task = make_task(clock)
+    store.create_background_task(task)
+    first_calls = []
+    first = BackgroundTaskScheduler(store, clock=clock,
+        launcher=lambda _task, run: first_calls.append(run["run_id"]) or {
+            "status": "WAITING_CONFIRMATION", "mission_id": "mission-1"})
+    first.tick()
+    second_calls = []
+    second = BackgroundTaskScheduler(store, clock=clock,
+        launcher=lambda _task, run: second_calls.append(run["run_id"]) or {"ok": True})
+    second.tick()
+    assert len(first_calls) == 1
+    assert second_calls == []
+    assert store.get_background_task(task.task_id).status == BackgroundTaskStatus.WAITING_CONFIRMATION
+
+
+def test_waiting_user_idle_is_rechecked_after_scheduler_restart(tmp_path):
+    clock = FakeClock(100)
+    store = TaskDatabase(tmp_path / "tasks.db")
+    idle = {"seconds": 0}
+    evaluator = ConditionEvaluator(idle_provider=lambda: idle["seconds"])
+    task = make_task(clock, TriggerType.USER_IDLE, {"seconds": 10})
+    store.create_background_task(task)
+    first = BackgroundTaskScheduler(store, clock=clock, condition_evaluator=evaluator,
+        launcher=lambda _task, _run: {"ok": True})
+    first.tick()
+    assert store.get_background_task(task.task_id).status == BackgroundTaskStatus.WAITING_USER_IDLE
+    second_calls = []
+    second = BackgroundTaskScheduler(store, clock=clock, condition_evaluator=evaluator,
+        launcher=lambda _task, _run: second_calls.append(True) or {"ok": True})
+    second.tick()
+    assert second_calls == []
+    idle["seconds"] = 10
+    second.tick()
+    assert second_calls == [True]
+
+
 def test_misfire_skip_does_not_run_stale_one_shot(tmp_path):
     clock = FakeClock(1000)
     store = TaskDatabase(tmp_path / "tasks.db")

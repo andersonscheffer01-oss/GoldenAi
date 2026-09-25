@@ -346,7 +346,7 @@ The next session must preserve these invariants:
 - The scheduler only delegates to the existing mission path; all real work remains
   subject to SecurityManager, confirmation, foreground arbitration, stale-target
   protection, and AuditLog.
-- Automated validation passed: `87 passed, 8 subtests`. No real Windows action was
+- Automated validation passed: `90 passed, 8 subtests`. No real Windows action was
   run because the user was active. Resume only at `REAL_USER_SESSION_REQUIRED` after
   explicit authorization for a new real mission.
 - Do not touch `device_registry.json`, runtime DBs, build/dist, logs, or unrelated dirty
