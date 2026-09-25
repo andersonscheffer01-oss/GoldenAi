@@ -237,6 +237,22 @@ def test_waiting_confirmation_survives_scheduler_restart(tmp_path):
     assert store.get_background_task(task.task_id).status == BackgroundTaskStatus.WAITING_CONFIRMATION
 
 
+def test_mission_user_activity_pause_maps_to_waiting_idle(tmp_path):
+    clock = FakeClock(100)
+    store = TaskDatabase(tmp_path / "tasks.db")
+    task = make_task(clock)
+    store.create_background_task(task)
+    scheduler = BackgroundTaskScheduler(store, clock=clock,
+        launcher=lambda _task, _run: {
+            "ok": False, "error": "MISSION_PAUSED_FOR_USER_ACTIVITY",
+            "mission": {"status": "PAUSED", "mission_id": "mission-activity"}})
+    scheduler.tick()
+    run = store.list_task_runs(task.task_id)[0]
+    assert store.get_background_task(task.task_id).status == BackgroundTaskStatus.WAITING_USER_IDLE
+    assert run["status"] == RunStatus.WAITING_USER_IDLE.value
+    assert run["mission_id"] == "mission-activity"
+
+
 def test_waiting_user_idle_is_rechecked_after_scheduler_restart(tmp_path):
     clock = FakeClock(100)
     store = TaskDatabase(tmp_path / "tasks.db")

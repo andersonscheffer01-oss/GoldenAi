@@ -155,7 +155,20 @@ class BackgroundTaskScheduler:
         mission_id = result.get("mission_id") or (result.get("mission") or {}).get("mission_id")
         if mission_id:
             self.database.update_task_run(run["run_id"], mission_id=mission_id)
-        if result.get("status") == "WAITING_CONFIRMATION" or result.get("confirmation_required"):
+        mission = result.get("mission") or {}
+        result_status = str(result.get("status") or mission.get("status") or "").upper()
+        result_error = str(result.get("error") or mission.get("error") or "").upper()
+        if (result_status in {"WAITING_USER_IDLE", "WAITING_FOR_USER_IDLE"} or
+                result_error in {"USER_ACTIVITY_DETECTED", "MISSION_PAUSED_FOR_USER_ACTIVITY"}):
+            self.database.update_task_run(run["run_id"], status=RunStatus.WAITING_USER_IDLE,
+                                          claim_token=None, claimed_by=None, claim_expires_at=None,
+                                          error_code="USER_ACTIVITY_DETECTED",
+                                          error_message="mission paused for user activity")
+            self.database.update_background_task(task.task_id,
+                status=BackgroundTaskStatus.WAITING_USER_IDLE)
+            self._audit(task.task_id, "background_task_waiting_user_idle", {"run_id": run["run_id"]})
+            return "WAITING_USER_IDLE"
+        if result_status == "WAITING_CONFIRMATION" or result.get("confirmation_required"):
             self.database.update_task_run(run["run_id"], status=RunStatus.WAITING_CONFIRMATION,
                                           claim_token=None, claimed_by=None, claim_expires_at=None)
             self.database.update_background_task(task.task_id,

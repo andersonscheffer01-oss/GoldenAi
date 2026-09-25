@@ -798,6 +798,7 @@ class ComputerMissionPlanner:
     MAX_STEPS = 30
     _NOTEPAD_RE = re.compile(r"\b(bloco\s+de\s+notas|notepad)\b", re.I)
     _BROWSER_RE = re.compile(r"\b(navegador|browser|chrome|edge)\b", re.I)
+    _DIRECT_TITLE_RE = re.compile(r"\bt[ií]tulo\b.*\bpython\.org\b|\bpython\.org\b.*\bt[ií]tulo\b", re.I | re.S)
     _SAVE_RE = re.compile(r"\bsalv(?:e|ar|a)\s+(?:como\s+)?([\w.-]+)", re.I)
     _MULTI_APP_RE = re.compile(
         r"(?:chrome|navegador).*(?:bloco\s+de\s+notas|notepad).*"
@@ -820,6 +821,8 @@ class ComputerMissionPlanner:
         low = text.casefold()
         if self._is_multi_app_request(text):
             return True
+        if self._DIRECT_TITLE_RE.search(text) and self._BROWSER_RE.search(text):
+            return True
         if self._BROWSER_RE.search(text):
             return bool(re.search(r"\b(pesquis|buscar|busque|procure)\w*\b", low))
         return bool(self._NOTEPAD_RE.search(text) and
@@ -833,6 +836,8 @@ class ComputerMissionPlanner:
             if "ollama" in text.casefold() and "python" in text.casefold():
                 return self._plan_long_research(text)
             return self._plan_multi_app(text)
+        if self._DIRECT_TITLE_RE.search(text):
+            return self._plan_direct_title(text)
         if self._BROWSER_RE.search(text):
             return self._plan_browser_search(text)
         match = self._SAVE_RE.search(text)
@@ -900,6 +905,47 @@ class ComputerMissionPlanner:
         ]
         return ComputerMission(str(uuid.uuid4()), text, MissionStatus.PENDING,
                                time.time(), steps, max_steps=self.MAX_STEPS)
+
+    def _plan_direct_title(self, text: str) -> ComputerMission:
+        """Plan a read-only direct official-page title observation."""
+        tool_names = {
+            "browser_open", "browser_navigate", "browser_health", "browser_get_page_info",
+            "ui_active_window", "ui_focus_window", "browser_record_window",
+        }
+        missing = sorted(name for name in tool_names if self.registry.get(name) is None)
+        if missing:
+            raise ValueError("Capacidades não registradas: " + ", ".join(missing))
+
+        def step(step_id, description, action_type, target="", expected=None, args=None,
+                 app="chrome"):
+            return ComputerMissionStep(step_id, description, action_type, target,
+                                       expected or {}, args or {}, app=app)
+
+        steps = [
+            step("open-browser", "Abrir Google Chrome visível", "browser_open", "browser",
+                 args={"visible": True, "provider": "chrome"}),
+            step("navigate-official-python", "Acessar a página oficial do Python",
+                 "browser_navigate", "https://www.python.org/",
+                 args={"url": "https://www.python.org/"}),
+            step("focus-browser", "Confirmar foco no Google Chrome", "focus_browser", "browser",
+                 expected={"browser_process": True}),
+            step("observe-browser", "Validar sessão e página oficial", "observe_browser", "browser",
+                 expected={"browser_process": True}),
+            step("extract-python-title", "Observar o título da página oficial",
+                 "extract_mission_value", "browser-page",
+                 args={"source_variable": "python_page_title", "value_kind": "title"}),
+        ]
+        mission = ComputerMission(str(uuid.uuid4()), text, MissionStatus.PENDING,
+                                  time.time(), steps, max_steps=self.MAX_STEPS)
+        mission.result.update({
+            "browser_mission": True,
+            "direct_official_navigation": True,
+            "official_host": "www.python.org",
+            "source_url": "https://www.python.org/",
+            "value_key": "python_page_title",
+            "search_provider": "chrome",
+        })
+        return mission
 
     def _is_multi_app_request(self, text: str) -> bool:
         low = str(text or "").casefold()
@@ -2608,6 +2654,30 @@ class ComputerMissionExecutor:
                            "PRIVACY_CONSENT", "BENIGN_INTERSTITIAL"}:
                 return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
                         "dialog": barrier}
+            current_url = _resolved_result_url(str(page.get("url") or ""))
+            current_host = urlparse(current_url).netloc.casefold()
+            if (mode == "title" and barrier == "NONE" and
+                    (current_host == hosts[0] or current_host.endswith(hosts[1]))):
+                page_title = " ".join(str(page.get("title") or "").split())
+                if page_title and not re.fullmatch(r"(?:https?://|www\.)\S+", page_title, re.I):
+                    stored = mission.context.store_variable(
+                        key, page_title, kind="OBSERVED_VALUE", source_app="chrome",
+                        source_type="browser_page", source_title=page_title,
+                        source_url=current_url, confidence="verified",
+                        source_state_id=str(mission.result.get("browser_page_state_id") or current_url),
+                        valid_until_step=mission.current_step + mission.max_steps)
+                    mission.result.update({
+                        key: page_title, "value_extracted": True, "source_found": True,
+                        "source_verified": True, "source_provenance": stored.public(),
+                        "final_url": current_url,
+                    })
+                    self._audit_context_event(
+                        mission, "CONTEXT_VALUE_CREATED", "stored", {"ok": True},
+                        app="chrome", source_variable=key, destination="mission_context")
+                    return {"ok": True, "verified": True,
+                            "verification": "observed_official_page_title", "value": page_title,
+                            "source_variable": key, "source_url": current_url,
+                            "source_title": page_title}
             candidates = [item for item in list(page.get("links") or [])
                           if item.get("visible", True) and item.get("result_candidate")]
             official = [item for item in candidates if (
