@@ -52,6 +52,12 @@ class _FakeWrapper:
         return self._password
 
 
+def test_editor_value_normalizes_windows_line_endings():
+    wrapper = SimpleNamespace(get_value=lambda: "linha 1\r\nlinha 2")
+
+    assert uia._control_value(wrapper) == "linha 1\nlinha 2"
+
+
 def _fake_tree(monkeypatch):
     root = _FakeWrapper("Sem título - Bloco de notas", "Window",
                         (0, 0, 800, 600), children=[])

@@ -560,16 +560,21 @@ def ui_get_element_text(target: str, control_type: Optional[str] = None,
         return {"found": False, "reason": str(exc)[:200], "source": "windows_uia"}
 
 
+def _normalize_editor_text(value: Any) -> str:
+    """Normalize Windows editor line endings for mission comparisons."""
+    return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _control_value(wrapper: Any) -> str:
     """Read an editor value through the UIA value pattern when available."""
     for name in ("get_value", "window_text"):
         value = _safe_call(wrapper, name, None)
         if value is not None and str(value) != "":
-            return str(value)
+            return _normalize_editor_text(value)
     try:
         pattern = wrapper.get_value_pattern()
         value = getattr(pattern, "value", "")
-        return str(value() if callable(value) else value or "")
+        return _normalize_editor_text(value() if callable(value) else value)
     except Exception:
         return ""
 
