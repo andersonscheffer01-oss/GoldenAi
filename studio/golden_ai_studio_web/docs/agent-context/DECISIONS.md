@@ -55,3 +55,12 @@ do `MissionContext`; pesquisa web não é executada novamente. A escrita usa `ui
 uma ação única, confirmada e protegida pelo `SecurityManager`, para evitar a corrida entre foco
 e teclado. A validação real desta sessão permaneceu BLOCKED porque o Notepad desapareceu quando
 o PUBG retomou o foreground; nenhum arquivo foi criado.
+
+## 2026-09-24 — 6D.2 pausa diante de atividade humana
+
+Foreground é arbitrado por estado de processo, janela, foco, dono do foreground e idade
+operacional do último input. `GetLastInputInfo` não captura nem persiste conteúdo de teclado
+ou mouse. Com `USER_EXTERNAL_APP` e input recente, a missão cria checkpoint, registra
+`USER_ACTIVITY_DETECTED` e pausa; não tenta minimizar, fechar, focar ou digitar no aplicativo
+externo. Recuperação automática é limitada a dois focos e resume somente por comando explícito.
+`ui_type_editor` rejeita input quando HWND ou `foreground_epoch` mudam antes da escrita.

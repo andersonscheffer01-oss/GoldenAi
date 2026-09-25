@@ -182,3 +182,25 @@ Próximo: aguardar autorização; não iniciar M1.6.
   be verified. The authorized target `C:\Users\Anderson\Documents\resumo_pesquisa.txt`
   remains absent and no file was written.
 - Focused 6D.1/UIA regression: `59 passed`.
+
+## Computer Use 6D.2 — Foreground Arbitration
+
+**Date:** 2026-09-24
+**Status:** PARTIAL — real user-activity guard PASS; long mission remains paused
+
+- UIA now reports process presence, window presence, focus, minimized/occluded/background
+  state, foreground owner, foreground epoch, and recent input age without recording input
+  content.
+- `GetLastInputInfo` uses `kernel32.GetTickCount64`; the real Windows check returned
+  `last_user_input_age_ms: 0` while an external foreground application was active.
+- Mission actions refuse to steal focus or send input when `USER_EXTERNAL_APP` is active.
+  A real canonical `JarvisService` mission paused before `ui_focus_window`, persisted
+  `CHECKPOINT_PAUSED_USER_ACTIVITY`, and emitted `USER_ACTIVITY_DETECTED` plus
+  `MISSION_PAUSED_FOR_USER_ACTIVITY` in AuditLog.
+- UIA typing is atomic and fail-closed on foreground HWND/epoch changes; legacy keyboard
+  fallback was removed from `ui_type_editor`.
+- Focus recovery is bounded to two attempts and requires explicit resume. No research was
+  re-run and no authorized document was written during this validation.
+- Regression: `251 passed, 1 skipped` in the focused Computer Use/UIA/security/browser set
+  after the final test addition; the broader relevant set previously passed `250 passed,
+  1 skipped`.

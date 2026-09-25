@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import os
+import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -29,10 +30,63 @@ _PATH_NOT_FOUND_MARKERS = (
     "caminho especificado", "path specified", "cannot find the path",
     "sistema não pode encontrar",
 )
+DEFAULT_USER_ACTIVITY_THRESHOLD_MS = max(
+    250, int(os.getenv("JARVIS_USER_ACTIVITY_THRESHOLD_MS", "2000")))
+_FOREGROUND_LOCK = threading.RLock()
+_FOREGROUND_LAST_HANDLE = 0
+_FOREGROUND_EPOCH = 0
+_SYSTEM_DIALOG_PROCESSES = {
+    "applicationframehost.exe", "credentialuibroker.exe", "lockapp.exe",
+    "textinputhost.exe", "consent.exe",
+}
 
 
 def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _foreground_snapshot() -> tuple[int, int]:
+    """Read the foreground HWND and advance a process-local epoch on change."""
+    global _FOREGROUND_LAST_HANDLE, _FOREGROUND_EPOCH
+    handle = int(_foreground_handle() or 0)
+    with _FOREGROUND_LOCK:
+        if handle != _FOREGROUND_LAST_HANDLE:
+            _FOREGROUND_LAST_HANDLE = handle
+            _FOREGROUND_EPOCH += 1
+        return handle, _FOREGROUND_EPOCH
+
+
+def _last_user_input_age_ms() -> Optional[int]:
+    """Return idle age only; never reads or stores key/mouse content."""
+    try:
+        user32 = ctypes.windll.user32
+        class LastInputInfo(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        info = LastInputInfo()
+        info.cbSize = ctypes.sizeof(LastInputInfo)
+        if not user32.GetLastInputInfo(ctypes.byref(info)):
+            return None
+        # GetLastInputInfo.dwTime uses the 32-bit tick epoch.  The tick API
+        # lives in kernel32, not user32; use the 64-bit source and compare on
+        # the same low 32 bits to preserve Windows wraparound behavior.
+        now = int(ctypes.windll.kernel32.GetTickCount64()) & 0xFFFFFFFF
+        return int((now - int(info.dwTime)) & 0xFFFFFFFF)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+
+
+def ui_user_activity(threshold_ms: int = DEFAULT_USER_ACTIVITY_THRESHOLD_MS) -> dict[str, Any]:
+    """Report recent human input as age metadata, without capturing content."""
+    threshold = max(250, int(threshold_ms or DEFAULT_USER_ACTIVITY_THRESHOLD_MS))
+    age = _last_user_input_age_ms()
+    if age is None:
+        return {"ok": False, "user_active": False,
+                "last_user_input_age_ms": None,
+                "threshold_ms": threshold, "reason": "input_idle_unavailable",
+                "source": "windows_last_input_info"}
+    return {"ok": True, "user_active": age <= threshold,
+            "last_user_input_age_ms": age, "threshold_ms": threshold,
+            "source": "windows_last_input_info"}
 
 
 def _dependency_error() -> RuntimeError:
@@ -238,6 +292,108 @@ def ui_active_window() -> dict[str, Any]:
         return result
     except Exception as exc:
         return {"found": False, "reason": str(exc)[:200], "backend": "uia"}
+
+
+def _target_process_name(window: Optional[Any], expected_process: str = "") -> str:
+    value = str(expected_process or window or "").strip().casefold()
+    aliases = {
+        "notepad": "notepad.exe",
+        "chrome": "chrome.exe",
+        "msedge": "msedge.exe",
+        "edge": "msedge.exe",
+    }
+    return aliases.get(value, value if value.endswith(".exe") else f"{value}.exe")
+
+
+def _process_present(process_name: str) -> bool:
+    wanted = str(process_name or "").casefold()
+    if not wanted:
+        return False
+    try:
+        import psutil
+        for process in psutil.process_iter(["name"]):
+            if str(process.info.get("name") or "").casefold() == wanted:
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _window_visible(handle: int) -> bool:
+    try:
+        user32 = ctypes.windll.user32
+        return bool(user32.IsWindowVisible(ctypes.c_void_p(handle)))
+    except (AttributeError, OSError, TypeError, ValueError):
+        return True
+
+
+def _window_minimized(handle: int) -> bool:
+    try:
+        user32 = ctypes.windll.user32
+        return bool(user32.IsIconic(ctypes.c_void_p(handle)))
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
+def ui_foreground_state(window: Optional[Any] = None,
+                        expected_process: str = "",
+                        user_activity_threshold_ms: int = DEFAULT_USER_ACTIVITY_THRESHOLD_MS) -> dict[str, Any]:
+    """Classify process, window, focus ownership and recent user activity."""
+    try:
+        process_name = _target_process_name(window, expected_process)
+        process_present = _process_present(process_name)
+        target_wrapper = _window_wrapper(window)
+        target_record = _window_record(target_wrapper) if target_wrapper is not None else {}
+        target_handle = int(target_record.get("handle") or 0)
+        active = ui_active_window()
+        active_handle = int(active.get("handle") or 0)
+        _, epoch = _foreground_snapshot()
+        activity = ui_user_activity(user_activity_threshold_ms)
+
+        if not process_present:
+            window_state = "PROCESS_NOT_RUNNING"
+        elif not target_wrapper or not target_handle or not _window_exists(target_handle):
+            window_state = "WINDOW_NOT_FOUND"
+        elif target_handle == active_handle:
+            window_state = "WINDOW_EXISTS_FOREGROUND"
+        elif _window_minimized(target_handle):
+            window_state = "WINDOW_MINIMIZED"
+        elif not _window_visible(target_handle):
+            window_state = "WINDOW_OCCLUDED"
+        else:
+            window_state = "WINDOW_EXISTS_BACKGROUND"
+
+        active_process = str(active.get("process_name") or "").casefold()
+        if target_handle and target_handle == active_handle:
+            owner = "JARVIS_TARGET"
+        elif active_process in _SYSTEM_DIALOG_PROCESSES:
+            owner = "SYSTEM_DIALOG"
+        elif active_handle and activity.get("user_active"):
+            owner = "USER_EXTERNAL_APP"
+        else:
+            owner = "UNKNOWN"
+        return {
+            "ok": True,
+            "process_present": process_present,
+            "process_name": process_name,
+            "window_present": bool(target_wrapper and target_handle),
+            "window_focused": bool(target_handle and target_handle == active_handle),
+            "window_state": window_state,
+            "target_window": target_record,
+            "active_window": active,
+            "foreground_owner": owner,
+            "automatic_foreground_change": bool(active_handle != target_handle),
+            "foreground_epoch": epoch,
+            "user_active": bool(activity.get("user_active")),
+            "last_user_input_age_ms": activity.get("last_user_input_age_ms"),
+            "user_activity_threshold_ms": activity.get("threshold_ms"),
+            "source": "windows_uia",
+            "verification": "foreground_state_classified",
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200],
+                "window_state": "UNKNOWN_WINDOW_STATE",
+                "foreground_owner": "UNKNOWN", "source": "windows_uia"}
 
 
 def _children(wrapper: Any) -> list[Any]:
@@ -594,6 +750,14 @@ def ui_type_editor(window: Optional[Any] = None,
                     "editor": _editor_record(record, current_text),
                     "window": window_info, "source": "windows_uia"}
 
+        pre_state = ui_foreground_state(window, expected_process)
+        if (pre_state.get("foreground_owner") == "USER_EXTERNAL_APP" and
+                not pre_state.get("window_focused")):
+            return {"ok": False, "found": True, "reason": "USER_ACTIVITY_DETECTED",
+                    "foreground_owner": pre_state.get("foreground_owner"),
+                    "last_user_input_age_ms": pre_state.get("last_user_input_age_ms"),
+                    "window": window_info, "source": "windows_uia"}
+
         restore = getattr(root, "restore", None)
         if callable(restore):
             restore()
@@ -609,6 +773,26 @@ def ui_type_editor(window: Optional[Any] = None,
         click_input = getattr(wrapper, "click_input", None)
         if callable(click_input):
             click_input()
+
+        focused_handle, focused_epoch = _foreground_snapshot()
+        if focused_handle != int(window_info.get("handle") or 0):
+            return {"ok": False, "found": True,
+                    "reason": "FOCUS_ACQUIRE_FAILED",
+                    "foreground_owner": "UNKNOWN",
+                    "editor": record, "window": window_info,
+                    "source": "windows_uia"}
+
+        # This is the last guard before an input-capable UIA method.  A change
+        # away and back is still stale because the foreground epoch changed.
+        before_input_handle, before_input_epoch = _foreground_snapshot()
+        if (before_input_handle != int(window_info.get("handle") or 0) or
+                before_input_epoch != focused_epoch):
+            return {"ok": False, "found": True,
+                    "reason": "FOREGROUND_CHANGED_DURING_ATOMIC_ACTION",
+                    "foreground_epoch": before_input_epoch,
+                    "expected_foreground_epoch": focused_epoch,
+                    "editor": record, "window": window_info,
+                    "source": "windows_uia"}
 
         method = ""
         # Modern Notepad exposes a UIA Value pattern on its Document control.
@@ -635,14 +819,10 @@ def ui_type_editor(window: Optional[Any] = None,
                 except Exception:
                     method = ""
         if not method:
-            # Retain the existing Unicode-aware keyboard boundary as the last
-            # option, still inside this single confirmed UIA action.
-            from .computer_use_tools import keyboard_type
-            fallback = keyboard_type(value, interval=interval)
-            if not fallback.get("ok"):
-                return {**fallback, "editor": record, "window": window_info,
-                        "source": "windows_uia"}
-            method = str(fallback.get("input_method") or "keyboard")
+            return {"ok": False, "found": True,
+                    "reason": "EDITOR_INPUT_METHOD_UNAVAILABLE",
+                    "editor": record, "window": window_info,
+                    "source": "windows_uia"}
 
         time.sleep(0.05)
         refreshed = ui_read_editor(window_info.get("handle"), expected_process)
@@ -977,6 +1157,16 @@ def _ui_active_window_tool():
     return {"ok": True, **ui_active_window()}
 
 
+def _ui_user_activity_tool(threshold_ms: int = DEFAULT_USER_ACTIVITY_THRESHOLD_MS):
+    return ui_user_activity(threshold_ms)
+
+
+def _ui_foreground_state_tool(window: Optional[Any] = None,
+                              expected_process: str = "",
+                              user_activity_threshold_ms: int = DEFAULT_USER_ACTIVITY_THRESHOLD_MS):
+    return ui_foreground_state(window, expected_process, user_activity_threshold_ms)
+
+
 def _ui_find_element_tool(target: str, control_type: Optional[str] = None,
                           window: Optional[Any] = None):
     return ui_find_element(target, control_type, window)
@@ -1037,6 +1227,13 @@ def _hybrid_find_tool(target: str, control_type: Optional[str] = None,
 UI_AUTOMATION_TOOLS = (
     Tool("ui_active_window", "Consulta a janela ativa via Windows UIA.",
          _ui_active_window_tool, Risk.LOW, category="computer_use"),
+    Tool("ui_user_activity", "Consulta somente a idade do último input humano.",
+         _ui_user_activity_tool, Risk.LOW,
+         parameters={"threshold_ms": int}, category="computer_use"),
+    Tool("ui_foreground_state", "Classifica processo, janela, foco e dono do foreground.",
+         _ui_foreground_state_tool, Risk.LOW,
+         parameters={"window": str, "expected_process": str,
+                     "user_activity_threshold_ms": int}, category="computer_use"),
     Tool("ui_find_element", "Localiza um controle acessível via Windows UIA.",
          _ui_find_element_tool, Risk.LOW,
          parameters={"target": str, "control_type": str, "window": str},
@@ -1086,7 +1283,8 @@ UI_AUTOMATION_TOOLS = (
 
 
 __all__ = [
-    "UI_AUTOMATION_TOOLS", "ui_active_window", "ui_find_element",
+    "UI_AUTOMATION_TOOLS", "ui_active_window", "ui_user_activity",
+    "ui_foreground_state", "ui_find_element",
     "ui_list_elements", "ui_get_element_text", "validate_ui_target",
     "ui_read_editor", "ui_focus_editor", "ui_classify_dialog",
     "ui_type_editor",

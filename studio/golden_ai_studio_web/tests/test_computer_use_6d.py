@@ -371,6 +371,127 @@ class ClosedNotepadProbe(ProbeService):
         return super().execute_tool(name, arguments, command, task_id, confirmed)
 
 
+class ForegroundProbe(ProbeService):
+    def __init__(self, database, *, user_active, owner, focused=False,
+                 focus_ok=True):
+        super().__init__(database)
+        self.registry.names.add("ui_foreground_state")
+        self.user_active = user_active
+        self.owner = owner
+        self.focused = focused
+        self.focus_ok = focus_ok
+        self.focus_calls = 0
+
+    def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False):
+        if name == "ui_foreground_state":
+            self.calls.append((name, dict(arguments), confirmed))
+            return {
+                "ok": True,
+                "process_present": True,
+                "window_present": True,
+                "window_focused": self.focused,
+                "window_state": ("WINDOW_EXISTS_FOREGROUND" if self.focused
+                                  else "WINDOW_EXISTS_BACKGROUND"),
+                "foreground_owner": self.owner,
+                "foreground_epoch": 7,
+                "user_active": self.user_active,
+                "last_user_input_age_ms": 50 if self.user_active else 5000,
+            }
+        if name == "ui_focus_window":
+            self.focus_calls += 1
+            self.calls.append((name, dict(arguments), confirmed))
+            return {"ok": self.focus_ok, "focused": self.focus_ok,
+                    **({} if self.focus_ok else {"error": "FOCUS_ACQUIRE_FAILED"})}
+        return super().execute_tool(name, arguments, command, task_id, confirmed)
+
+
+def _foreground_pause_mission(request="request"):
+    mission = ComputerMission(
+        "foreground-pause-mission", request, MissionStatus.PENDING, time.time(),
+        [ComputerMissionStep(
+            "focus-notepad", "Focus Notepad", "ui_focus_window", app="notepad",
+            expected_state={"process": "notepad"}, args={"window": "notepad"},
+        )],
+        max_steps=10,
+    )
+    mission.context.current_app = "notepad"
+    return mission
+
+
+def test_user_activity_pauses_before_focus_or_keyboard_input(tmp_path):
+    service = ForegroundProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        user_active=True, owner="USER_EXTERNAL_APP", focused=False,
+    )
+    executor = ComputerMissionExecutor(
+        service, FixedPlanner(lambda request: _foreground_pause_mission(request)))
+
+    result = executor.run("request")
+
+    assert result["ok"] is False
+    assert result["mission"]["status"] == MissionStatus.PAUSED.value
+    assert result["mission"]["error"] == "MISSION_PAUSED_FOR_USER_ACTIVITY"
+    assert result["mission"]["result"]["pause_reason"] == "USER_ACTIVITY"
+    assert service.focus_calls == 0
+    assert any(event["status"] == "USER_ACTIVITY_DETECTED"
+               for event in service.audit_events)
+
+
+def test_focus_failure_pauses_as_foreground_contention_without_retry_loop(tmp_path):
+    service = ForegroundProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        user_active=False, owner="UNKNOWN", focused=False, focus_ok=False,
+    )
+    executor = ComputerMissionExecutor(
+        service, FixedPlanner(lambda request: _foreground_pause_mission(request)))
+
+    result = executor.run("request")
+
+    assert result["ok"] is False
+    assert result["mission"]["status"] == MissionStatus.PAUSED.value
+    assert result["mission"]["error"] == "MISSION_PAUSED_FOR_FOREGROUND_CONTENTION"
+    assert service.focus_calls == 1
+    assert result["mission"]["result"]["pause_reason"] == "FOREGROUND_CONTENTION"
+
+
+def test_background_target_is_contention_not_app_closed(tmp_path):
+    service = ForegroundProbe(
+        TaskDatabase(tmp_path / "golden_tasks.db"),
+        user_active=False, owner="UNKNOWN", focused=False,
+    )
+    mission = _foreground_pause_mission()
+    executor = ComputerMissionExecutor(service, FixedPlanner(lambda request: mission))
+
+    change = executor._classify_world_state_change(
+        mission, {"ok": False, "error": "CORRECT_WINDOW_NOT_FOCUSED"},
+        mission.mission_id,
+    )
+
+    assert change is WorldStateChangeType.WINDOW_EXISTS_BACKGROUND
+    assert change is not WorldStateChangeType.APP_CLOSED
+
+
+def test_explicit_resume_after_user_pause_rechecks_foreground(tmp_path):
+    database = TaskDatabase(tmp_path / "golden_tasks.db")
+    service = ForegroundProbe(
+        database, user_active=True, owner="USER_EXTERNAL_APP", focused=False,
+    )
+    executor = ComputerMissionExecutor(
+        service, FixedPlanner(lambda request: _foreground_pause_mission(request)))
+    paused = executor.run("request")
+    token = paused["mission"]["resume_token"]
+
+    service.user_active = False
+    service.owner = "JARVIS_TARGET"
+    service.focused = True
+    service.focus_ok = True
+    resumed = executor.resume("foreground-pause-mission", token)
+
+    assert resumed["ok"] is True
+    assert resumed["mission"]["status"] == MissionStatus.COMPLETED.value
+    assert resumed["mission"]["current_step"] == 1
+
+
 def test_app_closed_is_classified_as_recoverable_without_research_rerun(tmp_path):
     service = ClosedNotepadProbe(TaskDatabase(tmp_path / "golden_tasks.db"))
     mission, planner = _recovery_mission(tmp_path)

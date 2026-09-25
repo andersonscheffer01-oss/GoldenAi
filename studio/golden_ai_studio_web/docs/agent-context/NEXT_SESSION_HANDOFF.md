@@ -275,3 +275,29 @@ Date: 2026-09-24
 - The new atomic `ui_type_editor` action is HIGH-risk and confirmation-protected. Do not bypass
   SecurityManager, reuse stale window/document identities, or write another path.
 - Focused validation: `59 passed`; no push; do not touch `device_registry.json`.
+
+## Computer Use 6D.2 Handoff
+
+Date: 2026-09-24
+
+6D.2 foreground arbitration is implemented in `jarvis_core/tools/ui_automation.py` and
+`jarvis_core/computer_use_mission.py`, with focused regression coverage in
+`tests/test_ui_automation_grounding.py` and `tests/test_computer_use_6d.py`.
+
+- The UIA state classifier distinguishes process, window, focus, background, minimized,
+  occluded, foreground owner, and recent human-input age. The age uses Windows
+  `GetLastInputInfo` plus `kernel32.GetTickCount64`; no key or mouse content is stored.
+- User-owned external foreground pauses safely before focus or input. Automatic contention
+  gets at most two focus attempts and then pauses. `ui_type_editor` validates target, focus,
+  HWND and foreground epoch immediately before UIA input, with no legacy keyboard fallback.
+- Real validation through the canonical `JarvisService` observed an external foreground with
+  recent input (`0 ms`) and returned `MISSION_PAUSED_FOR_USER_ACTIVITY`. A durable
+  `CHECKPOINT_PAUSED_USER_ACTIVITY` and corresponding AuditLog events were created; no
+  `ui_focus_window`, keyboard, mouse, minimize, or close action was sent.
+- There is no active prior long-mission object in the current service process. The authorized
+  target `C:\Users\Anderson\Documents\resumo_pesquisa.txt` remains absent. Do not resume or
+  start a writing mission while the user owns the foreground. Continue only after explicit
+  user authorization and a stable target app, then revalidate/rebuild the mission-owned
+  document from the persisted MissionContext without re-running Python or Ollama research.
+- Focused regression after 6D.2: `251 passed, 1 skipped`; no push. Preserve
+  `device_registry.json` and unrelated worktree changes.

@@ -150,6 +150,112 @@ def test_focus_window_uses_grounded_click_when_set_focus_loses_foreground(monkey
     assert clicked == [True]
 
 
+def test_user_activity_reports_idle_age_without_content(monkeypatch):
+    monkeypatch.setattr(uia, "_last_user_input_age_ms", lambda: 120)
+
+    result = uia.ui_user_activity(threshold_ms=500)
+
+    assert result["ok"] is True
+    assert result["user_active"] is True
+    assert result["last_user_input_age_ms"] == 120
+    assert "keys" not in result
+    assert "mouse" not in result
+
+
+def test_foreground_state_distinguishes_background_target_and_user_owner(monkeypatch):
+    root = _FakeWrapper("Sem título - Bloco de notas", "Window",
+                        (0, 0, 800, 600), handle=401, pid=55)
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_window_exists", lambda _handle: True)
+    monkeypatch.setattr(uia, "_process_present", lambda _name: True)
+    monkeypatch.setattr(uia, "_window_minimized", lambda _handle: False)
+    monkeypatch.setattr(uia, "_window_visible", lambda _handle: True)
+    monkeypatch.setattr(uia, "ui_active_window", lambda: {
+        "found": True, "handle": 402, "process_name": "TslGame.exe",
+    })
+    monkeypatch.setattr(uia, "ui_user_activity", lambda _threshold: {
+        "ok": True, "user_active": True, "last_user_input_age_ms": 80,
+        "threshold_ms": 2000,
+    })
+
+    result = uia.ui_foreground_state("notepad", "notepad")
+
+    assert result["process_present"] is True
+    assert result["window_present"] is True
+    assert result["window_focused"] is False
+    assert result["window_state"] == "WINDOW_EXISTS_BACKGROUND"
+    assert result["foreground_owner"] == "USER_EXTERNAL_APP"
+    assert result["user_active"] is True
+
+
+def test_foreground_state_distinguishes_minimized_target_when_user_idle(monkeypatch):
+    root = _FakeWrapper("Sem título - Bloco de notas", "Window",
+                        (0, 0, 800, 600), handle=403, pid=55)
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_window_exists", lambda _handle: True)
+    monkeypatch.setattr(uia, "_process_present", lambda _name: True)
+    monkeypatch.setattr(uia, "_window_minimized", lambda _handle: True)
+    monkeypatch.setattr(uia, "_window_visible", lambda _handle: True)
+    monkeypatch.setattr(uia, "ui_active_window", lambda: {
+        "found": True, "handle": 404, "process_name": "explorer.exe",
+    })
+    monkeypatch.setattr(uia, "ui_user_activity", lambda _threshold: {
+        "ok": True, "user_active": False, "last_user_input_age_ms": 5000,
+        "threshold_ms": 2000,
+    })
+
+    result = uia.ui_foreground_state("notepad", "notepad")
+
+    assert result["window_state"] == "WINDOW_MINIMIZED"
+    assert result["foreground_owner"] == "UNKNOWN"
+    assert result["automatic_foreground_change"] is True
+
+
+def test_type_editor_aborts_before_input_when_external_user_owns_foreground(monkeypatch):
+    root = _FakeWrapper("Sem título - Bloco de notas", "Window",
+                        (0, 0, 800, 600), handle=405, pid=55)
+    editor = _FakeWrapper("", "Document", (20, 80, 780, 560), handle=406, pid=55)
+    writes = []
+    editor.set_edit_text = lambda value: writes.append(value)
+    root._children = [editor]
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_process_name", lambda _pid: "notepad.exe")
+    monkeypatch.setattr(uia, "ui_foreground_state", lambda *_args: {
+        "ok": True, "foreground_owner": "USER_EXTERNAL_APP",
+        "window_focused": False, "last_user_input_age_ms": 40,
+    })
+
+    result = uia.ui_type_editor("notepad", "notepad", "Golden Jarvis funcionando")
+
+    assert result["ok"] is False
+    assert result["reason"] == "USER_ACTIVITY_DETECTED"
+    assert writes == []
+
+
+def test_type_editor_aborts_on_foreground_epoch_change_before_input(monkeypatch):
+    root = _FakeWrapper("Sem título - Bloco de notas", "Window",
+                        (0, 0, 800, 600), handle=407, pid=55)
+    editor = _FakeWrapper("", "Document", (20, 80, 780, 560), handle=408, pid=55)
+    writes = []
+    editor.set_focus = lambda: None
+    editor.click_input = lambda: None
+    editor.set_edit_text = lambda value: writes.append(value)
+    root._children = [editor]
+    monkeypatch.setattr(uia, "_window_wrapper", lambda _window=None: root)
+    monkeypatch.setattr(uia, "_process_name", lambda _pid: "notepad.exe")
+    monkeypatch.setattr(uia, "ui_foreground_state", lambda *_args: {
+        "ok": True, "foreground_owner": "JARVIS_TARGET", "window_focused": True,
+    })
+    snapshots = iter([(407, 11), (999, 12)])
+    monkeypatch.setattr(uia, "_foreground_snapshot", lambda: next(snapshots))
+
+    result = uia.ui_type_editor("notepad", "notepad", "Golden Jarvis funcionando")
+
+    assert result["ok"] is False
+    assert result["reason"] == "FOREGROUND_CHANGED_DURING_ATOMIC_ACTION"
+    assert writes == []
+
+
 def test_ui_find_element_and_bounds_validation(monkeypatch):
     _fake_tree(monkeypatch)
 
@@ -303,11 +409,15 @@ def test_ui_tools_are_read_only_and_use_canonical_security_manager(tmp_path):
     names = {"ui_active_window", "ui_find_element", "ui_list_elements",
              "ui_get_element_text", "ui_read_editor", "ui_focus_editor",
              "ui_type_editor", "ui_classify_dialog",
-             "hybrid_find_ui_target"}
+             "hybrid_find_ui_target", "ui_user_activity", "ui_foreground_state"}
 
     catalog_names = {item["name"] for item in service.registry.public_catalog()}
     assert names <= catalog_names
     assert service.registry.get("ui_active_window").risk == Risk.LOW
+    assert service.registry.get("ui_user_activity").risk == Risk.LOW
+    assert service.registry.get("ui_foreground_state").risk == Risk.LOW
+    assert service.registry.get("ui_user_activity").confirmation is False
+    assert service.registry.get("ui_foreground_state").confirmation is False
     assert service.registry.get("ui_find_element").confirmation is False
     assert service.registry.get("ui_type_editor").risk == Risk.HIGH
     assert service.registry.get("ui_type_editor").confirmation is True

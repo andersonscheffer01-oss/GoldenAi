@@ -74,6 +74,10 @@ class WorldStateChangeType(str, Enum):
     VALID = "WORLD_STATE_VALID"
     APP_CLOSED = "APP_CLOSED"
     WINDOW_MISSING = "WINDOW_MISSING"
+    WINDOW_EXISTS_BACKGROUND = "WINDOW_EXISTS_BACKGROUND"
+    WINDOW_MINIMIZED = "WINDOW_MINIMIZED"
+    WINDOW_OCCLUDED = "WINDOW_OCCLUDED"
+    FOREGROUND_CONTENTION = "FOREGROUND_CONTENTION"
     DOCUMENT_MISSING = "DOCUMENT_MISSING"
     PAGE_CHANGED = "PAGE_CHANGED"
     FILE_STATE_CHANGED = "FILE_STATE_CHANGED"
@@ -1075,6 +1079,7 @@ class ComputerMissionExecutor:
     _WINDOW_TOOLS = {"ui_active_window", "ui_focus_window", "ui_focus_element"}
     _ACTION_TOOLS = {"keyboard_type", "keyboard_hotkey", "keyboard_press"}
     MAX_APP_SWITCHES = 4
+    MAX_FOCUS_RECOVERY_ATTEMPTS = 2
 
     def __init__(self, service, planner: Optional[ComputerMissionPlanner] = None):
         self.service = service
@@ -1134,6 +1139,12 @@ class ComputerMissionExecutor:
             current = mission.steps[mission.current_step]
             revalidated = self._resume_revalidate(mission, current, task_id)
             if not revalidated.get("ok"):
+                if revalidated.get("error") in {
+                        "USER_ACTIVITY_DETECTED", "FOREGROUND_CONTENTION",
+                        "FOREGROUND_CHANGED_DURING_ATOMIC_ACTION",
+                        "FOCUS_ACQUIRE_FAILED"}:
+                    return self._pause_for_foreground_state(
+                        mission, current, revalidated)
                 mission.status = MissionStatus.BLOCKED
                 mission.error = str(revalidated.get("error") or "RESUME_REVALIDATION_FAILED")
                 current.status = MissionStepStatus.BLOCKED
@@ -1164,6 +1175,11 @@ class ComputerMissionExecutor:
             "checkpoint_id": checkpoint.get("checkpoint_id")})
         revalidated = self._revalidate_world(mission, task_id)
         if not revalidated.get("ok"):
+            if revalidated.get("error") in {
+                    "USER_ACTIVITY_DETECTED", "FOREGROUND_CONTENTION",
+                    "FOREGROUND_CHANGED_DURING_ATOMIC_ACTION"}:
+                return self._pause_for_foreground_state(
+                    mission, mission.steps[mission.current_step], revalidated)
             mission.status = MissionStatus.BLOCKED
             mission.error = str(revalidated.get("error") or "WORLD_STATE_CHANGED")
             self._audit_mission(mission, "WORLD_STATE_REVALIDATED", revalidated)
@@ -1316,8 +1332,92 @@ class ComputerMissionExecutor:
             "checkpoint_id": checkpoint["checkpoint_id"]})
         return mission
 
+    def _foreground_guard(self, mission, task_id, app: str) -> dict[str, Any]:
+        """Protect mission actions from competing with a human-owned foreground."""
+        if not getattr(self.service, "registry", None) or not self.service.registry.get(
+                "ui_foreground_state"):
+            return {"ok": True, "verification": "foreground_guard_unavailable"}
+        expected = "notepad" if str(app).casefold() == "notepad" else "chrome"
+        state = self.service.execute_tool(
+            "ui_foreground_state", {"window": expected,
+                                     "expected_process": expected},
+            command=f"computer_mission:{mission.mission_id}:foreground_guard",
+            task_id=task_id)
+        if not state.get("ok"):
+            return {"ok": False, "error": "FOREGROUND_STATE_UNAVAILABLE",
+                    "detail": state}
+        mission.result.update({
+            "foreground_owner": state.get("foreground_owner", "UNKNOWN"),
+            "foreground_window_state": state.get("window_state", "UNKNOWN_WINDOW_STATE"),
+            "foreground_epoch": state.get("foreground_epoch"),
+            "last_user_input_age_ms": state.get("last_user_input_age_ms"),
+            "user_active": bool(state.get("user_active")),
+        })
+        if (state.get("user_active") and
+                state.get("foreground_owner") == "USER_EXTERNAL_APP" and
+                not state.get("window_focused")):
+            return {"ok": False, "error": "USER_ACTIVITY_DETECTED",
+                    "pause_reason": "USER_ACTIVITY",
+                    "foreground_owner": state.get("foreground_owner"),
+                    "last_user_input_age_ms": state.get("last_user_input_age_ms"),
+                    "foreground_state": state}
+        if (state.get("foreground_owner") == "SYSTEM_DIALOG" and
+                not state.get("window_focused")):
+            return {"ok": False, "error": "FOREGROUND_CONTENTION",
+                    "pause_reason": "SYSTEM_DIALOG",
+                    "foreground_owner": state.get("foreground_owner"),
+                    "foreground_state": state}
+        return state
+
+    def _pause_for_foreground_state(self, mission, step, result):
+        """Persist a safe pause; explicit resume is required to continue."""
+        error = str(result.get("error") or "FOREGROUND_CONTENTION")
+        reason = str(result.get("pause_reason") or (
+            "USER_ACTIVITY" if error == "USER_ACTIVITY_DETECTED"
+            else "FOREGROUND_CONTENTION"))
+        mission.status = MissionStatus.PAUSED
+        mission.error = ("MISSION_PAUSED_FOR_USER_ACTIVITY" if
+                         reason == "USER_ACTIVITY" else
+                         "MISSION_PAUSED_FOR_FOREGROUND_CONTENTION")
+        step.status = MissionStepStatus.PENDING
+        step.error = ""
+        mission.result.update({
+            "pause_reason": reason,
+            "mission_paused_for_user_activity": reason == "USER_ACTIVITY",
+            "foreground_owner": result.get("foreground_owner",
+                                             mission.result.get("foreground_owner", "UNKNOWN")),
+            "last_user_input_age_ms": result.get(
+                "last_user_input_age_ms", mission.result.get("last_user_input_age_ms")),
+        })
+        checkpoint_name = ("CHECKPOINT_PAUSED_USER_ACTIVITY" if
+                           reason == "USER_ACTIVITY" else
+                           "CHECKPOINT_PAUSED_FOREGROUND_CONTENTION")
+        checkpoint = self._create_checkpoint(mission, checkpoint_name, reason)
+        if not checkpoint.get("ok"):
+            mission.status = MissionStatus.BLOCKED
+            mission.error = checkpoint.get("error", "CHECKPOINT_FAILED")
+            return self._finish(mission, False)
+        self._audit_mission(mission, "USER_ACTIVITY_DETECTED" if
+                            reason == "USER_ACTIVITY" else "FOREGROUND_CONTENTION", {
+                                "pause_reason": reason,
+                                "foreground_owner": mission.result.get("foreground_owner"),
+                                "last_user_input_age_ms": mission.result.get(
+                                    "last_user_input_age_ms"),
+                            })
+        self._audit_mission(mission, "MISSION_PAUSED_FOR_USER_ACTIVITY" if
+                            reason == "USER_ACTIVITY" else
+                            "MISSION_PAUSED_FOR_FOREGROUND_CONTENTION", {
+                                "checkpoint_id": checkpoint.get("checkpoint_id"),
+                                "next_step": mission.current_step,
+                            })
+        return self._finish(mission, False)
+
     def _revalidate_world(self, mission, task_id):
         current_app = str((mission.context.current_app if mission.context else "") or "")
+        if current_app.casefold() in {"chrome", "notepad"}:
+            guard = self._foreground_guard(mission, task_id, current_app)
+            if not guard.get("ok"):
+                return guard
         if current_app.casefold() == "chrome":
             previous_state = str(mission.result.get("browser_page_state_id") or "")
             health = self.service.execute_tool(
@@ -1349,6 +1449,11 @@ class ComputerMissionExecutor:
                     if recovered.get("ok"):
                         return recovered
                     return recovered
+                if change == WorldStateChangeType.FOREGROUND_CONTENTION:
+                    return {"ok": False, "error": "FOREGROUND_CONTENTION",
+                            "pause_reason": "FOREGROUND_CONTENTION",
+                            "world_state_change_type": change.value,
+                            "detail": observed}
                 return {"ok": False, "error": "WORLD_STATE_CHANGED",
                         "world_state_change_type": change.value,
                         "detail": observed}
@@ -1360,6 +1465,11 @@ class ComputerMissionExecutor:
                                   WorldStateChangeType.WINDOW_MISSING}:
                         return self._prepare_notepad_recovery(
                             mission, change, guard)
+                    if change == WorldStateChangeType.FOREGROUND_CONTENTION:
+                        return {"ok": False, "error": "FOREGROUND_CONTENTION",
+                                "pause_reason": "FOREGROUND_CONTENTION",
+                                "world_state_change_type": change.value,
+                                "detail": guard}
                     return {"ok": False, "error": "WORLD_STATE_CHANGED",
                             "world_state_change_type": change.value,
                             "detail": guard}
@@ -1373,6 +1483,25 @@ class ComputerMissionExecutor:
         if detail.get("error") in {"DOCUMENT_NOT_FOUND", "DOCUMENT_IDENTITY_MISMATCH",
                                     "DOCUMENT_WINDOW_MISMATCH"}:
             return WorldStateChangeType.DOCUMENT_MISSING
+        if getattr(self.service, "registry", None) and self.service.registry.get(
+                "ui_foreground_state"):
+            foreground = self.service.execute_tool(
+                "ui_foreground_state",
+                {"window": "notepad", "expected_process": "notepad"},
+                command=f"computer_mission:{mission.mission_id}:world_foreground_probe",
+                task_id=task_id)
+            if foreground.get("ok"):
+                state = str(foreground.get("window_state") or "")
+                if state == "WINDOW_EXISTS_BACKGROUND":
+                    return WorldStateChangeType.WINDOW_EXISTS_BACKGROUND
+                if state == "WINDOW_MINIMIZED":
+                    return WorldStateChangeType.WINDOW_MINIMIZED
+                if state == "WINDOW_OCCLUDED":
+                    return WorldStateChangeType.WINDOW_OCCLUDED
+                if state == "PROCESS_NOT_RUNNING":
+                    return WorldStateChangeType.APP_CLOSED
+                if state == "WINDOW_NOT_FOUND":
+                    return WorldStateChangeType.WINDOW_MISSING
         probe = self.service.execute_tool(
             "ui_read_editor", {"window": "notepad", "expected_process": "notepad"},
             command=f"computer_mission:{mission.mission_id}:world_probe",
@@ -1674,7 +1803,7 @@ class ComputerMissionExecutor:
             elif step.action_type == "observe_window":
                 result = self._observe_window(step)
             elif step.action_type == "focus_browser":
-                result = self._focus_browser()
+                result = self._focus_browser(mission)
             elif step.action_type == "observe_browser":
                 result = self._observe_browser(mission, step)
             elif step.action_type == "ground_search_field":
@@ -1712,6 +1841,11 @@ class ComputerMissionExecutor:
                         "step_id": step.step_id})
                     self._audit_step(mission, step, result, "user_confirmation_required")
                     return self._finish(mission, False)
+                if result.get("error") in {
+                        "USER_ACTIVITY_DETECTED", "FOREGROUND_CONTENTION",
+                        "FOREGROUND_CHANGED_DURING_ATOMIC_ACTION",
+                        "FOCUS_ACQUIRE_FAILED"}:
+                    return self._pause_for_foreground_state(mission, step, result)
                 if result.get("error") in {
                     "NAVIGATION_TIMEOUT", "SEARCH_EXECUTION_FAILED",
                     "SEARCH_PROVIDERS_EXHAUSTED", "NON_CHROME_BROWSER_DETECTED",
@@ -1862,6 +1996,9 @@ class ComputerMissionExecutor:
             guard = self._observe_window(step)
             if (not guard.get("ok") and step.app == "notepad" and
                     guard.get("error") == "CORRECT_WINDOW_NOT_FOCUSED"):
+                foreground = self._foreground_guard(mission, task_id, step.app)
+                if not foreground.get("ok"):
+                    return foreground
                 refocused = self.service.execute_tool(
                     "ui_focus_window", {"window": "notepad"},
                     command=f"computer_mission:{mission.mission_id}:refocus_notepad",
@@ -1870,6 +2007,12 @@ class ComputerMissionExecutor:
                     guard = self._observe_window(step)
             if not guard.get("ok"):
                 return guard
+        if (step.app in {"notepad", "chrome"} and step.action_type in {
+                "ui_focus_window", "ui_focus_element", "ui_invoke_element",
+                "keyboard_type", "keyboard_hotkey", "keyboard_press"}):
+            foreground = self._foreground_guard(mission, task_id, step.app)
+            if not foreground.get("ok"):
+                return foreground
         if (mission.result.get("multi_app_mission") and step.app == "notepad" and
                 step.step_id not in {"focus-notepad", "observe-notepad",
                                      "capture-preexisting-document",
@@ -1888,12 +2031,22 @@ class ComputerMissionExecutor:
             step.action_type, step.args,
             command=f"computer_mission:{mission.mission_id}",
             task_id=mission.mission_id)
+        if (step.action_type == "ui_focus_window" and not result.get("ok") and
+                result.get("error") in {"FOCUS_ACQUIRE_FAILED",
+                                         "CHROME_FOCUS_GUARD_FAILED",
+                                         "WINDOW_NOT_FOUND", "window_not_found"}):
+            return {**result, "error": "FOREGROUND_CONTENTION",
+                    "pause_reason": "FOREGROUND_CONTENTION"}
         if result.get("confirmation_required"):
             self._receipt_confirmation_reset(mission, step)
         return result
 
     def _resume_revalidate(self, mission, step, task_id):
         """Re-observe mission-owned state before consuming a confirmation."""
+        if step.app in {"notepad", "chrome"}:
+            foreground = self._foreground_guard(mission, task_id, step.app)
+            if not foreground.get("ok"):
+                return foreground
         if not mission.result.get("multi_app_mission") or step.app != "notepad":
             return {"ok": True, "verification": "resume_revalidation_not_required"}
         if step.step_id == "new-notepad-document":
@@ -2110,6 +2263,9 @@ class ComputerMissionExecutor:
             return self._cancelled_result()
         if context.app_switches >= self.MAX_APP_SWITCHES:
             return {"ok": False, "error": "APP_SWITCH_LOOP_DETECTED"}
+        guard = self._foreground_guard(mission, mission.mission_id, "notepad")
+        if not guard.get("ok"):
+            return guard
         previous = context.current_app
         self._audit_context_event(
             mission, "APP_HANDOFF_STARTED", "switching", {"ok": True},
@@ -2125,7 +2281,10 @@ class ComputerMissionExecutor:
             return self._cancelled_result()
         focused = {}
         data = {}
-        for _ in range(8):
+        for _ in range(self.MAX_FOCUS_RECOVERY_ATTEMPTS):
+            guard = self._foreground_guard(mission, mission.mission_id, "notepad")
+            if not guard.get("ok"):
+                return guard
             focused = self.service.execute_tool(
                 "ui_focus_window", {"window": "notepad"},
                 command=f"computer_mission:{mission.mission_id}",
@@ -2142,7 +2301,8 @@ class ComputerMissionExecutor:
                 break
             time.sleep(0.2)
         else:
-            return {"ok": False, "error": "APP_IDENTITY_MISMATCH", "window": data}
+            return {"ok": False, "error": "FOREGROUND_CONTENTION",
+                    "pause_reason": "FOREGROUND_CONTENTION", "window": data}
         context.previous_app = previous
         context.current_app = "notepad"
         context.app_switches += 1
@@ -2168,6 +2328,9 @@ class ComputerMissionExecutor:
             if observed.get("path_error_dialog"):
                 return observed
             if attempt < 3:
+                foreground = self._foreground_guard(mission, task_id, "notepad")
+                if not foreground.get("ok"):
+                    return foreground
                 self.service.execute_tool(
                     "ui_focus_window", {"window": "notepad"},
                     command=f"computer_mission:{mission.mission_id}:refocus_editor",
@@ -2177,6 +2340,9 @@ class ComputerMissionExecutor:
 
     def _capture_document_state(self, mission, step, task_id):
         observed = self._read_notepad_editor(mission, task_id, "document_state")
+        if observed.get("error") in {"USER_ACTIVITY_DETECTED",
+                                      "FOREGROUND_CONTENTION"}:
+            return observed
         if observed.get("path_error_dialog"):
             return {"ok": False, "error": "PATH_NOT_FOUND", "path_error_dialog": True}
         if not observed.get("found") or not observed.get("verified"):
@@ -2236,6 +2402,9 @@ class ComputerMissionExecutor:
         if not mission_document_id:
             return {"ok": False, "error": "MISSION_DOCUMENT_NOT_REGISTERED"}
         observed = self._read_notepad_editor(mission, task_id, "document_guard")
+        if observed.get("error") in {"USER_ACTIVITY_DETECTED",
+                                      "FOREGROUND_CONTENTION"}:
+            return observed
         if observed.get("path_error_dialog"):
             return {"ok": False, "error": "PATH_NOT_FOUND", "path_error_dialog": True}
         if not observed.get("found") or not observed.get("verified"):
@@ -2311,6 +2480,9 @@ class ComputerMissionExecutor:
             mission, str(step.args.get("template") or ""))
         if error:
             return {"ok": False, "error": error}
+        foreground = self._foreground_guard(mission, task_id, "notepad")
+        if not foreground.get("ok"):
+            return foreground
         guard = self._observe_window(step)
         if not guard.get("ok"):
             return guard
@@ -2376,6 +2548,9 @@ class ComputerMissionExecutor:
                 mission, str(step.args.get("template") or ""))
             if error:
                 return {"ok": False, "error": error}
+        foreground = self._foreground_guard(mission, task_id, "notepad")
+        if not foreground.get("ok"):
+            return foreground
         guard = self._observe_window(step)
         if not guard.get("ok"):
             return guard
@@ -2515,6 +2690,10 @@ class ComputerMissionExecutor:
                 "overwrite_confirmed": True}
 
     def _focus_browser(self, mission=None):
+        if mission is not None:
+            foreground = self._foreground_guard(mission, mission.mission_id, "chrome")
+            if not foreground.get("ok"):
+                return foreground
         health = self.service.execute_tool(
             "browser_health", {}, command="computer_mission:focus_browser",
             task_id="computer-mission")

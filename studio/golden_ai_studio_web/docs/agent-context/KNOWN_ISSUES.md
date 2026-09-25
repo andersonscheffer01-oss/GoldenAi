@@ -27,3 +27,10 @@
   process/window disappears when `TslGame.exe` (PUBG) retakes the foreground. The executor
   classifies the change, invalidates stale targets, preserves the verified MissionContext and
   fails closed before typing or saving. No `resumo_pesquisa.txt` was created.
+- Computer Use 6D.2 intentionally pauses when an external application owns the foreground
+  during recent human input. The real guard test returned `USER_EXTERNAL_APP` with
+  `last_user_input_age_ms: 0`, created a durable pause checkpoint, and sent no focus or
+  keyboard action. Explicit resume is required after the user releases the desktop.
+- The current 6D.2 implementation is not CLOSED: the previous long mission has no active
+  in-memory instance in the current service process, and the authorized
+  `resumo_pesquisa.txt` has not been written.
