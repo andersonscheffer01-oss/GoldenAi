@@ -317,7 +317,7 @@ Date: 2026-09-24
 - A new executor can reconstruct a paused mission, its MissionContext/provenance, step state
   and action receipts from the store. Explicit resume observes a configurable quiet window,
   resets on new input and is cancellable.
-- Structural validation: `277 passed, 1 skipped` integrated non-real suite; `55 passed`
+- Structural validation: `278 passed, 1 skipped` integrated non-real suite; `55 passed`
   focused 6D/mission suite. `test_browser_real.py` was deliberately not run.
 - No real mission was started because the user reported active computer use. Stop now at
   `REAL_USER_SESSION_REQUIRED`; do not open/focus apps or send keyboard/mouse input until an

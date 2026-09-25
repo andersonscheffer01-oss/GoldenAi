@@ -221,7 +221,7 @@ Próximo: aguardar autorização; não iniciar M1.6.
 - Explicit resume observes `ui_user_activity` through the existing `GetLastInputInfo` path,
   waits for one configurable quiet window, resets on new input, supports cancellation, and
   never auto-resumes from background activity.
-- Structural regression: `277 passed, 1 skipped` in the integrated non-real suite; focused
+- Structural regression: `278 passed, 1 skipped` in the integrated non-real suite; focused
   6D/mission regression: `55 passed`.
 - No real 6D.3 mission was started because the user reported active computer use. The next
   step is a new mission from zero only after the user authorizes a stable idle session;
