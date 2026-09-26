@@ -8,6 +8,7 @@ from .models import BROWSER_READ, Risk
 
 
 READ_ONLY_PUBLIC_BROWSER_OBSERVATION = "READ_ONLY_PUBLIC_BROWSER_OBSERVATION"
+COMPUTER_USE_MISSION_PRE_SAVE = "COMPUTER_USE_MISSION_PRE_SAVE"
 
 
 def is_public_browser_url(url):
@@ -62,6 +63,10 @@ class SecurityManager:
                     not browser_host_matches(target_url, allowed_hosts) or
                     str(page_barrier or "NONE") != "NONE"):
                 return "confirm"
+            return "allow"
+        if authorization_scope == COMPUTER_USE_MISSION_PRE_SAVE and tool.name in {
+                "keyboard_hotkey", "keyboard_type", "keyboard_press",
+                "ui_type_editor"}:
             return "allow"
         if (configured == "confirm" or tool.confirmation or requires_confirmation
                 or risk in (Risk.HIGH, Risk.CRITICAL)):

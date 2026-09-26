@@ -23,7 +23,8 @@ from urllib.parse import parse_qs, urlparse
 
 from .browser import (MAX_SEARCH_PROVIDERS, SEARCH_PROVIDER_ORDER,
                       SEARCH_PROVIDER_URLS, classify_page_barrier)
-from .security import READ_ONLY_PUBLIC_BROWSER_OBSERVATION
+from .security import (COMPUTER_USE_MISSION_PRE_SAVE,
+                       READ_ONLY_PUBLIC_BROWSER_OBSERVATION)
 from .windows_known_folders import documents_dir as known_documents_dir
 
 
@@ -802,7 +803,7 @@ class ComputerMissionPlanner:
     _DIRECT_TITLE_RE = re.compile(r"\bt[ií]tulo\b.*\bpython\.org\b|\bpython\.org\b.*\bt[ií]tulo\b", re.I | re.S)
     _SAVE_RE = re.compile(r"\bsalv(?:e|ar|a)\s+(?:como\s+)?([\w.-]+)", re.I)
     _MULTI_APP_RE = re.compile(
-        r"(?:chrome|navegador).*(?:bloco\s+de\s+notas|notepad).*"
+        r"(?:chrome|navegador|ollama|página\s+oficial).*(?:bloco\s+de\s+notas|notepad).*"
         r"(?:salv|escrev|digit)", re.I | re.S)
 
     def __init__(self, registry, documents_dir: Optional[Path] = None):
@@ -957,13 +958,18 @@ class ComputerMissionPlanner:
     def _plan_multi_app(self, text: str) -> ComputerMission:
         low = text.casefold()
         title_mode = bool(re.search(r"t[ií]tulo", low))
-        value_key = "python_page_title" if title_mode else "python_version"
-        query = ("Python official homepage Python.org" if title_mode else
+        ollama_mode = "ollama" in low
+        value_key = ("ollama_page_title" if ollama_mode and title_mode else
+                     "python_page_title" if title_mode else "python_version")
+        query = ("Ollama official homepage" if ollama_mode else
+                 "Python official homepage Python.org" if title_mode else
                  "current stable Python version official Python")
-        template = ("{{python_page_title}}" if title_mode else
+        template = ("{{ollama_page_title}}" if ollama_mode and title_mode else
+                    "{{python_page_title}}" if title_mode else
                     "Versão atual do Python: {{python_version}}")
         match = re.search(r"\bsalv(?:e|ar|a)\s+(?:como\s+)?([\w.-]+)", text, re.I)
         filename = Path(match.group(1)).name if match else (
+            "tarefa_7d.txt" if ollama_mode else
             "titulo_python.txt" if title_mode else "pesquisa_python.txt")
         if not filename or filename in {".", ".."}:
             raise ValueError("Nome de arquivo inválido para a missão multiaplicativo.")
@@ -1058,6 +1064,23 @@ class ComputerMissionPlanner:
             step("verify-cross-app-file", "Validar arquivo e valor transferido",
                   "verify_cross_app_file", str(target_path), app="notepad"),
         ]
+        if ollama_mode:
+            steps = [
+                step("open-browser", "Abrir Google Chrome", "browser_open", "browser",
+                     args={"visible": True, "provider": "chrome"}, app="chrome"),
+                step("navigate-ollama-official", "Abrir a página oficial do Ollama",
+                     "browser_navigate", "https://ollama.com/",
+                     args={"url": "https://ollama.com/"}, app="chrome"),
+                step("focus-browser", "Validar foco do Chrome", "focus_browser", "browser",
+                     expected={"browser_process": True}, app="chrome"),
+                step("observe-browser", "Validar identidade da página oficial",
+                     "observe_browser", "browser", expected={"browser_process": True},
+                     app="chrome"),
+                step("extract-mission-value", "Observar o título oficial do Ollama",
+                     "extract_mission_value", "browser-page",
+                     args={"source_variable": "ollama_page_title", "value_kind": "title"},
+                     app="chrome", produces=("ollama_page_title",)),
+            ] + steps[8:]
         mission = ComputerMission(str(uuid.uuid4()), text, MissionStatus.PENDING,
                                   time.time(), steps, max_steps=self.MAX_STEPS)
         mission.result.update({
@@ -1073,6 +1096,13 @@ class ComputerMissionPlanner:
             "provider_health": [],
             "document_ownership": "PENDING",
         })
+        if ollama_mode:
+            mission.result.update({
+                "direct_official_navigation": True,
+                "authorization_scope": READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
+                "official_host": "ollama.com",
+                "source_url": "https://ollama.com/",
+            })
         mission.context.artifacts["search_query"] = {
             "value": query, "kind": "USER_VALUE",
         }
@@ -1665,17 +1695,43 @@ class ComputerMissionExecutor:
                 context_snapshot.get("context_version") or 0):
             raise ValueError("CHECKPOINT_CONTEXT_MISMATCH")
         mission = self.planner.plan(str(snapshot.get("user_request") or ""))
+        stored_result = dict(snapshot.get("result") or {})
+        stored_step_ids = {str(item.get("step_id") or "")
+                           for item in snapshot.get("steps") or []}
+        planned_step_ids = {step.step_id for step in mission.steps}
+        legacy_plan_repaired = bool(
+            mission.result.get("multi_app_mission") and
+            (not stored_result.get("multi_app_mission") or
+             bool(stored_step_ids - planned_step_ids)))
         if mission.mission_id != checkpoint.get("mission_id"):
             mission.mission_id = str(checkpoint["mission_id"])
             context_snapshot = dict(context_snapshot)
-        mission.context = MissionContext.from_checkpoint(
-            context_snapshot, mission.mission_id,
-            str(snapshot.get("user_request") or mission.user_request))
-        mission.current_step = int(snapshot.get("next_step", snapshot.get("current_step", 0)))
+        if legacy_plan_repaired:
+            # The persisted mission was created before the planner recognized
+            # the official Ollama -> Notepad workflow. Restart the same mission
+            # from step zero with the corrected plan; do not create new IDs.
+            mission.context = MissionContext(
+                mission.mission_id,
+                str(snapshot.get("user_request") or mission.user_request))
+            mission.current_step = 0
+            mission.result.update({
+                "replanned_from_checkpoint": True,
+                "replan_reason": "PLANNER_SCOPE_MISMATCH",
+            })
+            self._audit_mission(mission, "MISSION_PLAN_REPAIRED", {
+                "reason": "PLANNER_SCOPE_MISMATCH",
+                "mission_id": mission.mission_id,
+            })
+        else:
+            mission.context = MissionContext.from_checkpoint(
+                context_snapshot, mission.mission_id,
+                str(snapshot.get("user_request") or mission.user_request))
+            mission.current_step = int(snapshot.get("next_step", snapshot.get("current_step", 0)))
         mission.max_steps = int(snapshot.get("max_steps") or mission.max_steps)
         mission.timeout_seconds = float(snapshot.get("timeout_seconds") or mission.timeout_seconds)
         mission.risk_level = str(snapshot.get("risk_level") or mission.risk_level)
-        mission.result.update(dict(snapshot.get("result") or {}))
+        if not legacy_plan_repaired:
+            mission.result.update(stored_result)
         if mission.result.get("direct_official_navigation"):
             # Older checkpoints created this read-only mission as WRITE.
             # Normalize them without widening permissions or creating a new mission.
@@ -1685,18 +1741,19 @@ class ComputerMissionExecutor:
         mission.result["checkpoint_id"] = checkpoint["checkpoint_id"]
         mission.result["resume_token"] = checkpoint["resume_token"]
         mission.result["recovered_from_checkpoint"] = True
-        by_id = {step.step_id: step for step in mission.steps}
-        for raw in snapshot.get("steps") or []:
-            step = by_id.get(str(raw.get("step_id") or ""))
-            if step is None:
-                continue
-            try:
-                step.status = MissionStepStatus(str(raw.get("status") or "PENDING"))
-            except ValueError:
-                raise ValueError("CHECKPOINT_INVALID")
-            step.attempts = int(raw.get("attempts") or 0)
-            step.result = dict(raw.get("result") or {})
-            step.error = str(raw.get("error") or "")
+        if not legacy_plan_repaired:
+            by_id = {step.step_id: step for step in mission.steps}
+            for raw in snapshot.get("steps") or []:
+                step = by_id.get(str(raw.get("step_id") or ""))
+                if step is None:
+                    continue
+                try:
+                    step.status = MissionStepStatus(str(raw.get("status") or "PENDING"))
+                except ValueError:
+                    raise ValueError("CHECKPOINT_INVALID")
+                step.attempts = int(raw.get("attempts") or 0)
+                step.result = dict(raw.get("result") or {})
+                step.error = str(raw.get("error") or "")
         if mission.current_step < 0 or mission.current_step > len(mission.steps):
             raise ValueError("CHECKPOINT_INVALID")
         mission.status = MissionStatus.RESUMING
@@ -2536,10 +2593,23 @@ class ComputerMissionExecutor:
                     "step_id": step.step_id})
             return receipt_result
         step.status = MissionStepStatus.EXECUTING
-        result = self.service.execute_tool(
-            step.action_type, step.args,
-            command=f"computer_mission:{mission.mission_id}",
-            task_id=mission.mission_id)
+        scoped = step.action_type in {
+            "keyboard_type", "keyboard_hotkey", "keyboard_press",
+            "ui_type_editor",
+        } and step.step_id not in {"confirm-save", "handle-overwrite-confirmation"}
+        try:
+            result = self.service.execute_tool(
+                step.action_type, step.args,
+                command=f"computer_mission:{mission.mission_id}",
+                task_id=task_id,
+                authorization_scope=(COMPUTER_USE_MISSION_PRE_SAVE if scoped else ""))
+        except TypeError as exc:
+            if "unexpected keyword argument 'authorization_scope'" not in str(exc):
+                raise
+            result = self.service.execute_tool(
+                step.action_type, step.args,
+                command=f"computer_mission:{mission.mission_id}",
+                task_id=task_id)
         if (step.action_type == "ui_focus_window" and not result.get("ok") and
                 result.get("error") in {"FOCUS_ACQUIRE_FAILED",
                                          "CHROME_FOCUS_GUARD_FAILED",
@@ -3115,6 +3185,14 @@ class ComputerMissionExecutor:
         if not foreground.get("ok"):
             return foreground
         guard = self._observe_window(step)
+        if (not guard.get("ok") and
+                guard.get("error") == "CORRECT_WINDOW_NOT_FOCUSED"):
+            refocused = self.service.execute_tool(
+                "ui_focus_window", {"window": "notepad"},
+                command=f"computer_mission:{mission.mission_id}:refocus_notepad_editor",
+                task_id=task_id)
+            if refocused.get("ok"):
+                guard = self._observe_window(step)
         if not guard.get("ok"):
             return guard
         ownership = self._assert_mission_document(mission, task_id)
@@ -3128,12 +3206,22 @@ class ComputerMissionExecutor:
         if typed is not None and not typed.get("ok"):
             return typed
         if typed is None:
-            typed = self.service.execute_tool(
-                "ui_type_editor", {
-                    "window": "notepad", "expected_process": "notepad",
-                    "text": rendered,
-                    "interval": step.args.get("interval", 0.03),
-                }, command=f"computer_mission:{mission.mission_id}", task_id=task_id)
+            editor_args = {
+                "window": "notepad", "expected_process": "notepad",
+                "text": rendered,
+                "interval": step.args.get("interval", 0.03),
+            }
+            try:
+                typed = self.service.execute_tool(
+                    "ui_type_editor", editor_args,
+                    command=f"computer_mission:{mission.mission_id}", task_id=task_id,
+                    authorization_scope=COMPUTER_USE_MISSION_PRE_SAVE)
+            except TypeError as exc:
+                if "unexpected keyword argument 'authorization_scope'" not in str(exc):
+                    raise
+                typed = self.service.execute_tool(
+                    "ui_type_editor", editor_args,
+                    command=f"computer_mission:{mission.mission_id}", task_id=task_id)
         if typed.get("confirmation_required"):
             return typed
         if not typed.get("ok"):

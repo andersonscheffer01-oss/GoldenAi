@@ -53,3 +53,20 @@ def test_direct_python_title_uses_observed_page_and_provenance():
     assert result["value"] == "Welcome to Python.org"
     assert result["source_url"] == "https://www.python.org/"
     assert mission.context.source_provenance["python_page_title"]["source_type"] == "browser_page"
+
+
+def test_ollama_title_to_notepad_request_uses_multi_app_plan(tmp_path):
+    request = (
+        "Daqui a 2 minutos, quando eu estiver ocioso, acesse a página oficial do Ollama, "
+        "obtenha o título principal, abra o Bloco de Notas, escreva o título encontrado e "
+        "prepare para salvar como tarefa_7d.txt nos Documentos."
+    )
+    mission = ComputerMissionPlanner(Registry(), documents_dir=tmp_path).plan(request)
+    assert mission.result["multi_app_mission"] is True
+    assert mission.result["value_key"] == "ollama_page_title"
+    assert mission.result["search_query"] == "Ollama official homepage"
+    assert mission.result["target_path"] == str(tmp_path / "tarefa_7d.txt")
+    assert [step.step_id for step in mission.steps[:2]] == [
+        "open-browser", "navigate-ollama-official"]
+    assert mission.result["official_host"] == "ollama.com"
+    assert mission.steps[-4].step_id == "confirm-save"

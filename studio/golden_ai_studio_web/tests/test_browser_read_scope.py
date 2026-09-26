@@ -4,6 +4,7 @@ from jarvis_core.cancellation import CancellationToken
 from jarvis_core.computer_use_mission import ComputerMissionExecutor, ComputerMissionPlanner
 from jarvis_core.models import BROWSER_ACTION, BROWSER_READ, Risk, Tool
 from jarvis_core.security import (
+    COMPUTER_USE_MISSION_PRE_SAVE,
     READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
     SecurityManager,
 )
@@ -51,6 +52,18 @@ def test_browser_actions_are_not_classified_as_read_only():
         action, authorization_scope=READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
         target_url="https://www.python.org/", allowed_hosts=("python.org",),
     ) == "allow"
+
+
+def test_mission_pre_save_scope_allows_only_non_save_input_actions():
+    manager = SecurityManager()
+    keyboard = Tool("keyboard_type", "type", lambda: {"ok": True}, Risk.HIGH,
+                    confirmation=True)
+    save = Tool("ui_invoke_element", "save", lambda: {"ok": True}, Risk.HIGH,
+                confirmation=True)
+    assert manager.decision(
+        keyboard, authorization_scope=COMPUTER_USE_MISSION_PRE_SAVE) == "allow"
+    assert manager.decision(
+        save, authorization_scope=COMPUTER_USE_MISSION_PRE_SAVE) == "confirm"
 
 
 class HealthFallbackService:

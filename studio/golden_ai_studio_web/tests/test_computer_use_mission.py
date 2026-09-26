@@ -47,7 +47,8 @@ class FakeService:
         self.active_process = "notepad.exe"
         self.typed = []
 
-    def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False):
+    def execute_tool(self, name, arguments, command="", task_id="desktop", confirmed=False,
+                     authorization_scope=""):
         self.calls.append((name, dict(arguments), confirmed))
         if name == "ui_active_window":
             if self.wrong_window:
