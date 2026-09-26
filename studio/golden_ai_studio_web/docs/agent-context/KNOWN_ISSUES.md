@@ -48,6 +48,14 @@
   retained in the canonical database for audit evidence and is terminal/non-redispatching.
 - Legacy schema-v1 task databases under other runtime/work directories remain present but are
   non-active; the service uses the schema-v2 canonical store.
+
+## Computer Use 8D.1
+
+- The read-only Background Control Center is implemented and validated. It intentionally does
+  not provide pause, resume, cancel, retry, schedule editing, notifications, or dashboard UI;
+  those belong to later 8D stages.
+- The control center bounds aggregate reads to the existing canonical task/run/approval schema.
+  It does not migrate or modify legacy databases and does not touch `device_registry.json`.
 # Computer Use 7D.1
 
 - Internal background scheduling infrastructure is implemented and structurally

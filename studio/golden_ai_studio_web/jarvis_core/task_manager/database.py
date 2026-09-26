@@ -279,6 +279,14 @@ class TaskDatabase:
                 "SELECT * FROM task_runs WHERE task_id=? ORDER BY scheduled_for DESC LIMIT ?",
                 (task_id, max(1, min(int(limit), 500)))).fetchall()]
 
+    def list_all_task_runs(self, limit=5000):
+        """Read background run history in one query for observability consumers."""
+        with self.connect(rows=True) as db:
+            return [dict(row) for row in db.execute(
+                "SELECT * FROM task_runs "
+                "ORDER BY COALESCE(started_at, created_at) DESC, run_id DESC LIMIT ?",
+                (max(1, min(int(limit), 5000)),)).fetchall()]
+
     def claim_task_run(self, run_id, worker_id, now, lease_seconds=30.0,
                        allow_waiting_user_idle=False):
         token = str(uuid.uuid4())
@@ -347,6 +355,26 @@ class TaskDatabase:
                 (approval_id, task_id, run_id, mission_id, scope, target,
                  float(granted_at), float(expires_at), int(bool(single_use)), "ACTIVE"))
         return approval_id
+
+    def list_task_approvals(self, task_id=None, run_id=None, status=None, limit=1000):
+        """Return approvals without consuming or otherwise changing them."""
+        sql, params = "SELECT * FROM task_approvals", []
+        clauses = []
+        if task_id is not None:
+            clauses.append("task_id=?")
+            params.append(str(task_id))
+        if run_id is not None:
+            clauses.append("run_id=?")
+            params.append(str(run_id))
+        if status is not None:
+            clauses.append("status=?")
+            params.append(str(status))
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY granted_at DESC, approval_id DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 5000)))
+        with self.connect(rows=True) as db:
+            return [dict(row) for row in db.execute(sql, params).fetchall()]
 
     def consume_task_approval(self, approval_id, task_id, run_id, scope, target, now):
         with self._lock, self.connect(rows=True) as db:

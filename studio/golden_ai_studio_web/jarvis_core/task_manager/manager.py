@@ -14,6 +14,7 @@ from .models import TaskStatus
 from .planner import PlannerContracts
 from .runner import BackgroundJobRunner
 from .condition_executor import ConditionAuditExecutor
+from .control_center import BackgroundControlCenter
 
 
 class TaskManager:
@@ -28,6 +29,7 @@ class TaskManager:
             "condition_audit": ConditionAuditExecutor(self.audit),
         }
         self.scheduler = BackgroundTaskScheduler(self.database, audit=self.audit)
+        self.control_center = BackgroundControlCenter(self.database, self.scheduler)
 
     def create(self, plan):
         plan = PlannerContracts.validate(plan)
@@ -99,6 +101,9 @@ class TaskManager:
 
     def background_runs(self, task_id, limit=100):
         return self.database.list_task_runs(task_id, limit)
+
+    def background_control_snapshot(self, **kwargs):
+        return self.control_center.get_snapshot(**kwargs)
 
     def execute_background_task(self, task, run):
         """Dispatch a background task to its explicit non-GUI handler."""

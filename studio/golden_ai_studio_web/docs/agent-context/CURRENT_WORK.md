@@ -266,3 +266,19 @@ Próximo: aguardar autorização; não iniciar M1.6.
 - Automated structural/integrated validation passed: `90 passed, 8 subtests` in the
   7D.1 scheduler plus existing TaskManager and Computer Use 6D collections.
 - No real Windows action was executed in 7D.1. Final gate: `REAL_USER_SESSION_REQUIRED`.
+
+# Computer Use 8D.1 - Background Control Center Foundation
+
+**Date:** 2026-09-26
+**Status:** `COMPUTER_USE_8D_PHASE: IN_PROGRESS`; `COMPUTER_USE_8D_1: PASS`
+
+- Added the read-only `BackgroundControlCenter` over the existing `TaskDatabase` and
+  `BackgroundTaskScheduler`; no second scheduler, database, worker, or execution path exists.
+- The control center exposes deterministic task/run/approval views, summary counts, waiting
+  reasons, next due task, scheduler status, and a complete read-only snapshot.
+- Runs and approvals are loaded with bounded aggregate queries. Observation never claims a run,
+  consumes approval, evaluates a trigger, starts a mission, or invokes ComputerMissionExecutor.
+- The canonical database remains `jarvis/golden_tasks.db`; the snapshot is explicitly classified
+  as `READ_ONLY_BACKGROUND_OBSERVATION`.
+- Regression: `8 passed` focused Control Center tests and `146 passed` relevant scheduler,
+  condition, security, approval, and Computer Use tests. No real GUI action was needed.

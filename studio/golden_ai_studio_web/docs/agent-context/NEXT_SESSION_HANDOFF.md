@@ -370,3 +370,19 @@ The next session must preserve these invariants:
   redispatched.
 - Current implementation commit: `d08c288`. A separate documentation commit may follow;
   do not push. Preserve unrelated dirty files and `device_registry.json`.
+
+# Computer Use 8D.1 Handoff
+
+**Status:** `COMPUTER_USE_8D_PHASE: IN_PROGRESS`; `COMPUTER_USE_8D_1: PASS`
+
+- Reuse `TaskManager.control_center` / `BackgroundControlCenter` for read-only background
+  observability. It is wired to the existing `TaskManager.scheduler` and canonical
+  `TaskDatabase`; do not create another scheduler or database.
+- Supported internal reads include `get_snapshot`, `get_summary`, `list_tasks`, `get_task`,
+  `list_runs`, `get_run`, `list_pending_approvals`, and `get_next_due_task`. The service exposes
+  `background_control_snapshot()` as the canonical snapshot entry point.
+- Snapshot classification is `READ_ONLY_BACKGROUND_OBSERVATION`. Reads do not create tasks/runs,
+  acquire claims, consume approvals, evaluate triggers, execute missions, or send GUI input.
+- Focused validation passed: `8 passed`; relevant regression passed: `146 passed`.
+- Next work is 8D.2 safe task controls. Preserve runtime databases, build/dist artifacts,
+  `device_registry.json`, and unrelated dirty files. No push.

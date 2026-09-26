@@ -596,6 +596,10 @@ class JarvisService:
                       "recent": len(self.task_manager.list(limit=20))},
         }
 
+    def background_control_snapshot(self, **kwargs):
+        """Expose the canonical read-only background control snapshot."""
+        return self.task_manager.control_center.get_snapshot(**kwargs)
+
     @staticmethod
     def _memory_record_dict(record):
         return {"id": record.id, "type": record.memory_type.value,

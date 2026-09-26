@@ -90,6 +90,16 @@ class BackgroundTaskScheduler:
             thread.join(timeout=max(1.0, self.tick_interval * 3))
         self._thread = None
 
+    def status(self):
+        """Return scheduler health without touching task or run state."""
+        thread = self._thread
+        return {
+            "running": bool(thread and thread.is_alive()),
+            "worker_id": self.worker_id,
+            "tick_interval": self.tick_interval,
+            "database_path": str(self.database.path),
+        }
+
     def _loop(self):
         while not self._stop.is_set():
             try:
