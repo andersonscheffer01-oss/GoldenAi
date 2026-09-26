@@ -2288,7 +2288,7 @@ class ComputerMissionExecutor:
                 result = self._verify_file(step)
             elif step.action_type == "extract_mission_value":
                 step.status = MissionStepStatus.VERIFYING
-                result = self._extract_mission_value(mission, step)
+                result = self._extract_mission_value(mission, step, task_id)
             elif step.action_type == "handoff_to_notepad":
                 result = self._handoff_to_notepad(mission, step)
             elif step.action_type == "capture_document_state":
@@ -2652,7 +2652,21 @@ class ComputerMissionExecutor:
             }
             return self.service.execute_tool(name, arguments, **legacy_kwargs)
 
-    def _extract_mission_value(self, mission, step):
+    def _mission_run_id(self, mission, task_id):
+        task_manager = getattr(self.service, "task_manager", None)
+        database = getattr(task_manager, "database", None)
+        if database is None or not task_id:
+            return ""
+        try:
+            runs = database.list_task_runs(str(task_id))
+        except (AttributeError, OSError, TypeError):
+            return ""
+        for run in runs or []:
+            if str(run.get("mission_id") or "") == mission.mission_id:
+                return str(run.get("run_id") or "")
+        return ""
+
+    def _extract_mission_value(self, mission, step, task_id=""):
         key = str(step.args.get("source_variable") or
                   mission.result.get("value_key") or "python_version")
         mode = str(step.args.get("value_kind") or
@@ -2662,6 +2676,8 @@ class ComputerMissionExecutor:
                  else ("ollama.com", ".ollama.com"))
         version_re = re.compile(
             r"\bPython\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b", re.I)
+        execution_task_id = str(task_id or "")
+        execution_run_id = self._mission_run_id(mission, execution_task_id)
 
         for attempt in range(MAX_SEARCH_PROVIDERS):
             if self._cancel.is_set() or self.service.cancellation.is_cancelled():
@@ -2669,6 +2685,7 @@ class ComputerMissionExecutor:
             target_url = _resolved_result_url(str(
                 mission.result.get("browser_url") or mission.result.get("source_url") or ""))
             read_scope = self._browser_read_scope(mission, target_url)
+            observation_method = "browser_get_page_info"
             self._execute_browser_read(
                 "browser_wait_for_results", {"timeout_ms": 10000},
                 command="computer_mission:extract_value_wait",
@@ -2703,6 +2720,7 @@ class ComputerMissionExecutor:
                     page = {"url": health_url, "title": health_title,
                             "text": "", "links": [], "interactive": [],
                             "forms": [], "barrier_type": "NONE"}
+                    observation_method = "browser_health"
                     self._audit_mission(mission, "BROWSER_READ_HEALTH_FALLBACK", {
                         "scope": READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
                         "source": "browser_health",
@@ -2746,9 +2764,18 @@ class ComputerMissionExecutor:
                         source_url=current_url, confidence="verified",
                         source_state_id=str(mission.result.get("browser_page_state_id") or current_url),
                         valid_until_step=mission.current_step + mission.max_steps)
+                    provenance = stored.public()
+                    provenance.update({
+                        "observed_value": page_title,
+                        "observation_method": observation_method,
+                        "task_id": execution_task_id,
+                        "run_id": execution_run_id,
+                        "mission_id": mission.mission_id,
+                    })
+                    mission.context.source_provenance[key] = provenance
                     mission.result.update({
                         key: page_title, "value_extracted": True, "source_found": True,
-                        "source_verified": True, "source_provenance": stored.public(),
+                        "source_verified": True, "source_provenance": provenance,
                         "final_url": current_url,
                     })
                     self._audit_context_event(

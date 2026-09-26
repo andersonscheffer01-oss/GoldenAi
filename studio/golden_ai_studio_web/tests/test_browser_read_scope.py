@@ -92,13 +92,22 @@ def test_public_title_read_recovers_from_dom_failure_without_confirmation():
         "official_host": "www.python.org",
         "value_key": "python_page_title",
     })
-    result = ComputerMissionExecutor(service, planner)._extract_mission_value(
-        mission, mission.steps[-1])
+    executor = ComputerMissionExecutor(service, planner)
+    service.task_manager = SimpleNamespace(database=SimpleNamespace(
+        list_task_runs=lambda _task_id: [{"mission_id": mission.mission_id,
+                                          "run_id": "run-1"}]))
+    result = executor._extract_mission_value(mission, mission.steps[-1], "task-1")
     assert result["ok"] is True
     assert result["value"] == "Welcome to Python.org"
     assert any(name == "browser_health" for name, _ in service.calls)
     assert all(kwargs.get("authorization_scope") == READ_ONLY_PUBLIC_BROWSER_OBSERVATION
                for _name, kwargs in service.calls)
+    provenance = mission.context.source_provenance["python_page_title"]
+    assert provenance["observed_value"] == "Welcome to Python.org"
+    assert provenance["observation_method"] == "browser_health"
+    assert provenance["task_id"] == "task-1"
+    assert provenance["run_id"] == "run-1"
+    assert provenance["mission_id"] == mission.mission_id
 
 
 def test_public_title_read_reports_observation_failure_not_confirmation():
