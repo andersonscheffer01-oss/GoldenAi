@@ -41,6 +41,13 @@
 - The prior real 6D mission remains historical state only. A future validation must create a
   new mission from zero, research Python and Ollama again, persist the Python checkpoint,
   reconstruct through a new executor, and revalidate the exact authorized target before Save As.
+
+## Computer Use 7D
+
+- No remaining 7D condition-trigger issue is known. The historical failed condition task is
+  retained in the canonical database for audit evidence and is terminal/non-redispatching.
+- Legacy schema-v1 task databases under other runtime/work directories remain present but are
+  non-active; the service uses the schema-v2 canonical store.
 # Computer Use 7D.1
 
 - Internal background scheduling infrastructure is implemented and structurally

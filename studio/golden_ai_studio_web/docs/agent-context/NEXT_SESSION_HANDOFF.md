@@ -351,3 +351,22 @@ The next session must preserve these invariants:
   explicit authorization for a new real mission.
 - Do not touch `device_registry.json`, runtime DBs, build/dist, logs, or unrelated dirty
   files. Do not push.
+
+# Computer Use 7D Handoff
+
+**Status:** `COMPUTER_USE_7D: CLOSED`
+
+- Internal scheduler is enabled through the existing `TaskDatabase` and schema 2 store:
+  `C:\GoldenAI\studio\golden_ai_studio_web\jarvis\golden_tasks.db`.
+- Persistent claims, run IDs, duplicate prevention, startup recovery, idle recovery,
+  approvals, SecurityManager gates and AuditLog are enabled.
+- `condition_audit` uses `ConditionAuditExecutor` for allow-listed `FILE_EXISTS` conditions;
+  it performs no GUI action and does not create a fake Computer Mission.
+- Failed one-shot occurrences are terminal. Recurring failures schedule the next occurrence
+  instead of retrying immediately.
+- Real retest task `ccdf81e0-c845-43e1-be64-a426aa5c0dc1` completed exactly one run. The
+  trigger file was user-created and remained unchanged. Reload/ticks did not reexecute it.
+- Historical failed task `b9d9d361-5225-44c8-9a40-65a92b9bb446` remains FAILED and was not
+  redispatched.
+- Current implementation commit: `d08c288`. A separate documentation commit may follow;
+  do not push. Preserve unrelated dirty files and `device_registry.json`.

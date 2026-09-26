@@ -226,6 +226,25 @@ Próximo: aguardar autorização; não iniciar M1.6.
 - No real 6D.3 mission was started because the user reported active computer use. The next
   step is a new mission from zero only after the user authorizes a stable idle session;
   current stop marker: `REAL_USER_SESSION_REQUIRED`.
+
+# Computer Use 7D - Condition Triggers
+
+**Date:** 2026-09-26
+**Status:** CLOSED
+
+- The canonical task store is `jarvis/golden_tasks.db`, schema version 2. The active
+  service, scheduler and mission persistence share that path.
+- `condition_audit` is routed to `ConditionAuditExecutor`; it records
+  `CONDITION_TRIGGER_SATISFIED` without invoking ComputerMissionExecutor or GUI input.
+- One-shot failed occurrences are terminal unless explicitly re-enabled. Recurring failures
+  advance to the next future occurrence and do not redispatch immediately.
+- Real condition retest passed with task `ccdf81e0-c845-43e1-be64-a426aa5c0dc1` and one
+  completed run. The user-created zero-byte trigger remained untouched. Durable reload and
+  additional ticks produced no second run.
+- The earlier failed task `b9d9d361-5225-44c8-9a40-65a92b9bb446` remains historical FAILED
+  state and was not redispatched after the fix.
+- Commit: `d08c288`. No push. Runtime databases, trigger files, build/dist artifacts and
+  `device_registry.json` are outside the commit.
 # Computer Use 7D.1 - Internal Background Scheduler
 
 **Date:** 2026-09-25
