@@ -1,6 +1,7 @@
 """Internal durable scheduler. It dispatches work; it never drives a GUI itself."""
 from __future__ import annotations
 
+from dataclasses import replace
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -70,6 +71,7 @@ class BackgroundTaskScheduler:
         self._thread = None
         self._lock = threading.RLock()
         self._idle_observations = {}
+        self._condition_observations = {}
 
     def start(self):
         with self._lock:
@@ -104,6 +106,10 @@ class BackgroundTaskScheduler:
             if not task.enabled or task.status in {BackgroundTaskStatus.CANCELLED,
                     BackgroundTaskStatus.DISABLED, BackgroundTaskStatus.COMPLETED}:
                 continue
+            if task.status == BackgroundTaskStatus.FAILED:
+                # A one-shot failure is terminal unless explicitly re-enabled.
+                # Recurring failures are advanced by _finish to their next occurrence.
+                continue
             if task.max_runs is not None and task.run_count >= task.max_runs:
                 self.database.update_background_task(task.task_id,
                     status=BackgroundTaskStatus.EXPIRED, enabled=False)
@@ -135,6 +141,7 @@ class BackgroundTaskScheduler:
                 except (KeyError, TypeError, ValueError, OSError):
                     self._fail_task(task, "CONDITION_INVALID")
                     continue
+                self._audit_condition_transition(task, condition, ready)
                 if not ready:
                     status = (BackgroundTaskStatus.WAITING_USER_IDLE
                               if task.trigger_type == TriggerType.USER_IDLE
@@ -155,6 +162,21 @@ class BackgroundTaskScheduler:
                                           started_at=now)
             actions.append((task.task_id, self._dispatch(task, claimed, now)))
         return actions
+
+    def _audit_condition_transition(self, task, condition, ready):
+        """Audit only condition transitions, avoiding one event per tick."""
+        value = bool(ready)
+        previous = self._condition_observations.get(task.task_id)
+        if previous is value:
+            return
+        self._condition_observations[task.task_id] = value
+        details = {
+            "condition_type": str(condition.get("condition_type", condition.get("type", ""))).upper(),
+            "target": str(condition.get("path", "")),
+            "result": value,
+        }
+        self._audit(task.task_id, "TRIGGER_EVALUATED", details)
+        self._audit(task.task_id, "CONDITION_TRUE" if value else "CONDITION_FALSE", details)
 
     @staticmethod
     def _is_auto_resume_task(task):
@@ -270,15 +292,26 @@ class BackgroundTaskScheduler:
         if ok:
             self.database.update_background_task(task.task_id, status=BackgroundTaskStatus.COMPLETED,
                                                 last_run_at=now, run_count=task.run_count + 1)
-            if task.max_runs is not None and task.run_count + 1 >= task.max_runs:
+            exhausted = task.max_runs is not None and task.run_count + 1 >= task.max_runs
+            if exhausted:
                 self.database.update_background_task(task.task_id,
                     status=BackgroundTaskStatus.EXPIRED, enabled=False)
                 self._audit(task.task_id, "background_task_expired", {"run_id": run["run_id"]})
-                return
-            self._advance(task, now)
+            else:
+                self._advance(task, now)
+            self._audit(task.task_id, "TASK_RUN_COMPLETED", {"run_id": run["run_id"]})
+            self._audit(task.task_id, "CLAIM_FINALIZED", {"run_id": run["run_id"]})
             self._audit(task.task_id, "background_task_completed", {"run_id": run["run_id"]})
         else:
-            self.database.update_background_task(task.task_id, status=BackgroundTaskStatus.FAILED)
+            if task.trigger_type == TriggerType.RECURRING:
+                next_run = self._next_recurring(replace(task, last_run_at=now), now)
+                self.database.update_background_task(
+                    task.task_id, status=BackgroundTaskStatus.SCHEDULED,
+                    enabled=True, next_run_at=next_run, last_run_at=now)
+            else:
+                self.database.update_background_task(
+                    task.task_id, status=BackgroundTaskStatus.FAILED, enabled=False,
+                    last_run_at=now)
             self._audit(task.task_id, "background_task_failed", {"run_id": run["run_id"],
                                                                     "error_code": error_code})
 

@@ -6,6 +6,7 @@ from .manager import TaskManager
 from .models import StepRecord, StepStatus, TaskPlan, TaskRecord, TaskStatus
 from .planner import PlanValidationError, Planner, PlannerContracts
 from .runner import BackgroundJobRunner, ConfirmationRequired
+from .condition_executor import ConditionAuditExecutor
 from .scheduler import BackgroundTaskScheduler, ConditionEvaluator
 
 __all__ = ["BackgroundJobRunner", "BackgroundTask", "BackgroundTaskScheduler",
@@ -13,4 +14,4 @@ __all__ = ["BackgroundJobRunner", "BackgroundTask", "BackgroundTaskScheduler",
            "ConfirmationRequired", "FakeClock", "MisfirePolicy", "PlanValidationError",
            "Planner", "PlannerContracts", "RunStatus", "SystemClock", "TriggerType",
            "StepRecord", "StepStatus", "TaskDatabase", "TaskManager", "TaskPlan",
-           "TaskRecord", "TaskStatus"]
+           "TaskRecord", "TaskStatus", "ConditionAuditExecutor"]

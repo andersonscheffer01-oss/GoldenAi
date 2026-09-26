@@ -315,6 +315,10 @@ class JarvisService:
 
     def _launch_background_task(self, task, run):
         """Route scheduled missions through the canonical mission/security path."""
+        if str(task.task_type).lower() == "condition_audit":
+            return self.task_manager.execute_background_task(task, run)
+        if str(task.task_type).lower() != "computer_use":
+            return {"ok": False, "error_code": "UNSUPPORTED_TASK_TYPE"}
         if run.get("mission_id"):
             checkpoint, error = self.computer_missions.persistence.latest(
                 str(run["mission_id"]))

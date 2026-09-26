@@ -13,6 +13,7 @@ from .scheduler import BackgroundTaskScheduler
 from .models import TaskStatus
 from .planner import PlannerContracts
 from .runner import BackgroundJobRunner
+from .condition_executor import ConditionAuditExecutor
 
 
 class TaskManager:
@@ -23,6 +24,9 @@ class TaskManager:
         self.database = TaskDatabase(self.base_dir / "jarvis" / self.DB_NAME)
         self.runner = BackgroundJobRunner(self.database, max_workers=max_workers)
         self.audit = AuditLog(self.base_dir / "golden_runtime.db")
+        self.background_handlers = {
+            "condition_audit": ConditionAuditExecutor(self.audit),
+        }
         self.scheduler = BackgroundTaskScheduler(self.database, audit=self.audit)
 
     def create(self, plan):
@@ -95,6 +99,13 @@ class TaskManager:
 
     def background_runs(self, task_id, limit=100):
         return self.database.list_task_runs(task_id, limit)
+
+    def execute_background_task(self, task, run):
+        """Dispatch a background task to its explicit non-GUI handler."""
+        handler = self.background_handlers.get(str(task.task_type).lower())
+        if handler is None:
+            return {"ok": False, "error_code": "UNSUPPORTED_TASK_TYPE"}
+        return handler(task, run)
 
     def reconcile_background_mission_state(self, task_id, mission_result):
         """Project a durable mission pause onto its existing scheduled run."""
