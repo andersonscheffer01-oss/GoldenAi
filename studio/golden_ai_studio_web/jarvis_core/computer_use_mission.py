@@ -2085,11 +2085,31 @@ class ComputerMissionExecutor:
         context = mission.context
         if context is None:
             return {"ok": False, "error": "MISSING_MISSION_CONTEXT"}
-        required = {
+        known_hosts = {
             "python_version": ("python.org", ".python.org"),
+            "python_page_title": ("python.org", ".python.org"),
             "ollama_page_title": ("ollama.com", ".ollama.com"),
         }
-        for key, hosts in required.items():
+        required_keys = set()
+        value_key = str(mission.result.get("value_key") or "").strip()
+        if value_key:
+            required_keys.add(value_key)
+        for step in mission.steps:
+            source_variable = str(step.args.get("source_variable") or "").strip()
+            if source_variable:
+                required_keys.add(source_variable)
+            required_keys.update(
+                str(key) for key in step.args.get("source_variables", ()) if key)
+            template = str(step.args.get("template") or "")
+            required_keys.update(re.findall(
+                r"\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}", template))
+        if not required_keys:
+            required_keys.update(str(key) for key in context.variables)
+        for key in sorted(required_keys):
+            hosts = known_hosts.get(key)
+            if not hosts:
+                return {"ok": False, "error": "SOURCE_PROVENANCE_INVALID",
+                        "variable": key}
             value, error = context.resolve(
                 key, mission_id=mission.mission_id,
                 current_step=mission.current_step)

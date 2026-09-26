@@ -70,3 +70,28 @@ def test_ollama_title_to_notepad_request_uses_multi_app_plan(tmp_path):
         "open-browser", "navigate-ollama-official"]
     assert mission.result["official_host"] == "ollama.com"
     assert mission.steps[-4].step_id == "confirm-save"
+
+
+def test_ollama_only_recovery_validates_only_its_context_value():
+    request = (
+        "Daqui a 2 minutos, quando eu estiver ocioso, acesse a página oficial do Ollama, "
+        "obtenha o título principal, abra o Bloco de Notas, escreva o título encontrado e "
+        "prepare para salvar como tarefa_7d.txt nos Documentos."
+    )
+    planner = ComputerMissionPlanner(Registry())
+    mission = planner.plan(request)
+    mission.current_step = 12
+    mission.context.store_variable(
+        "ollama_page_title", "Ollama", kind="OBSERVED_VALUE",
+        source_app="chrome", source_type="browser_page",
+        source_title="Ollama", source_url="https://ollama.com/",
+        confidence="verified")
+
+    executor = ComputerMissionExecutor(SimpleNamespace(registry=Registry()), planner)
+
+    result = executor._recovery_context_validation(mission)
+
+    assert result == {
+        "ok": True,
+        "verification": "MISSION_CONTEXT_AND_PROVENANCE_VALID",
+    }
