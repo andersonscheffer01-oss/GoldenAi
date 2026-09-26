@@ -1044,8 +1044,10 @@ class JarvisService:
 
     def resume_current_mission(self, mission_id, resume_token, task_id="desktop"):
         """Resume a mission from its explicit durable checkpoint token."""
-        return self.computer_missions.resume_current_mission(
+        result = self.computer_missions.resume_current_mission(
             mission_id, resume_token, task_id=task_id)
+        self.task_manager.reconcile_background_mission_state(task_id, result)
+        return result
 
     def pause_current_mission(self, reason="operator_requested"):
         """Request a safe pause at the next checkpoint boundary."""

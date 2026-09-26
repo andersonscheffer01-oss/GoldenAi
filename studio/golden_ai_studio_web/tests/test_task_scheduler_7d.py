@@ -267,6 +267,70 @@ def test_mission_user_activity_pause_maps_to_waiting_idle(tmp_path):
     assert run["mission_id"] == "mission-activity"
 
 
+def test_user_activity_precedes_stale_confirmation_state(tmp_path):
+    clock = FakeClock(100)
+    store = TaskDatabase(tmp_path / "tasks.db")
+    task = make_task(clock)
+    store.create_background_task(task)
+    scheduler = BackgroundTaskScheduler(store, clock=clock,
+        launcher=lambda _task, _run: {
+            "ok": False, "status": "WAITING_CONFIRMATION",
+            "pause_reason": "USER_ACTIVITY",
+            "mission": {"status": "PAUSED", "error": "MISSION_PAUSED_FOR_USER_ACTIVITY",
+                        "mission_id": "mission-activity"}})
+    scheduler.tick()
+    run = store.list_task_runs(task.task_id)[0]
+    assert store.get_background_task(task.task_id).status == BackgroundTaskStatus.WAITING_USER_IDLE
+    assert run["status"] == RunStatus.WAITING_USER_IDLE.value
+
+
+def test_reconcile_existing_run_keeps_user_activity_out_of_confirmation(tmp_path):
+    from jarvis_core.task_manager import TaskManager
+
+    manager = TaskManager(tmp_path)
+    try:
+        clock = FakeClock(100)
+        task = make_task(clock)
+        manager.database.create_background_task(task)
+        run = manager.database.ensure_task_run(task.task_id, 100, 100)
+        manager.database.update_task_run(run["run_id"], mission_id="mission-activity",
+                                         status=RunStatus.WAITING_CONFIRMATION)
+        manager.database.update_background_task(task.task_id,
+                                                status=BackgroundTaskStatus.WAITING_CONFIRMATION)
+        state = manager.reconcile_background_mission_state(task.task_id, {
+            "mission": {"mission_id": "mission-activity", "status": "PAUSED",
+                        "error": "MISSION_PAUSED_FOR_USER_ACTIVITY",
+                        "pause_reason": "USER_ACTIVITY"},
+            "status": "WAITING_CONFIRMATION",
+        })
+        assert state == RunStatus.WAITING_USER_IDLE.value
+        assert manager.background(task.task_id).status == BackgroundTaskStatus.WAITING_USER_IDLE
+        assert manager.background_runs(task.task_id)[0]["status"] == RunStatus.WAITING_USER_IDLE.value
+    finally:
+        manager.shutdown()
+
+
+def test_reconcile_confirmation_requires_explicit_security_result(tmp_path):
+    from jarvis_core.task_manager import TaskManager
+
+    manager = TaskManager(tmp_path)
+    try:
+        clock = FakeClock(100)
+        task = make_task(clock)
+        manager.database.create_background_task(task)
+        run = manager.database.ensure_task_run(task.task_id, 100, 100)
+        manager.database.update_task_run(run["run_id"], mission_id="mission-confirm")
+        state = manager.reconcile_background_mission_state(task.task_id, {
+            "mission": {"mission_id": "mission-confirm", "status": "PAUSED",
+                        "error": "MISSION_PAUSED_FOR_USER_ACTIVITY",
+                        "pause_reason": "USER_ACTIVITY"},
+        })
+        assert state == RunStatus.WAITING_USER_IDLE.value
+        assert manager.background(task.task_id).status == BackgroundTaskStatus.WAITING_USER_IDLE
+    finally:
+        manager.shutdown()
+
+
 def test_waiting_user_idle_is_rechecked_after_scheduler_restart(tmp_path):
     clock = FakeClock(100)
     store = TaskDatabase(tmp_path / "tasks.db")

@@ -158,8 +158,13 @@ class BackgroundTaskScheduler:
         mission = result.get("mission") or {}
         result_status = str(result.get("status") or mission.get("status") or "").upper()
         result_error = str(result.get("error") or mission.get("error") or "").upper()
+        pause_reason = str(result.get("pause_reason") or mission.get("pause_reason") or "").upper()
+        user_activity_pause = (
+            pause_reason == "USER_ACTIVITY" or
+            result_error in {"USER_ACTIVITY_DETECTED", "MISSION_PAUSED_FOR_USER_ACTIVITY"}
+        )
         if (result_status in {"WAITING_USER_IDLE", "WAITING_FOR_USER_IDLE"} or
-                result_error in {"USER_ACTIVITY_DETECTED", "MISSION_PAUSED_FOR_USER_ACTIVITY"}):
+                user_activity_pause):
             self.database.update_task_run(run["run_id"], status=RunStatus.WAITING_USER_IDLE,
                                           claim_token=None, claimed_by=None, claim_expires_at=None,
                                           error_code="USER_ACTIVITY_DETECTED",

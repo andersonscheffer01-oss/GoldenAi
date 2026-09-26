@@ -8,7 +8,7 @@ from ..audit import AuditLog
 from ..orchestrator.models import DataClassification
 from .database import TaskDatabase
 from .background import (BackgroundTask, BackgroundTaskStatus, MisfirePolicy,
-                          TriggerType)
+                          RunStatus, TriggerType)
 from .scheduler import BackgroundTaskScheduler
 from .models import TaskStatus
 from .planner import PlannerContracts
@@ -95,6 +95,47 @@ class TaskManager:
 
     def background_runs(self, task_id, limit=100):
         return self.database.list_task_runs(task_id, limit)
+
+    def reconcile_background_mission_state(self, task_id, mission_result):
+        """Project a durable mission pause onto its existing scheduled run."""
+        if not task_id or not isinstance(mission_result, dict):
+            return ""
+        mission = mission_result.get("mission") or {}
+        mission_id = str(mission_result.get("mission_id") or mission.get("mission_id") or "")
+        runs = self.database.list_task_runs(str(task_id))
+        run = next((item for item in runs if not mission_id or
+                    str(item.get("mission_id") or "") == mission_id), None)
+        if run is None:
+            return ""
+        result_error = str(mission_result.get("error") or mission.get("error") or "").upper()
+        pause_reason = str(mission_result.get("pause_reason") or
+                           mission.get("pause_reason") or "").upper()
+        if pause_reason == "USER_ACTIVITY" or result_error in {
+                "USER_ACTIVITY_DETECTED", "MISSION_PAUSED_FOR_USER_ACTIVITY"}:
+            self.database.update_task_run(
+                run["run_id"], status=RunStatus.WAITING_USER_IDLE,
+                claim_token=None, claimed_by=None, claim_expires_at=None,
+                error_code="USER_ACTIVITY_DETECTED",
+                error_message="mission paused for user activity")
+            self.database.update_background_task(
+                str(task_id), status=BackgroundTaskStatus.WAITING_USER_IDLE)
+            self._audit(str(task_id), "background_task_reconciled_user_idle", {
+                "run_id": run["run_id"], "mission_id": mission_id})
+            return RunStatus.WAITING_USER_IDLE.value
+        confirmation_required = bool(mission_result.get("confirmation_required"))
+        confirmation_required = confirmation_required or result_error == "USER_CONFIRMATION_REQUIRED"
+        confirmation_required = confirmation_required or str(
+            mission.get("status") or "").upper() == "WAITING_CONFIRMATION"
+        if confirmation_required:
+            self.database.update_task_run(
+                run["run_id"], status=RunStatus.WAITING_CONFIRMATION,
+                claim_token=None, claimed_by=None, claim_expires_at=None)
+            self.database.update_background_task(
+                str(task_id), status=BackgroundTaskStatus.WAITING_CONFIRMATION)
+            self._audit(str(task_id), "background_task_reconciled_confirmation", {
+                "run_id": run["run_id"], "mission_id": mission_id})
+            return RunStatus.WAITING_CONFIRMATION.value
+        return ""
 
     def start_scheduler(self, launcher):
         self.scheduler.launcher = launcher
