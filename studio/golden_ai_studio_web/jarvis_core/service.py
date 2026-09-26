@@ -13,9 +13,9 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 
 from .audit import AuditLog
-from .models import AgentState, ResponsePolicy, Risk, Tool
+from .models import AgentState, BROWSER_READ, ResponsePolicy, Risk, Tool
 from .registry import ToolRegistry
-from .security import SecurityManager
+from .security import READ_ONLY_PUBLIC_BROWSER_OBSERVATION, SecurityManager
 from .cancellation import CancellationToken
 from .memory import GoldenMemoryManager
 from .memory.models import MemoryCategory, MemorySource
@@ -501,11 +501,17 @@ class JarvisService:
             Tool("browser_navigate", "Navega para uma URL no navegador", self._browser_navigate,
                  Risk.MEDIUM, timeout=30, parameters={"url": str}, category="browser"),
             Tool("browser_get_page_info", "Extrai informações estruturadas da página (DOM/ARIA)",
-                 self._browser_get_page_info, Risk.LOW, timeout=15, category="browser"),
+                 self._browser_get_page_info, Risk.LOW, timeout=15, category="browser",
+                 action_class=BROWSER_READ,
+                 authorization_scope=READ_ONLY_PUBLIC_BROWSER_OBSERVATION),
             Tool("browser_read_page", "Lê o conteúdo de texto da página (marcado como untrusted)",
-                 self._browser_read_page, Risk.LOW, timeout=15, category="browser"),
+                 self._browser_read_page, Risk.LOW, timeout=15, category="browser",
+                 action_class=BROWSER_READ,
+                 authorization_scope=READ_ONLY_PUBLIC_BROWSER_OBSERVATION),
             Tool("browser_get_elements", "Lista elementos interativos com refs (e1, e2, ...)",
-                 self._browser_get_elements, Risk.LOW, timeout=15, category="browser"),
+                 self._browser_get_elements, Risk.LOW, timeout=15, category="browser",
+                 action_class=BROWSER_READ,
+                 authorization_scope=READ_ONLY_PUBLIC_BROWSER_OBSERVATION),
             Tool("browser_click", "Clica em elemento por ref, seletor ou texto",
                  self._browser_click, Risk.MEDIUM, timeout=15,
                  parameters={"ref": str, "selector": str, "text": str}, category="browser"),
@@ -522,7 +528,8 @@ class JarvisService:
             Tool("browser_wait_for_results", "Aguarda resultados visíveis e estruturados da página.",
                  self._browser_wait_for_results, Risk.LOW, timeout=25,
                  parameters={"timeout_ms": int}, category="browser",
-                 llm_enabled=False),
+                 llm_enabled=False, action_class=BROWSER_READ,
+                 authorization_scope=READ_ONLY_PUBLIC_BROWSER_OBSERVATION),
             Tool("browser_scroll", "Rola a página (down/up/top/bottom)",
                  self._browser_scroll, Risk.LOW, timeout=10,
                  parameters={"direction": str, "amount": int}, category="browser"),
@@ -536,7 +543,8 @@ class JarvisService:
             Tool("browser_close", "Fecha o navegador e limpa recursos", self._browser_close,
                  Risk.LOW, timeout=10, category="browser"),
             Tool("browser_health", "Verifica status do navegador", self._browser_health,
-                 Risk.LOW, timeout=5, category="browser"),
+                 Risk.LOW, timeout=5, category="browser", action_class=BROWSER_READ,
+                 authorization_scope=READ_ONLY_PUBLIC_BROWSER_OBSERVATION),
             Tool("browser_record_window", "Registra a identidade UIA da janela Chrome",
                  self._browser_record_window, Risk.LOW, timeout=5,
                  parameters={"pid": int, "window_id": int}, category="browser",
@@ -1300,7 +1308,9 @@ class JarvisService:
         return "Quais valores você quer usar para: %s?" % ", ".join(missing)
 
     def execute_tool(self, name, arguments, command="",
-                     task_id="desktop", confirmed=False):
+                     task_id="desktop", confirmed=False,
+                     authorization_scope="", target_url="",
+                     allowed_hosts=(), page_barrier=""):
         tool = self.registry.get(name)
         if not tool:
             self.audit.add(task_id=task_id, command=command, tool=str(name),
@@ -1321,7 +1331,12 @@ class JarvisService:
             return {"ok": False, "error": error}
         if self.cancellation.is_cancelled():
             return {"ok": False, "error": "Execução cancelada antes de iniciar.", "cancelled": True}
-        decision = self.security.decision(tool, effective_risk, force_confirmation)
+        decision = self.security.decision(
+            tool, effective_risk, force_confirmation,
+            authorization_scope=authorization_scope,
+            target_url=target_url,
+            allowed_hosts=allowed_hosts,
+            page_barrier=page_barrier)
         if decision == "deny":
             self.state = AgentState.IDLE
             return {"ok": False,

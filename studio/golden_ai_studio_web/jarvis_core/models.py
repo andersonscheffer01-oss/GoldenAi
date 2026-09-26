@@ -21,6 +21,10 @@ class ResponsePolicy(str, Enum):
     STRUCTURED = "STRUCTURED"
     BACKGROUND = "BACKGROUND"
 
+
+BROWSER_READ = "BROWSER_READ"
+BROWSER_ACTION = "BROWSER_ACTION"
+
 @dataclass(frozen=True)
 class Tool:
     name: str
@@ -37,3 +41,5 @@ class Tool:
     dynamic_risk: bool = False
     response_policy: ResponsePolicy = ResponsePolicy.NEEDS_SYNTHESIS
     expected_latency_ms: int = 0
+    action_class: str = BROWSER_ACTION
+    authorization_scope: str = ""

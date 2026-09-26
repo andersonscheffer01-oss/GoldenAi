@@ -36,6 +36,8 @@ def test_direct_python_title_request_is_planned_without_write_steps():
     assert [step.action_type for step in mission.steps] == [
         "browser_open", "browser_navigate", "focus_browser", "observe_browser",
         "extract_mission_value"]
+    assert mission.risk_level == "LOW"
+    assert mission.requires_confirmation is False
     assert not any(step.action_type in {"keyboard_type", "keyboard_press", "verify_file"}
                    for step in mission.steps)
 

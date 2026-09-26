@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .browser import (MAX_SEARCH_PROVIDERS, SEARCH_PROVIDER_ORDER,
                       SEARCH_PROVIDER_URLS, classify_page_barrier)
+from .security import READ_ONLY_PUBLIC_BROWSER_OBSERVATION
 from .windows_known_folders import documents_dir as known_documents_dir
 
 
@@ -936,10 +937,12 @@ class ComputerMissionPlanner:
                  args={"source_variable": "python_page_title", "value_kind": "title"}),
         ]
         mission = ComputerMission(str(uuid.uuid4()), text, MissionStatus.PENDING,
-                                  time.time(), steps, max_steps=self.MAX_STEPS)
+                                  time.time(), steps, max_steps=self.MAX_STEPS,
+                                  requires_confirmation=False, risk_level="LOW")
         mission.result.update({
             "browser_mission": True,
             "direct_official_navigation": True,
+            "authorization_scope": READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
             "official_host": "www.python.org",
             "source_url": "https://www.python.org/",
             "value_key": "python_page_title",
@@ -1673,6 +1676,12 @@ class ComputerMissionExecutor:
         mission.timeout_seconds = float(snapshot.get("timeout_seconds") or mission.timeout_seconds)
         mission.risk_level = str(snapshot.get("risk_level") or mission.risk_level)
         mission.result.update(dict(snapshot.get("result") or {}))
+        if mission.result.get("direct_official_navigation"):
+            # Older checkpoints created this read-only mission as WRITE.
+            # Normalize them without widening permissions or creating a new mission.
+            mission.requires_confirmation = False
+            mission.risk_level = "LOW"
+            mission.result["authorization_scope"] = READ_ONLY_PUBLIC_BROWSER_OBSERVATION
         mission.result["checkpoint_id"] = checkpoint["checkpoint_id"]
         mission.result["resume_token"] = checkpoint["resume_token"]
         mission.result["recovered_from_checkpoint"] = True
@@ -2617,6 +2626,32 @@ class ComputerMissionExecutor:
             result={"ok": bool(result.get("ok")), "error": result.get("error", "")},
         )
 
+    @staticmethod
+    def _browser_read_scope(mission, target_url):
+        official_host = str(mission.result.get("official_host") or "").strip()
+        allowed_hosts = [official_host] if official_host else []
+        if official_host.casefold().startswith("www."):
+            allowed_hosts.append(official_host[4:])
+        return {
+            "authorization_scope": READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
+            "target_url": str(target_url or ""),
+            "allowed_hosts": tuple(allowed_hosts),
+        }
+
+    def _execute_browser_read(self, name, arguments, **kwargs):
+        """Call scoped browser reads while keeping legacy test doubles compatible."""
+        try:
+            return self.service.execute_tool(name, arguments, **kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument 'authorization_scope'" not in str(exc):
+                raise
+            legacy_kwargs = {
+                key: value for key, value in kwargs.items()
+                if key not in {"authorization_scope", "target_url", "allowed_hosts",
+                               "page_barrier"}
+            }
+            return self.service.execute_tool(name, arguments, **legacy_kwargs)
+
     def _extract_mission_value(self, mission, step):
         key = str(step.args.get("source_variable") or
                   mission.result.get("value_key") or "python_version")
@@ -2631,14 +2666,59 @@ class ComputerMissionExecutor:
         for attempt in range(MAX_SEARCH_PROVIDERS):
             if self._cancel.is_set() or self.service.cancellation.is_cancelled():
                 return self._cancelled_result()
-            self.service.execute_tool(
+            target_url = _resolved_result_url(str(
+                mission.result.get("browser_url") or mission.result.get("source_url") or ""))
+            read_scope = self._browser_read_scope(mission, target_url)
+            self._execute_browser_read(
                 "browser_wait_for_results", {"timeout_ms": 10000},
                 command="computer_mission:extract_value_wait",
-                task_id=mission.mission_id)
-            page_result = self.service.execute_tool(
+                task_id=mission.mission_id, **read_scope)
+            page_result = self._execute_browser_read(
                 "browser_get_page_info", {}, command="computer_mission:extract_value",
-                task_id=mission.mission_id)
+                task_id=mission.mission_id, **read_scope)
+            if page_result.get("confirmation_required"):
+                self._audit_mission(mission, "BROWSER_READ_SCOPE_DENIED", {
+                    "scope": READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
+                    "target_url": target_url,
+                    "allowed_hosts": read_scope.get("allowed_hosts"),
+                })
+                return {"ok": False, "error": "USER_CONFIRMATION_REQUIRED",
+                        "dialog": "BROWSER_READ_SCOPE"}
             page = page_result.get("page") or {}
+            if not page_result.get("ok") or not page:
+                # A transient DOM extraction failure is not an authorization request.
+                # Re-observe the already-authorized public page through browser health
+                # before failing the mission, without clicking or navigating.
+                health_result = self._execute_browser_read(
+                    "browser_health", {}, command="computer_mission:extract_value_health",
+                    task_id=mission.mission_id, **read_scope)
+                health_url = _resolved_result_url(str(
+                    health_result.get("current_url") or ""))
+                health_title = " ".join(str(
+                    health_result.get("page_title") or "").split())
+                if (health_result.get("ok") and health_url and health_title and
+                        health_url == target_url and
+                        classify_page_barrier({"url": health_url,
+                                               "title": health_title}) == "NONE"):
+                    page = {"url": health_url, "title": health_title,
+                            "text": "", "links": [], "interactive": [],
+                            "forms": [], "barrier_type": "NONE"}
+                    self._audit_mission(mission, "BROWSER_READ_HEALTH_FALLBACK", {
+                        "scope": READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
+                        "source": "browser_health",
+                        "target_url": health_url,
+                        "original_error": page_result.get("error", ""),
+                    })
+                else:
+                    self._audit_mission(mission, "BROWSER_READ_FAILED", {
+                        "scope": READ_ONLY_PUBLIC_BROWSER_OBSERVATION,
+                        "target_url": target_url,
+                        "error": page_result.get("error", ""),
+                        "health_error": health_result.get("error", ""),
+                    })
+                    return {"ok": False, "error": "BROWSER_READ_FAILURE",
+                            "detail": {"page": page_result.get("error", ""),
+                                       "health": health_result.get("error", "")}}
             barrier = classify_page_barrier(page, page.get("interactive"))
             if barrier == "COOKIE_CONSENT":
                 elements_result = self.service.execute_tool(
