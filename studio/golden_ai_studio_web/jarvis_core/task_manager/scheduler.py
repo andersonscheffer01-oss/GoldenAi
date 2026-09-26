@@ -12,6 +12,9 @@ from .background import (BackgroundTask, BackgroundTaskStatus, ConditionType,
 from .clock import SystemClock
 
 
+BACKGROUND_QUIET_WINDOW_MS = 1500
+
+
 class ConditionEvaluator:
     """Allow-listed, dependency-injected condition checks; no eval or shell."""
 
@@ -51,18 +54,22 @@ class BackgroundTaskScheduler:
 
     def __init__(self, database, audit=None, launcher=None, clock=None,
                  condition_evaluator=None, tick_interval=1.0, worker_id=None,
-                 lease_seconds=30.0):
+                 lease_seconds=30.0, idle_provider=None):
         self.database = database
         self.audit = audit
         self.launcher = launcher
         self.clock = clock or SystemClock()
-        self.conditions = condition_evaluator or ConditionEvaluator()
+        self.conditions = condition_evaluator or ConditionEvaluator(
+            idle_provider=idle_provider)
+        if idle_provider is not None and condition_evaluator is not None:
+            self.conditions.idle_provider = idle_provider
         self.tick_interval = max(0.05, float(tick_interval))
         self.worker_id = worker_id or f"jarvis-scheduler-{uuid.uuid4()}"
         self.lease_seconds = float(lease_seconds)
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.RLock()
+        self._idle_observations = {}
 
     def start(self):
         with self._lock:
@@ -103,12 +110,20 @@ class BackgroundTaskScheduler:
                 continue
             if task.next_run_at is None:
                 next_run = self._first_run(task, now)
+                next_status = (BackgroundTaskStatus.WAITING_USER_IDLE
+                               if self._is_auto_resume_task(task)
+                               else BackgroundTaskStatus.SCHEDULED)
                 self.database.update_background_task(task.task_id,
-                    next_run_at=next_run, status=BackgroundTaskStatus.SCHEDULED)
+                    next_run_at=next_run, status=next_status)
                 task = self.database.get_background_task(task.task_id)
                 if task is None or float(task.next_run_at) > now:
                     continue
             if float(task.next_run_at) > now:
+                continue
+            if self._is_auto_resume_task(task):
+                action = self._reevaluate_waiting_user_idle(task, now)
+                if action:
+                    actions.append((task.task_id, action))
                 continue
             if task.trigger_type in {TriggerType.USER_IDLE, TriggerType.CONDITION}:
                 try:
@@ -140,6 +155,63 @@ class BackgroundTaskScheduler:
                                           started_at=now)
             actions.append((task.task_id, self._dispatch(task, claimed, now)))
         return actions
+
+    @staticmethod
+    def _is_auto_resume_task(task):
+        """Limit automatic idle recovery to explicitly scheduled missions."""
+        return (task.status == BackgroundTaskStatus.WAITING_USER_IDLE and
+                bool(task.trigger_config.get("idle_required")))
+
+    def _reevaluate_waiting_user_idle(self, task, now):
+        """Re-evaluate one existing run without creating a new occurrence."""
+        runs = self.database.list_task_runs(task.task_id)
+        run = next((item for item in runs
+                    if item.get("status") == RunStatus.WAITING_USER_IDLE.value), None)
+        if run is None or not run.get("mission_id"):
+            return ""
+        try:
+            idle_seconds = max(0.0, float(self.conditions.idle_provider()))
+        except (TypeError, ValueError, OSError):
+            idle_seconds = 0.0
+        quiet_ms = int(task.trigger_config.get("quiet_window_ms",
+                                               BACKGROUND_QUIET_WINDOW_MS))
+        quiet_ms = max(1, quiet_ms)
+        previous = self._idle_observations.get(task.task_id)
+        current_age_ms = int(idle_seconds * 1000)
+        if previous is None:
+            self._audit(task.task_id, "TASK_WAITING_USER_IDLE", {
+                "run_id": run["run_id"], "mission_id": run["mission_id"]})
+        elif current_age_ms < int(previous.get("age_ms", 0)):
+            self._audit(task.task_id, "QUIET_WINDOW_RESET", {
+                "run_id": run["run_id"], "last_user_input_age_ms": current_age_ms})
+        if current_age_ms < quiet_ms:
+            self._idle_observations[task.task_id] = {
+                "age_ms": current_age_ms, "quiet_satisfied": False}
+            if previous is None or previous.get("quiet_started") is not True:
+                self._audit(task.task_id, "QUIET_WINDOW_STARTED", {
+                    "run_id": run["run_id"], "required_quiet_window_ms": quiet_ms})
+            self._idle_observations[task.task_id]["quiet_started"] = True
+            return "WAITING_USER_IDLE"
+        if not previous or not previous.get("quiet_satisfied"):
+            self._audit(task.task_id, "QUIET_WINDOW_SATISFIED", {
+                "run_id": run["run_id"], "last_user_input_age_ms": current_age_ms,
+                "required_quiet_window_ms": quiet_ms})
+        claimed = self.database.claim_task_run(
+            run["run_id"], self.worker_id, now, self.lease_seconds,
+            allow_waiting_user_idle=True)
+        if not claimed:
+            return "WAITING_USER_IDLE"
+        self.database.update_background_task(task.task_id,
+                                             status=BackgroundTaskStatus.RUNNING)
+        self.database.update_task_run(claimed["run_id"], status=RunStatus.RUNNING.value,
+                                      started_at=now)
+        self._idle_observations[task.task_id] = {
+            "age_ms": current_age_ms, "quiet_satisfied": True}
+        self._audit(task.task_id, "BACKGROUND_IDLE_RESUME_TRIGGERED", {
+            "run_id": claimed["run_id"], "mission_id": claimed.get("mission_id")})
+        self._audit(task.task_id, "MISSION_RESUMED_FROM_USER_IDLE", {
+            "run_id": claimed["run_id"], "mission_id": claimed.get("mission_id")})
+        return self._dispatch(task, claimed, now)
 
     def _dispatch(self, task, run, now):
         self._audit(task.task_id, "background_task_dispatched", {"run_id": run["run_id"]})

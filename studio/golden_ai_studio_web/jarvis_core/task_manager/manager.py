@@ -137,8 +137,10 @@ class TaskManager:
             return RunStatus.WAITING_CONFIRMATION.value
         return ""
 
-    def start_scheduler(self, launcher):
+    def start_scheduler(self, launcher, idle_provider=None):
         self.scheduler.launcher = launcher
+        if idle_provider is not None:
+            self.scheduler.conditions.idle_provider = idle_provider
         self.scheduler.start()
 
     def tick_scheduler(self):

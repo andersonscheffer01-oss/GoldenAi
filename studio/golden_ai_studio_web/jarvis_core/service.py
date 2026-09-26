@@ -180,7 +180,8 @@ class JarvisService:
         self.task_manager = TaskManager(base_dir)
         from .computer_use_mission import ComputerMissionExecutor
         self.computer_missions = ComputerMissionExecutor(self)
-        self.task_manager.start_scheduler(self._launch_background_task)
+        self.task_manager.start_scheduler(self._launch_background_task,
+                                          idle_provider=self._background_idle_seconds)
         self.orchestrator = CentralOrchestrator(self.registry, audit=self.audit)
         self.runtime = JarvisRuntimeCoordinator(self.orchestrator, self,
                                                 task_manager=self.task_manager)
@@ -314,7 +315,22 @@ class JarvisService:
 
     def _launch_background_task(self, task, run):
         """Route scheduled missions through the canonical mission/security path."""
+        if run.get("mission_id"):
+            checkpoint, error = self.computer_missions.persistence.latest(
+                str(run["mission_id"]))
+            if error or not checkpoint:
+                return {"ok": False, "error": error or "MISSION_CHECKPOINT_NOT_FOUND",
+                        "mission_id": run["mission_id"]}
+            return self.resume_current_mission(
+                run["mission_id"], checkpoint["resume_token"], task_id=task.task_id)
         return self.run_computer_mission(task.user_request, task_id=task.task_id)
+
+    def _background_idle_seconds(self):
+        """Read Windows idle age without touching foreground state."""
+        from .tools.ui_automation import ui_user_activity
+        result = ui_user_activity(1500)
+        age_ms = result.get("last_user_input_age_ms")
+        return max(0.0, float(age_ms or 0) / 1000.0)
 
     # ═══════════════════════════════════════════════════════════════
     # REGISTRO DE FERRAMENTAS

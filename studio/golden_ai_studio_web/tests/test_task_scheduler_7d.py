@@ -331,6 +331,121 @@ def test_reconcile_confirmation_requires_explicit_security_result(tmp_path):
         manager.shutdown()
 
 
+def test_scheduled_waiting_user_idle_reuses_same_run_after_quiet_window(tmp_path):
+    clock = FakeClock(100)
+    store = TaskDatabase(tmp_path / "tasks.db")
+    task = make_task(clock, TriggerType.AFTER_DELAY,
+                     {"idle_required": True, "quiet_window_ms": 1000},
+                     next_run_at=100)
+    store.create_background_task(task)
+    run = store.ensure_task_run(task.task_id, 105, 100)
+    store.update_task_run(run["run_id"], mission_id="mission-existing",
+                          status=RunStatus.WAITING_USER_IDLE)
+    store.update_background_task(task.task_id,
+                                 status=BackgroundTaskStatus.WAITING_USER_IDLE)
+    resumed = []
+    scheduler = BackgroundTaskScheduler(
+        store, clock=clock, idle_provider=lambda: 2.0,
+        launcher=lambda _task, existing: resumed.append(existing["run_id"]) or {"ok": True})
+
+    actions = scheduler.tick()
+
+    assert resumed == [run["run_id"]]
+    assert actions == [(task.task_id, "COMPLETED")]
+    assert len(store.list_task_runs(task.task_id)) == 1
+    assert store.get_background_task(task.task_id).run_count == 1
+
+
+def test_scheduled_waiting_user_idle_stays_put_while_user_is_active(tmp_path):
+    clock = FakeClock(100)
+    store = TaskDatabase(tmp_path / "tasks.db")
+    task = make_task(clock, TriggerType.AFTER_DELAY,
+                     {"idle_required": True, "quiet_window_ms": 1000},
+                     next_run_at=100)
+    store.create_background_task(task)
+    run = store.ensure_task_run(task.task_id, 105, 100)
+    store.update_task_run(run["run_id"], mission_id="mission-existing",
+                          status=RunStatus.WAITING_USER_IDLE)
+    store.update_background_task(task.task_id,
+                                 status=BackgroundTaskStatus.WAITING_USER_IDLE)
+    calls = []
+    scheduler = BackgroundTaskScheduler(
+        store, clock=clock, idle_provider=lambda: 0.0,
+        launcher=lambda _task, _run: calls.append(True) or {"ok": True})
+
+    scheduler.tick()
+
+    assert calls == []
+    assert store.get_background_task(task.task_id).status == BackgroundTaskStatus.WAITING_USER_IDLE
+    assert store.list_task_runs(task.task_id)[0]["status"] == RunStatus.WAITING_USER_IDLE.value
+
+
+def test_quiet_window_reset_then_resume_emits_significant_events(tmp_path):
+    clock = FakeClock(100)
+    store = TaskDatabase(tmp_path / "tasks.db")
+    task = make_task(clock, TriggerType.AFTER_DELAY,
+                     {"idle_required": True, "quiet_window_ms": 1000},
+                     next_run_at=100)
+    store.create_background_task(task)
+    run = store.ensure_task_run(task.task_id, 105, 100)
+    store.update_task_run(run["run_id"], mission_id="mission-existing",
+                          status=RunStatus.WAITING_USER_IDLE)
+    store.update_background_task(task.task_id,
+                                 status=BackgroundTaskStatus.WAITING_USER_IDLE)
+    ages = iter((0.0, 0.4, 0.1, 2.0))
+    class AuditSink:
+        def __init__(self):
+            self.events = []
+
+        def add(self, **kwargs):
+            self.events.append(kwargs.get("command"))
+
+    audit = AuditSink()
+    scheduler = BackgroundTaskScheduler(
+        store, audit=audit, clock=clock, idle_provider=lambda: next(ages),
+        launcher=lambda _task, _run: {"ok": True})
+
+    scheduler.tick()
+    scheduler.tick()
+    scheduler.tick()
+    scheduler.tick()
+
+    events = audit.events
+    assert "QUIET_WINDOW_STARTED" in events
+    assert "QUIET_WINDOW_RESET" in events
+    assert "QUIET_WINDOW_SATISFIED" in events
+    assert "BACKGROUND_IDLE_RESUME_TRIGGERED" in events
+
+
+def test_auto_resume_security_gate_keeps_same_run_waiting_confirmation(tmp_path):
+    clock = FakeClock(100)
+    store = TaskDatabase(tmp_path / "tasks.db")
+    task = make_task(clock, TriggerType.AFTER_DELAY,
+                     {"idle_required": True, "quiet_window_ms": 1000},
+                     next_run_at=100)
+    store.create_background_task(task)
+    run = store.ensure_task_run(task.task_id, 105, 100)
+    store.update_task_run(run["run_id"], mission_id="mission-existing",
+                          status=RunStatus.WAITING_USER_IDLE)
+    store.update_background_task(task.task_id,
+                                 status=BackgroundTaskStatus.WAITING_USER_IDLE)
+    scheduler = BackgroundTaskScheduler(
+        store, clock=clock, idle_provider=lambda: 2.0,
+        launcher=lambda _task, existing: {
+            "ok": False, "error": "USER_CONFIRMATION_REQUIRED",
+            "mission": {"mission_id": existing["mission_id"],
+                        "status": "WAITING_CONFIRMATION",
+                        "error": "USER_CONFIRMATION_REQUIRED"}})
+
+    actions = scheduler.tick()
+
+    refreshed = store.list_task_runs(task.task_id)[0]
+    assert actions == [(task.task_id, "WAITING_CONFIRMATION")]
+    assert refreshed["run_id"] == run["run_id"]
+    assert refreshed["status"] == RunStatus.WAITING_CONFIRMATION.value
+    assert store.get_background_task(task.task_id).status == BackgroundTaskStatus.WAITING_CONFIRMATION
+
+
 def test_waiting_user_idle_is_rechecked_after_scheduler_restart(tmp_path):
     clock = FakeClock(100)
     store = TaskDatabase(tmp_path / "tasks.db")

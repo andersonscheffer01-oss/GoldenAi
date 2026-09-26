@@ -279,7 +279,8 @@ class TaskDatabase:
                 "SELECT * FROM task_runs WHERE task_id=? ORDER BY scheduled_for DESC LIMIT ?",
                 (task_id, max(1, min(int(limit), 500)))).fetchall()]
 
-    def claim_task_run(self, run_id, worker_id, now, lease_seconds=30.0):
+    def claim_task_run(self, run_id, worker_id, now, lease_seconds=30.0,
+                       allow_waiting_user_idle=False):
         token = str(uuid.uuid4())
         now = float(now)
         with self._lock, self.connect(rows=True) as db:
@@ -288,9 +289,11 @@ class TaskDatabase:
             if not row:
                 return None
             row = dict(row)
-            if row["status"] in {RunStatus.COMPLETED.value, RunStatus.CANCELLED.value,
-                                  RunStatus.WAITING_CONFIRMATION.value,
-                                  RunStatus.WAITING_USER_IDLE.value}:
+            terminal_statuses = {RunStatus.COMPLETED.value, RunStatus.CANCELLED.value,
+                                 RunStatus.WAITING_CONFIRMATION.value}
+            if not allow_waiting_user_idle:
+                terminal_statuses.add(RunStatus.WAITING_USER_IDLE.value)
+            if row["status"] in terminal_statuses:
                 return None
             if row["mission_id"] and row["status"] in {RunStatus.CLAIMED.value,
                                                          RunStatus.RUNNING.value}:
