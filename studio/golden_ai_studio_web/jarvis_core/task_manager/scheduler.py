@@ -163,6 +163,8 @@ class BackgroundTaskScheduler:
                 actions.append((task.task_id, "SKIPPED_MISFIRE"))
                 continue
             run = self.database.ensure_task_run(task.task_id, task.next_run_at, now)
+            if run is None:
+                continue
             claimed = self.database.claim_task_run(run["run_id"], self.worker_id, now,
                                                    self.lease_seconds)
             if not claimed:
@@ -299,6 +301,26 @@ class BackgroundTaskScheduler:
         self.database.update_task_run(run["run_id"], status=status, finished_at=now,
                                       claim_token=None, claimed_by=None, claim_expires_at=None,
                                       error_code=error_code, error_message=error_message)
+        current = self.database.get_background_task(task.task_id)
+        if current and current.status == BackgroundTaskStatus.CANCELLED:
+            self.database.update_background_task(task.task_id, status=BackgroundTaskStatus.CANCELLED,
+                                                 enabled=False, last_run_at=now,
+                                                 run_count=task.run_count + (1 if ok else 0))
+            self._audit(task.task_id, "TASK_RUN_COMPLETED" if ok else "background_task_failed",
+                        {"run_id": run["run_id"], "cancelled_during_run": True})
+            return
+        if current and current.status == BackgroundTaskStatus.PAUSED:
+            if task.trigger_type == TriggerType.RECURRING or not ok:
+                self.database.update_background_task(
+                    task.task_id, status=BackgroundTaskStatus.PAUSED, enabled=False,
+                    last_run_at=now, run_count=task.run_count + (1 if ok else 0))
+            else:
+                self.database.update_background_task(
+                    task.task_id, status=BackgroundTaskStatus.COMPLETED, enabled=False,
+                    last_run_at=now, run_count=task.run_count + 1)
+            self._audit(task.task_id, "TASK_RUN_COMPLETED" if ok else "background_task_failed",
+                        {"run_id": run["run_id"], "paused_during_run": True})
+            return
         if ok:
             self.database.update_background_task(task.task_id, status=BackgroundTaskStatus.COMPLETED,
                                                 last_run_at=now, run_count=task.run_count + 1)
@@ -390,9 +412,13 @@ class BackgroundTaskScheduler:
         self._audit(task.task_id, "background_task_failed", {"error_code": code})
 
     def cancel(self, task_id):
-        self.database.update_background_task(task_id, status=BackgroundTaskStatus.CANCELLED,
-                                             enabled=False)
-        self._audit(task_id, "background_task_cancelled")
+        return self.database.control_background_task(task_id, "cancel")
+
+    def pause(self, task_id):
+        return self.database.control_background_task(task_id, "pause")
+
+    def resume(self, task_id):
+        return self.database.control_background_task(task_id, "resume")
 
     def disable(self, task_id):
         self.database.update_background_task(task_id, status=BackgroundTaskStatus.DISABLED,

@@ -1,4 +1,4 @@
-"""Read-only observability over the canonical background task system."""
+"""Observability and explicit controls over the canonical task system."""
 from __future__ import annotations
 
 import time
@@ -31,7 +31,7 @@ _TERMINAL = _COMPLETED | {
 
 
 class BackgroundControlCenter:
-    """Project durable scheduler data into deterministic, read-only views."""
+    """Keep read-only views separate from explicit task control operations."""
 
     def __init__(self, database, scheduler=None, now_provider=None):
         self.database = database
@@ -103,6 +103,18 @@ class BackgroundControlCenter:
                  if float(row.get("expires_at", 0) or 0) >= now]
         start = max(0, int(offset))
         return views[start:start + max(1, min(int(limit), 1000))]
+
+    def control_task(self, action, task_id):
+        """Delegate one already-authorized control to the canonical scheduler."""
+        if self.scheduler is None:
+            return {"success": False, "code": "SCHEDULER_UNAVAILABLE",
+                    "task_id": str(task_id), "requested_action": str(action)}
+        method = {"pause": "pause", "resume": "resume", "cancel": "cancel"}.get(
+            str(action).lower())
+        if method is None:
+            return {"success": False, "code": "UNKNOWN_CONTROL_ACTION",
+                    "task_id": str(task_id), "requested_action": str(action)}
+        return getattr(self.scheduler, method)(str(task_id))
 
     def get_next_due_task(self):
         tasks, runs, approvals = self._state()

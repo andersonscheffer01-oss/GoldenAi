@@ -177,7 +177,7 @@ class JarvisService:
             self.learning_engine = None
             self.project_memory = None
         self._register_tools()
-        self.task_manager = TaskManager(base_dir)
+        self.task_manager = TaskManager(base_dir, security=self.security)
         from .computer_use_mission import ComputerMissionExecutor
         self.computer_missions = ComputerMissionExecutor(self)
         self.task_manager.start_scheduler(self._launch_background_task,
@@ -599,6 +599,16 @@ class JarvisService:
     def background_control_snapshot(self, **kwargs):
         """Expose the canonical read-only background control snapshot."""
         return self.task_manager.control_center.get_snapshot(**kwargs)
+
+    def pause_background_task(self, task_id, confirmation_token=None, actor="service"):
+        return self.task_manager.pause_background(task_id, confirmation_token, actor)
+
+    def resume_background_task(self, task_id, confirmation_token=None, actor="service"):
+        return self.task_manager.resume_background(task_id, confirmation_token, actor)
+
+    def cancel_background_task(self, task_id, confirmation_token=None, actor="service"):
+        return self.task_manager.control_background("cancel", task_id,
+                                                   confirmation_token, actor)
 
     @staticmethod
     def _memory_record_dict(record):

@@ -282,3 +282,25 @@ Próximo: aguardar autorização; não iniciar M1.6.
   as `READ_ONLY_BACKGROUND_OBSERVATION`.
 - Regression: `8 passed` focused Control Center tests and `146 passed` relevant scheduler,
   condition, security, approval, and Computer Use tests. No real GUI action was needed.
+
+# Computer Use 8D.2 - Safe Task Controls
+
+**Date:** 2026-09-26
+**Status:** `COMPUTER_USE_8D_PHASE: IN_PROGRESS`; `COMPUTER_USE_8D_2: PASS`
+
+- Reused the existing `PAUSED`/`CANCELLED` states, `TaskManager`, canonical
+  `TaskDatabase`, `BackgroundControlCenter`, and `BackgroundTaskScheduler`.
+- Added only the additive schema-v3 `paused_from_status` field so pausing a task in
+  `WAITING_CONFIRMATION` can resume to that state without consuming its approval.
+- Pause disables future dispatches and survives reload. Resume only restores eligibility;
+  it never dispatches directly. Cancel is terminal for future intent, preserves history and
+  approvals, and requires a scoped single-use `SecurityManager` confirmation.
+- Active runs are cooperative: pause/cancel never kills processes or invalidates a lease;
+  the current run may reach a safe terminal state while future dispatch remains blocked.
+- `ensure_task_run` and `claim_task_run` revalidate task state inside the canonical write
+  transaction, closing the post-control claim race. Read-only 8D.1 queries remain unchanged.
+- Focused controls/regression: `60 passed`; broader relevant set: `153 passed` plus 3
+  pre-existing Windows teardown file-lock failures in `test_jarvis_hardening.py`, whose
+  fixtures do not close `JarvisService` before temporary-directory cleanup.
+- `py_compile` and `git diff --check` remain required before the dedicated 8D.2 commit.
+- No real GUI action, process kill, `device_registry.json` change, runtime DB change, or push.

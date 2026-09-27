@@ -5,7 +5,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from ..audit import AuditLog
+from ..models import Risk, Tool
 from ..orchestrator.models import DataClassification
+from ..security import SecurityManager
 from .database import TaskDatabase
 from .background import (BackgroundTask, BackgroundTaskStatus, MisfirePolicy,
                           RunStatus, TriggerType)
@@ -20,11 +22,14 @@ from .control_center import BackgroundControlCenter
 class TaskManager:
     DB_NAME = "golden_tasks.db"
 
-    def __init__(self, base_dir, max_workers=2):
+    def __init__(self, base_dir, max_workers=2, security=None):
         self.base_dir = Path(base_dir).expanduser().resolve()
         self.database = TaskDatabase(self.base_dir / "jarvis" / self.DB_NAME)
         self.runner = BackgroundJobRunner(self.database, max_workers=max_workers)
         self.audit = AuditLog(self.base_dir / "golden_runtime.db")
+        # JarvisService passes its canonical manager; standalone TaskManager
+        # instances keep the same policy for isolated tests and tooling.
+        self.security = security or SecurityManager()
         self.background_handlers = {
             "condition_audit": ConditionAuditExecutor(self.audit),
         }
@@ -162,8 +167,51 @@ class TaskManager:
     def tick_scheduler(self):
         return self.scheduler.tick()
 
-    def cancel_background(self, task_id):
-        return self.scheduler.cancel(task_id)
+    def cancel_background(self, task_id, confirmation_token=None, actor="background_control"):
+        return self.control_background("cancel", task_id, confirmation_token, actor)
+
+    def pause_background(self, task_id, confirmation_token=None, actor="background_control"):
+        return self.control_background("pause", task_id, confirmation_token, actor)
+
+    def resume_background(self, task_id, confirmation_token=None, actor="background_control"):
+        return self.control_background("resume", task_id, confirmation_token, actor)
+
+    def control_background(self, action, task_id, confirmation_token=None,
+                           actor="background_control"):
+        action = str(action).lower()
+        task_id = str(task_id)
+        risk = Risk.HIGH if action == "cancel" else Risk.MEDIUM
+        tool = Tool(f"background_task_{action}", f"Controla task em background: {action}",
+                    lambda **_kwargs: {}, risk=risk, confirmation=(action == "cancel"),
+                    parameters={"task_id": str})
+        arguments = {"task_id": task_id, "action": action, "actor": str(actor)}
+        if confirmation_token:
+            item = self.security.consume(confirmation_token)
+            if not item or item.get("tool") != tool.name or item.get("arguments") != arguments:
+                return {"success": False, "code": "INVALID_CONFIRMATION",
+                        "task_id": task_id, "requested_action": action}
+        else:
+            decision = self.security.decision(tool, risk=risk,
+                                              requires_confirmation=tool.confirmation)
+            if decision == "deny":
+                self._audit(task_id, "BACKGROUND_TASK_CONTROL_DENIED", arguments)
+                return {"success": False, "code": "SECURITY_DENIED",
+                        "task_id": task_id, "requested_action": action}
+            if decision == "confirm":
+                token = self.security.create_confirmation(tool, arguments, action, risk)
+                return {"success": False, "confirmation_required": True, "token": token,
+                        "task_id": task_id, "requested_action": action,
+                        "code": "CONFIRMATION_REQUIRED"}
+        result = self.control_center.control_task(action, task_id)
+        if result.get("success") and result.get("new_state") != result.get("previous_state"):
+            event_name = {"pause": "BACKGROUND_TASK_PAUSED",
+                          "resume": "BACKGROUND_TASK_RESUMED",
+                          "cancel": "BACKGROUND_TASK_CANCELLED"}[action]
+            self._audit(task_id, event_name, {
+                "action": action, "previous_state": result.get("previous_state"),
+                "new_state": result.get("new_state"), "actor": str(actor),
+                "active_run_state": result.get("active_run_state")})
+        return result
 
     def disable_background(self, task_id):
         return self.scheduler.disable(task_id)

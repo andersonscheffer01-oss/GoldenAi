@@ -13,7 +13,7 @@ from .models import StepRecord, StepStatus, TaskPlan, TaskRecord, TaskStatus
 
 
 class TaskDatabase:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, path):
         self.path = Path(path)
@@ -80,6 +80,7 @@ class TaskDatabase:
                         max_runs INTEGER,
                         misfire_policy TEXT NOT NULL,
                         security_scope TEXT NOT NULL,
+                        paused_from_status TEXT,
                         schema_version INTEGER NOT NULL
                     );
                     CREATE TABLE IF NOT EXISTS task_runs(
@@ -121,6 +122,11 @@ class TaskDatabase:
                     CREATE INDEX IF NOT EXISTS idx_approvals_scope
                         ON task_approvals(task_id, run_id, status);
                 """)
+            if current < 3:
+                columns = {item[1] for item in db.execute(
+                    "PRAGMA table_info(background_tasks)").fetchall()}
+                if "paused_from_status" not in columns:
+                    db.execute("ALTER TABLE background_tasks ADD COLUMN paused_from_status TEXT")
             db.execute("DELETE FROM task_schema_version")
             db.execute("INSERT INTO task_schema_version(version) VALUES(?)", (self.SCHEMA_VERSION,))
 
@@ -215,13 +221,15 @@ class TaskDatabase:
             db.execute("""INSERT INTO background_tasks(
                 task_id,user_request,task_type,trigger_type,trigger_config,status,
                 created_at,updated_at,next_run_at,last_run_at,timezone,enabled,
-                run_count,max_runs,misfire_policy,security_scope,schema_version)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                run_count,max_runs,misfire_policy,security_scope,paused_from_status,schema_version)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (task.task_id, task.user_request, task.task_type, task.trigger_type.value,
                  self._dump(task.trigger_config), task.status.value, task.created_at,
                  task.updated_at, task.next_run_at, task.last_run_at, task.timezone,
                  int(task.enabled), task.run_count, task.max_runs, task.misfire_policy.value,
-                 self._dump(task.security_scope), task.schema_version))
+                 self._dump(task.security_scope),
+                 getattr(task.paused_from_status, "value", task.paused_from_status),
+                 task.schema_version))
         return task.task_id
 
     def get_background_task(self, task_id):
@@ -241,13 +249,17 @@ class TaskDatabase:
 
     def update_background_task(self, task_id, **fields):
         allowed = {"status", "updated_at", "next_run_at", "last_run_at", "enabled",
-                   "run_count", "max_runs", "trigger_config", "security_scope"}
+                   "run_count", "max_runs", "trigger_config", "security_scope",
+                   "paused_from_status"}
         values = {key: value for key, value in fields.items() if key in allowed}
         if "status" in values:
             values["status"] = getattr(values["status"], "value", values["status"])
         for key in ("trigger_config", "security_scope"):
             if key in values:
                 values[key] = self._dump(values[key])
+        if "paused_from_status" in values:
+            values["paused_from_status"] = getattr(
+                values["paused_from_status"], "value", values["paused_from_status"])
         values.setdefault("updated_at", time.time())
         if "enabled" in values:
             values["enabled"] = int(bool(values["enabled"]))
@@ -260,6 +272,12 @@ class TaskDatabase:
         now = time.time() if now is None else float(now)
         run_id = str(uuid.uuid4())
         with self._lock, self.connect(rows=True) as db:
+            task = db.execute("SELECT status,enabled FROM background_tasks WHERE task_id=?",
+                              (task_id,)).fetchone()
+            if not task or task["status"] in {
+                    BackgroundTaskStatus.PAUSED.value,
+                    BackgroundTaskStatus.CANCELLED.value}:
+                return None
             db.execute("""INSERT OR IGNORE INTO task_runs(
                 run_id,task_id,scheduled_for,status,created_at)
                 VALUES(?,?,?,?,?)""", (run_id, task_id, float(scheduled_for),
@@ -267,6 +285,75 @@ class TaskDatabase:
             row = db.execute("SELECT * FROM task_runs WHERE task_id=? AND scheduled_for=?",
                              (task_id, float(scheduled_for))).fetchone()
             return dict(row)
+
+    def control_background_task(self, task_id, action):
+        """Apply one atomic task-level control transition."""
+        action = str(action).lower()
+        event_names = {"pause": "BACKGROUND_TASK_PAUSED",
+                       "resume": "BACKGROUND_TASK_RESUMED",
+                       "cancel": "BACKGROUND_TASK_CANCELLED"}
+        if action not in event_names:
+            return {"success": False, "code": "UNKNOWN_CONTROL_ACTION",
+                    "task_id": str(task_id), "requested_action": action}
+        with self._lock, self.connect(rows=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM background_tasks WHERE task_id=?",
+                             (str(task_id),)).fetchone()
+            if not row:
+                return {"success": False, "code": "TASK_NOT_FOUND",
+                        "task_id": str(task_id), "requested_action": action}
+            task = dict(row)
+            previous = task["status"]
+            terminal = {BackgroundTaskStatus.COMPLETED.value,
+                        BackgroundTaskStatus.EXPIRED.value,
+                        BackgroundTaskStatus.FAILED.value,
+                        BackgroundTaskStatus.DISABLED.value}
+            if action == "pause":
+                if previous == BackgroundTaskStatus.PAUSED.value:
+                    code, success, new_status = "ALREADY_PAUSED", True, previous
+                elif previous in terminal or previous == BackgroundTaskStatus.CANCELLED.value:
+                    code, success, new_status = "INVALID_STATE_TRANSITION", False, previous
+                else:
+                    code, success, new_status = "PAUSED", True, BackgroundTaskStatus.PAUSED.value
+                    db.execute("""UPDATE background_tasks SET status=?,enabled=0,
+                        paused_from_status=?,updated_at=? WHERE task_id=?""",
+                               (new_status, previous, time.time(), str(task_id)))
+            elif action == "resume":
+                if previous != BackgroundTaskStatus.PAUSED.value:
+                    code = ("INVALID_STATE_TRANSITION" if previous in terminal
+                            or previous == BackgroundTaskStatus.CANCELLED.value
+                            else "NOT_PAUSED")
+                    success, new_status = False, previous
+                else:
+                    restored = task.get("paused_from_status") or BackgroundTaskStatus.SCHEDULED.value
+                    if restored in {BackgroundTaskStatus.PAUSED.value,
+                                    BackgroundTaskStatus.CANCELLED.value}:
+                        restored = BackgroundTaskStatus.SCHEDULED.value
+                    code, success, new_status = "RESUMED", True, restored
+                    db.execute("""UPDATE background_tasks SET status=?,enabled=1,
+                        paused_from_status=NULL,updated_at=? WHERE task_id=?""",
+                               (new_status, time.time(), str(task_id)))
+            else:
+                if previous == BackgroundTaskStatus.CANCELLED.value:
+                    code, success, new_status = "ALREADY_CANCELLED", True, previous
+                elif previous in terminal:
+                    code, success, new_status = "INVALID_STATE_TRANSITION", False, previous
+                else:
+                    code, success, new_status = "CANCELLED", True, BackgroundTaskStatus.CANCELLED.value
+                    db.execute("""UPDATE background_tasks SET status=?,enabled=0,
+                        paused_from_status=NULL,updated_at=? WHERE task_id=?""",
+                               (new_status, time.time(), str(task_id)))
+            latest = db.execute("""SELECT run_id,status FROM task_runs
+                WHERE task_id=? ORDER BY COALESCE(started_at,created_at) DESC LIMIT 1""",
+                                (str(task_id),)).fetchone()
+            active_run_state = dict(latest) if latest else None
+            if success and new_status != previous:
+                self._event_db(db, str(task_id), event_names[action], {
+                    "action": action, "previous_status": previous,
+                    "new_status": new_status})
+            return {"success": success, "code": code, "task_id": str(task_id),
+                    "requested_action": action, "previous_state": previous,
+                    "new_state": new_status, "active_run_state": active_run_state}
 
     def get_task_run(self, run_id):
         with self.connect(rows=True) as db:
@@ -297,6 +384,17 @@ class TaskDatabase:
             if not row:
                 return None
             row = dict(row)
+            task = db.execute("SELECT status,enabled FROM background_tasks WHERE task_id=?",
+                              (row["task_id"],)).fetchone()
+            if not task or not bool(task["enabled"]) or task["status"] in {
+                    BackgroundTaskStatus.PAUSED.value,
+                    BackgroundTaskStatus.CANCELLED.value,
+                    BackgroundTaskStatus.DISABLED.value,
+                    BackgroundTaskStatus.COMPLETED.value,
+                    BackgroundTaskStatus.EXPIRED.value,
+                    BackgroundTaskStatus.FAILED.value,
+                    BackgroundTaskStatus.WAITING_CONFIRMATION.value}:
+                return None
             terminal_statuses = {RunStatus.COMPLETED.value, RunStatus.CANCELLED.value,
                                  RunStatus.WAITING_CONFIRMATION.value}
             if not allow_waiting_user_idle:
@@ -438,4 +536,6 @@ class TaskDatabase:
             enabled=bool(row["enabled"]), run_count=row["run_count"],
             max_runs=row["max_runs"], misfire_policy=MisfirePolicy(row["misfire_policy"]),
             security_scope=self._load(row["security_scope"], {}),
+            paused_from_status=(BackgroundTaskStatus(row["paused_from_status"])
+                                if row["paused_from_status"] else None),
             schema_version=row["schema_version"])

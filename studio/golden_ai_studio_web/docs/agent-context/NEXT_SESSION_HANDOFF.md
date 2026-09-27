@@ -386,3 +386,26 @@ The next session must preserve these invariants:
 - Focused validation passed: `8 passed`; relevant regression passed: `146 passed`.
 - Next work is 8D.2 safe task controls. Preserve runtime databases, build/dist artifacts,
   `device_registry.json`, and unrelated dirty files. No push.
+
+# Computer Use 8D.2 Handoff
+
+**Status:** `COMPUTER_USE_8D_PHASE: IN_PROGRESS`; `COMPUTER_USE_8D_2: PASS`
+
+- The implementation reuses the existing `TaskManager.control_center`, canonical
+  `TaskDatabase`, `BackgroundTaskScheduler`, `SecurityManager`, and `AuditLog`.
+- `pause_background`, `resume_background`, and `cancel_background` are structured internal
+  controls. Cancel requires a task-bound, action-bound, single-use confirmation token.
+- Schema version 3 adds only `background_tasks.paused_from_status`, preserving the prior
+  waiting state needed for safe resume from `WAITING_CONFIRMATION`.
+- Scheduler eligibility and claim both recheck task state under the canonical SQLite write
+  transaction. No post-ack pause/cancel claim is allowed. No kill/TerminateProcess/taskkill
+  path was introduced.
+- Active runs remain cooperative. Pause/cancel do not revoke leases or stop applications;
+  current work may finish safely, while future dispatch is blocked.
+- Focused controls suite: `60 passed`. Broader relevant suite: `153 passed`; three failures
+  are pre-existing Windows SQLite cleanup locks in `test_jarvis_hardening.py`, caused by the
+  fixture not calling `JarvisService.close()` before deleting its temporary directory.
+- Required final checks: project Python compile, focused/regression tests, secret scan,
+  `git diff --check`, and selective staging. Do not include `device_registry.json`, runtime
+  databases, build/dist, logs, or unrelated dirty files. Do not push.
+- Next step is review of the dedicated 8D.2 commit; do not begin 8D.3 retry/recovery controls.

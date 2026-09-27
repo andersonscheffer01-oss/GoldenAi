@@ -87,7 +87,8 @@ class BackgroundTask:
     max_runs: int | None = None
     misfire_policy: MisfirePolicy = MisfirePolicy.RUN_ONCE_WHEN_AVAILABLE
     security_scope: dict[str, Any] = field(default_factory=dict)
-    schema_version: int = 2
+    paused_from_status: BackgroundTaskStatus | None = None
+    schema_version: int = 3
 
     def __post_init__(self):
         if not _SAFE_ID.match(self.task_id):

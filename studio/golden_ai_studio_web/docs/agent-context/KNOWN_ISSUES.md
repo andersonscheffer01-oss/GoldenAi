@@ -56,6 +56,20 @@
   those belong to later 8D stages.
 - The control center bounds aggregate reads to the existing canonical task/run/approval schema.
   It does not migrate or modify legacy databases and does not touch `device_registry.json`.
+
+## Computer Use 8D.2
+
+- Safe task controls are implemented over the canonical scheduler. Pause blocks future
+  dispatches and resume restores scheduler eligibility without direct dispatch; neither
+  operation interrupts an active process.
+- Cancel is terminal for future dispatches and requires a scoped single-use SecurityManager
+  confirmation. Existing active approvals are preserved rather than consumed or deleted.
+- The background task schema is now version 3 with an additive `paused_from_status` column;
+  legacy task/run databases are not consolidated or deleted.
+- Three historical `test_jarvis_hardening.py` cases can fail during Windows temporary-directory
+  teardown because their `JarvisService` fixture is not closed. The assertions pass; the
+  failure is a SQLite file lock outside the 8D.2 control path and remains intentionally
+  unmodified in this phase.
 # Computer Use 7D.1
 
 - Internal background scheduling infrastructure is implemented and structurally
