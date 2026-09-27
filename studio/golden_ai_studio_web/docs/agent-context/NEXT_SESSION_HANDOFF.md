@@ -450,3 +450,21 @@ Date: 2026-09-26
   implemented. Do not add a second approval or notification store.
 - Preserve `device_registry.json`, runtime DBs, build/dist, Browser/UIA changes, and all
   unrelated dirty artifacts. Do not start 8D.5 or push.
+
+## Computer Use 8D.5 Handoff
+
+Date: 2026-09-26
+
+- `BackgroundControlCenter` now provides derived `get_scheduler_health()` and bounded
+  `get_scheduler_diagnostics()` views, with TaskManager/service wrappers. No health daemon,
+  watchdog, scheduler, queue, database, schema v6, or automatic repair was introduced.
+- Health reuses scheduler `status()`, task/run timestamps, `next_run_at`, existing claim lease
+  expiry semantics, 8D.3 retry/recovery eligibility, and 8D.4 pending approvals. Reads are
+  verified non-mutating and classify legitimate paused/user-idle/condition/approval waits.
+- New tests are in `tests/test_scheduler_health_diagnostics.py`. Relevant regression and
+  scheduler/security suite: `179 passed`. Full collection is `1760`; full run failed in
+  `tests/live_smoke_test.py::test_streaming` setup because fixture `question` is missing,
+  after `51.58s`. Do not report full suite as passing or fold that unrelated fix into 8D.5.
+- Schema gate: all health fields are derived; `SCHEMA_MIGRATION: NONE`, `SCHEMA_VERSION: 5`.
+  Preserve `device_registry.json`, runtime DBs, build/dist, Browser/UIA changes, and all
+  unrelated dirty artifacts. Do not start the final 8D closure gate in this session.

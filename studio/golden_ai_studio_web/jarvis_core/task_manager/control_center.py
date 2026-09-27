@@ -28,6 +28,13 @@ _TERMINAL = _COMPLETED | {
     BackgroundTaskStatus.DISABLED.value,
     BackgroundTaskStatus.FAILED.value,
 }
+_HEALTH_WAITING = {
+    BackgroundTaskStatus.WAITING_TRIGGER.value,
+    BackgroundTaskStatus.WAITING_USER_IDLE.value,
+    BackgroundTaskStatus.WAITING_CONFIRMATION.value,
+    BackgroundTaskStatus.PAUSED.value,
+}
+_CLAIMED_RUNS = {RunStatus.CLAIMED.value, RunStatus.RUNNING.value}
 
 
 class BackgroundControlCenter:
@@ -152,6 +159,212 @@ class BackgroundControlCenter:
             },
             "read_only": True,
         }
+
+    def get_scheduler_health(self, *, detail_limit=100):
+        """Return a concise, derived scheduler health snapshot."""
+        return self._scheduler_observation(detail_limit=detail_limit)["health"]
+
+    def get_scheduler_diagnostics(self, *, detail_limit=100):
+        """Return bounded scheduler evidence without changing operational state."""
+        return self._scheduler_observation(detail_limit=detail_limit)["diagnostics"]
+
+    def _scheduler_observation(self, *, detail_limit=100):
+        tasks, runs, approvals = self._state()
+        now = float(self.now_provider())
+        limit = max(1, min(int(detail_limit), 500))
+        scheduler = self.get_scheduler_status()
+        scheduler_alive = (None if self.scheduler is None else
+                           bool(scheduler.get("running")))
+        task_by_id = {task.task_id: task for task in tasks}
+        active_runs = [run for run in runs if run.get("status") in _CLAIMED_RUNS]
+        active_claims = [run for run in active_runs if run.get("claim_token")]
+        stale_claims = [run for run in active_runs if self._is_stale_claim(run, now)]
+        near_expiry = [run for run in active_claims
+                       if self._lease_near_expiry(run, now)]
+        active_task_ids = {run.get("task_id") for run in active_runs}
+        due_tasks = [task for task in tasks if self._is_due_task(task, now)]
+        overdue_tasks = [task for task in due_tasks
+                         if self._is_overdue_task(task, active_task_ids)]
+        pending = self._pending_approval_rows(tasks, approvals)
+        failed_runs = [run for run in runs
+                       if run.get("status") == RunStatus.FAILED.value]
+        failed_runs.sort(key=self._run_sort_key, reverse=True)
+        recovery_required = []
+        retry_eligible = []
+        retry_blocked = []
+        for run in (stale_claims + failed_runs):
+            if self.recovery_eligibility is not None and (
+                    run in stale_claims or run.get("mission_id")):
+                result = self._safe_eligibility(self.recovery_eligibility, run["run_id"])
+                if result.get("eligible"):
+                    recovery_required.append(self._eligibility_view(result))
+            if self.retry_eligibility is not None and run.get("status") == RunStatus.FAILED.value:
+                result = self._safe_eligibility(self.retry_eligibility, run["run_id"])
+                if result.get("eligible"):
+                    retry_eligible.append(self._eligibility_view(result))
+                else:
+                    retry_blocked.append(self._eligibility_view(result))
+        recovery_required = self._unique_by_run(recovery_required)[:limit]
+        retry_eligible = self._unique_by_run(retry_eligible)[:limit]
+        retry_blocked = self._unique_by_run(retry_blocked)[:limit]
+        recent_failures = [self._run_diagnostic_view(run) for run in failed_runs[:limit]]
+        activity_values = []
+        for task in tasks:
+            activity_values.extend([task.created_at, task.updated_at])
+        for run in runs:
+            activity_values.extend([run.get("created_at"), run.get("started_at"),
+                                    run.get("finished_at")])
+        activity_values = [float(value) for value in activity_values if value is not None]
+        last_activity = max(activity_values) if activity_values else None
+        last_dispatch = max((float(run["started_at"]) for run in runs
+                             if run.get("started_at") is not None), default=None)
+        last_completed_run = max((float(run["finished_at"]) for run in runs
+                                  if run.get("status") == RunStatus.COMPLETED.value
+                                  and run.get("finished_at") is not None), default=None)
+        reasons = []
+        if scheduler_alive is False:
+            reasons.append("SCHEDULER_NOT_RUNNING")
+        if stale_claims:
+            reasons.append("STALE_CLAIM")
+        if overdue_tasks:
+            reasons.append("OVERDUE_TASK")
+        if failed_runs:
+            reasons.append("FAILED_RUNS_PRESENT")
+        if pending:
+            reasons.append("APPROVAL_WAITING")
+        if recovery_required:
+            reasons.append("RECOVERY_REQUIRED")
+        if retry_blocked:
+            reasons.append("RETRY_BLOCKED")
+        if scheduler_alive is None:
+            status = "UNKNOWN"
+        elif stale_claims or overdue_tasks or failed_runs:
+            status = "DEGRADED"
+        elif pending or recovery_required:
+            status = "ACTION_REQUIRED"
+        else:
+            status = "HEALTHY"
+        progressing = (bool(scheduler_alive) and not stale_claims and
+                       not overdue_tasks)
+        health = {
+            "security_classification": READ_ONLY_BACKGROUND_OBSERVATION,
+            "read_only": True,
+            "status": status,
+            "scheduler_alive": scheduler_alive,
+            "scheduler_progressing": progressing,
+            "worker_id": scheduler.get("worker_id"),
+            "last_activity": last_activity,
+            "last_task_evaluation": None,
+            "last_dispatch": last_dispatch,
+            "last_completed_run": last_completed_run,
+            "due_tasks": len(due_tasks),
+            "overdue_tasks": len(overdue_tasks),
+            "active_runs": len(active_runs),
+            "possibly_stuck_runs": len(stale_claims),
+            "active_claims": len(active_claims),
+            "stale_claims": len(stale_claims),
+            "leases_near_expiration": len(near_expiry),
+            "pending_approvals": len(pending),
+            "oldest_pending_approval": self._oldest_approval(pending),
+            "recent_failures": len(recent_failures),
+            "recovery_required": len(recovery_required),
+            "retry_eligible": len(retry_eligible),
+            "retry_blocked": len(retry_blocked),
+            "action_required": bool(pending or recovery_required),
+            "reasons": reasons,
+        }
+        diagnostics = {
+            "security_classification": READ_ONLY_BACKGROUND_OBSERVATION,
+            "read_only": True,
+            "health": health,
+            "scheduler": scheduler,
+            "overdue_tasks": [self._task_diagnostic_view(task) for task in overdue_tasks[:limit]],
+            "stale_claims": [self._run_diagnostic_view(run) for run in stale_claims[:limit]],
+            "active_claims": [self._run_diagnostic_view(run) for run in active_claims[:limit]],
+            "leases_near_expiration": [self._run_diagnostic_view(run) for run in near_expiry[:limit]],
+            "pending_approvals": [self._approval_view(row) for row in pending[:limit]],
+            "recent_failures": recent_failures,
+            "recovery_required": recovery_required,
+            "retry_eligible": retry_eligible,
+            "retry_blocked": retry_blocked,
+            "waiting_tasks": [self._task_diagnostic_view(task) for task in tasks
+                              if task.status.value in _HEALTH_WAITING][:limit],
+        }
+        return {"health": health, "diagnostics": diagnostics}
+
+    @staticmethod
+    def _is_stale_claim(run, now):
+        return (run.get("status") in _CLAIMED_RUNS and
+                (run.get("claim_expires_at") is None or
+                 float(run.get("claim_expires_at")) <= float(now)))
+
+    def _lease_near_expiry(self, run, now):
+        expires = run.get("claim_expires_at")
+        lease_seconds = float(getattr(self.scheduler, "lease_seconds", 30.0))
+        return (expires is not None and float(expires) > float(now) and
+                float(expires) - float(now) <= max(1.0, lease_seconds * 0.25))
+
+    @staticmethod
+    def _is_due_task(task, now):
+        return (task.enabled and task.next_run_at is not None and
+                float(task.next_run_at) <= float(now) and
+                task.status.value not in _TERMINAL | _HEALTH_WAITING)
+
+    @staticmethod
+    def _is_overdue_task(task, active_task_ids):
+        if task.task_id in active_task_ids:
+            return False
+        return task.status.value in {
+            BackgroundTaskStatus.SCHEDULED.value,
+            BackgroundTaskStatus.READY.value,
+        }
+
+    @staticmethod
+    def _safe_eligibility(provider, run_id):
+        try:
+            result = provider(run_id)
+            return dict(result or {})
+        except Exception as exc:
+            return {"run_id": run_id, "eligible": False,
+                    "classification": "UNKNOWN", "reason": type(exc).__name__}
+
+    @staticmethod
+    def _eligibility_view(result):
+        return {key: result.get(key) for key in (
+            "run_id", "task_id", "mission_id", "status", "eligible",
+            "classification", "reason", "checkpoint_id")}
+
+    @staticmethod
+    def _unique_by_run(items):
+        unique = {}
+        for item in items:
+            unique.setdefault(item.get("run_id"), item)
+        return list(unique.values())
+
+    @staticmethod
+    def _oldest_approval(approvals):
+        if not approvals:
+            return None
+        row = min(approvals, key=lambda item: (
+            float(item.get("granted_at", 0) or 0), item.get("approval_id") or ""))
+        return {"approval_id": row.get("approval_id"),
+                "created_at": row.get("granted_at"),
+                "task_id": row.get("task_id"), "run_id": row.get("run_id")}
+
+    @staticmethod
+    def _run_diagnostic_view(run):
+        return {key: run.get(key) for key in (
+            "run_id", "task_id", "mission_id", "status", "scheduled_for",
+            "created_at", "started_at", "finished_at", "error_code",
+            "error_message", "claim_expires_at", "claimed_by",
+            "attempt_kind", "attempt", "recovery_count")}
+
+    @staticmethod
+    def _task_diagnostic_view(task):
+        return {"task_id": task.task_id, "status": task.status.value,
+                "task_type": task.task_type, "trigger_type": task.trigger_type.value,
+                "enabled": task.enabled, "next_run_at": task.next_run_at,
+                "updated_at": task.updated_at, "user_request": task.user_request}
 
     def _pending_approval_rows(self, tasks, approvals):
         task_by_id = {task.task_id: task for task in tasks}
@@ -312,6 +525,7 @@ class BackgroundControlCenter:
             "notifications": self._notification_views(),
             "notification_summary": self.get_notification_summary(),
             "action_required_count": self.get_notification_summary()["action_required"],
+            "scheduler_health": self.get_scheduler_health(),
         }
 
     def _state(self):

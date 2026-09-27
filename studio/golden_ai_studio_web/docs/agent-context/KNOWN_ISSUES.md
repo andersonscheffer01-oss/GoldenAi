@@ -99,6 +99,19 @@
   itself never dispatches a task or bypasses pause/cancel controls.
 - Full-suite execution remains incomplete because the earlier live/integration collection
   stalled; focused 8D.4 plus 8D.1-8D.3 regression coverage passed.
+
+## Computer Use 8D.5
+
+- Scheduler health has no persisted heartbeat. `last_task_evaluation` is therefore `None`;
+  `last_activity`, dispatch, and completion timestamps are derived only from existing task/run
+  timestamps. An unbound control center reports `UNKNOWN`, never a fabricated healthy state.
+- Health is diagnostic only. Stale claims and recovery eligibility are reported using the
+  existing lease/recovery semantics, but health never calls recovery, retry, claim, dispatch,
+  approval, or repair operations.
+- A controlled full-suite attempt collected `1760` tests and failed after `51.58s` at
+  `tests/live_smoke_test.py::test_streaming` during setup because fixture `question` is absent.
+  This is a pre-existing live/integration test issue; no stall, deadlock, SQLite lock, or
+  8D.5 resource leak was observed. It remains outside this phase.
 # Computer Use 7D.1
 
 - Internal background scheduling infrastructure is implemented and structurally

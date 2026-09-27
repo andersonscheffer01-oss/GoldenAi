@@ -609,6 +609,12 @@ class JarvisService:
     def background_notification_summary(self):
         return self.task_manager.background_notification_summary()
 
+    def scheduler_health(self, **kwargs):
+        return self.task_manager.scheduler_health(**kwargs)
+
+    def scheduler_diagnostics(self, **kwargs):
+        return self.task_manager.scheduler_diagnostics(**kwargs)
+
     def list_pending_background_approvals(self, **kwargs):
         return self.task_manager.list_pending_background_approvals(**kwargs)
 

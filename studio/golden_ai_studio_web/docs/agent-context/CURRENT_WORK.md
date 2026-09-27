@@ -327,6 +327,26 @@ Próximo: aguardar autorização; não iniciar M1.6.
 - No real Windows GUI action was run. Preserve `device_registry.json`, runtime databases,
   build/dist artifacts, and unrelated Browser/UIA changes. No push.
 
+# Computer Use 8D.5 - Scheduler Health and Diagnostics
+
+**Date:** 2026-09-26
+**Status:** `COMPUTER_USE_8D_PHASE: IN_PROGRESS`; structural validation in progress
+
+- Scheduler health is a read-only projection inside `BackgroundControlCenter`; the
+  existing scheduler, claim/lease fields, task/run timestamps, approvals, and 8D.3
+  retry/recovery eligibility remain the only sources of operational evidence.
+- No health daemon, watchdog, second scheduler, queue, metrics database, heartbeat
+  migration, or automatic repair was added. The schema remains v5.
+- Health distinguishes `UNKNOWN`, `HEALTHY`, `ACTION_REQUIRED`, and `DEGRADED`, with
+  explainable reasons. Paused, cancelled, user-idle, condition-waiting, and approval-waiting
+  states are not falsely reported as overdue scheduler failures.
+- `get_scheduler_health()` and bounded `get_scheduler_diagnostics()` perform no claims,
+  lease renewals, task/run creation, approval consumption, retry, recovery, dispatch, or
+  audit writes. Snapshot integration is channel-neutral.
+- Focused 8D.5 plus 8D.1-8D.4 regression coverage: `179 passed`. Full collection reached
+  `1760`; the controlled full run stopped at the pre-existing live smoke fixture error
+  (`question` missing), not a scheduler stall. No GUI, Core, process, or push action was used.
+
 # Computer Use 8D.4 - Notifications and Approval Center
 
 **Date:** 2026-09-26

@@ -475,6 +475,12 @@ class TaskManager:
     def background_notification_summary(self):
         return self.control_center.get_notification_summary()
 
+    def scheduler_health(self, **kwargs):
+        return self.control_center.get_scheduler_health(**kwargs)
+
+    def scheduler_diagnostics(self, **kwargs):
+        return self.control_center.get_scheduler_diagnostics(**kwargs)
+
     def list_pending_background_approvals(self, **kwargs):
         return self.control_center.list_pending_approvals(**kwargs)
 
