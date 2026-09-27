@@ -46,6 +46,7 @@ class HarnessObservation:
     playback_stopped_at: float | None = None
     mic_frames_before_window: int = 0
     mic_frames_during_window: int = 0
+    input_level_during_window: float = 0.0
     vad_triggered: bool = False
     vad_triggered_at: float | None = None
     endpoint_triggered: bool = False
@@ -143,6 +144,18 @@ def _install_observers(
         event = await original_feed(frame)
         now = time.monotonic()
         if (
+            observation.human_window_opened_at is not None
+            and observation.human_window_closed_at is None
+        ):
+            import numpy as np
+
+            samples = np.frombuffer(frame, dtype=np.int16)
+            if samples.size:
+                observation.input_level_during_window = max(
+                    observation.input_level_during_window,
+                    float(np.abs(samples).mean()),
+                )
+        if (
             event == VADEvent.SPEECH_STARTED
             and observation.human_window_opened_at is not None
             and observation.human_window_closed_at is None
@@ -183,6 +196,7 @@ async def run_controlled_attempt(
     output_device: int = OUTPUT_DEVICE,
     playback_seconds: float = PLAYBACK_SECONDS,
     preflight_hold_seconds: float = 0.0,
+    interactive: bool = False,
     announce: Callable[[str], None] = print,
 ) -> HarnessObservation:
     """Run one real hardware attempt; no audio or transcript leaves memory."""
@@ -198,10 +212,21 @@ async def run_controlled_attempt(
 
     try:
         announce("HUMAN_TEST_PREPARING")
+        if interactive:
+            announce("==================================================")
+            announce("TESTE DE BARGE-IN HUMANO")
+            announce("")
+            announce("Em alguns segundos o áudio começará.")
+            announce("")
+            announce('Quando aparecer: >>> FALE AGORA <<<')
+            announce('diga em voz normal: "Jarvis, pare."')
+            announce("")
+            announce("Depois aguarde.")
+            announce("==================================================")
         if preflight_hold_seconds > 0:
             await asyncio.sleep(float(preflight_hold_seconds))
         for value in (3, 2, 1):
-            announce(str(value))
+            announce(f"INICIANDO EM {value}" if interactive else str(value))
             await asyncio.sleep(1.0)
 
         await pipeline.load()
@@ -256,9 +281,17 @@ async def run_controlled_attempt(
 
         observation.playback_started_at = time.monotonic()
         announce("PLAYBACK_STARTED")
+        if interactive:
+            announce("PLAYBACK_ACTIVE: YES")
         observation.human_window_opened_at = time.monotonic()
         announce("HUMAN_SPEECH_WINDOW_OPEN")
-        announce('>>> FALE AGORA: "Jarvis, pare." <<<')
+        if interactive:
+            announce("==================================================")
+            announce(">>> FALE AGORA <<<")
+            announce('Diga: "Jarvis, pare."')
+            announce("==================================================")
+        else:
+            announce('>>> FALE AGORA: "Jarvis, pare." <<<')
 
         window_end = observation.human_window_opened_at + playback_seconds
         while time.monotonic() < window_end:
@@ -327,7 +360,11 @@ async def run_controlled_attempt(
             pass
 
 
-def report_dict(observation: HarnessObservation) -> dict[str, Any]:
+def report_dict(
+    observation: HarnessObservation,
+    *,
+    human_confirmation: bool | None = True,
+) -> dict[str, Any]:
     """Return scalar diagnostics suitable for terminal reporting only."""
     vad_to_barge_in_ms = None
     if observation.vad_triggered_at is not None and observation.barge_in_callback_at is not None:
@@ -341,7 +378,33 @@ def report_dict(observation: HarnessObservation) -> dict[str, Any]:
             (observation.playback_stopped_at - observation.barge_in_callback_at) * 1000,
             1,
         )
+    technical_valid = observation.valid_acoustic_attempt
+    if human_confirmation is None:
+        human_used: Any = "PENDING_HUMAN_CONFIRMATION"
+        valid_attempt: Any = "PENDING_HUMAN_CONFIRMATION"
+    else:
+        human_used = "YES" if human_confirmation else "NO"
+        valid_attempt = technical_valid and human_confirmation
+    window_duration = None
+    if observation.human_window_opened_at is not None and observation.human_window_closed_at is not None:
+        window_duration = round(
+            observation.human_window_closed_at - observation.human_window_opened_at,
+            3,
+        )
+    window_to_vad_ms = None
+    if observation.human_window_opened_at is not None and observation.vad_triggered_at is not None:
+        window_to_vad_ms = round(
+            (observation.vad_triggered_at - observation.human_window_opened_at) * 1000,
+            1,
+        )
     return {
+        "PLAYBACK_CONFIRMED_ACTIVE": observation.playback_started_at is not None,
+        "MIC_CONFIRMED_ACTIVE": observation.mic_frames_before_window >= 3,
+        "HUMAN_WINDOW_OPENED": observation.human_window_opened_at is not None,
+        "HUMAN_WINDOW_DURATION_SECONDS": window_duration,
+        "MIC_FRAMES_DURING_WINDOW": observation.mic_frames_during_window,
+        "INPUT_LEVEL_DURING_WINDOW": observation.input_level_during_window,
+        "REAL_HUMAN_SPEECH_USED": human_used,
         "PLAYBACK_ACTIVE_DURING_HUMAN_SPEECH": observation.valid_acoustic_attempt,
         "VAD_TRIGGERED": observation.vad_triggered,
         "ENDPOINT_TRIGGERED": observation.endpoint_triggered,
@@ -353,7 +416,8 @@ def report_dict(observation: HarnessObservation) -> dict[str, Any]:
         "USER_UTTERANCE_REMAINS_VALID": observation.user_utterance_remains_valid,
         "OLD_AUDIO_RESUMED": observation.old_audio_resumed,
         "OLD_COMPLETION_IGNORED": observation.old_completion_ignored,
-        "VALID_ACOUSTIC_ATTEMPT": observation.valid_acoustic_attempt,
+        "VALID_ACOUSTIC_ATTEMPT": valid_attempt,
+        "HUMAN_WINDOW_TO_VAD_MS": window_to_vad_ms,
         "VAD_TO_BARGE_IN_MS": vad_to_barge_in_ms,
         "BARGE_IN_TO_ABORT_MS": barge_in_to_abort_ms,
         "TOTAL_INTERRUPTION_MS": barge_in_to_abort_ms,
@@ -367,16 +431,36 @@ def main() -> int:
     parser.add_argument("--input-device", type=int, default=INPUT_DEVICE)
     parser.add_argument("--output-device", type=int, default=OUTPUT_DEVICE)
     parser.add_argument("--preflight-hold-seconds", type=float, default=0.0)
+    parser.add_argument("--interactive", action="store_true")
     args = parser.parse_args()
     observation = asyncio.run(
         run_controlled_attempt(
             input_device=args.input_device,
             output_device=args.output_device,
             preflight_hold_seconds=args.preflight_hold_seconds,
+            interactive=args.interactive,
         )
     )
-    for key, value in report_dict(observation).items():
+    for key, value in report_dict(
+        observation,
+        human_confirmation=None if args.interactive else True,
+    ).items():
         print(f"{key}: {value}")
+    if args.interactive:
+        print("==================================================")
+        print("CONFIRMAÇÃO HUMANA NECESSÁRIA")
+        print("")
+        print('Você disse "Jarvis, pare." enquanto o áudio ainda estava tocando?')
+        print("")
+        print("Responda apenas:")
+        print("")
+        print("SIM")
+        print("")
+        print("ou")
+        print("")
+        print("NÃO")
+        print("==================================================")
+        print("WAITING_FOR_HUMAN_CONFIRMATION")
     return 0 if not observation.error else 1
 
 

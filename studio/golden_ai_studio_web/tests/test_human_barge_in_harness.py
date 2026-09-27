@@ -48,3 +48,16 @@ def test_harness_report_keeps_endpoint_separate_from_speech_start():
     report = report_dict(observation)
     assert report["VAD_TRIGGERED"] is True
     assert report["ENDPOINT_TRIGGERED"] is False
+
+
+def test_interactive_report_waits_for_human_confirmation():
+    observation = HarnessObservation(
+        playback_started_at=1.0,
+        human_window_opened_at=1.1,
+        human_window_closed_at=2.0,
+        mic_frames_during_window=10,
+        playback_abort_cause="TIMEOUT",
+    )
+    report = report_dict(observation, human_confirmation=None)
+    assert report["REAL_HUMAN_SPEECH_USED"] == "PENDING_HUMAN_CONFIRMATION"
+    assert report["VALID_ACOUSTIC_ATTEMPT"] == "PENDING_HUMAN_CONFIRMATION"
