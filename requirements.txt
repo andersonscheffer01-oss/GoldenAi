@@ -68,3 +68,6 @@ edge-tts
 
 # === JARVIS DESKTOP NATIVO (PySide6/Qt, somente venv do Golden) ===
 PySide6>=6.6.0
+
+# === TESTES ===
+pytest-asyncio>=1.0.0
