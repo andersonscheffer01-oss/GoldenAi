@@ -1,0 +1,105 @@
+{
+  "benchmark": "JARVIS_STT_PTBR_BENCHMARK",
+  "date": "2026-09-27T13:13:12Z",
+  "model": {
+    "provider": "Systran",
+    "id": "Systran/faster-whisper-small",
+    "revision": "536b0662742c02347bc0e980a01041f333bce120",
+    "path": "C:\\Users\\Anderson\\.cache\\huggingface\\hub\\models--Systran--faster-whisper-small\\snapshots\\536b0662742c02347bc0e980a01041f333bce120",
+    "device": "cpu",
+    "compute_type": "int8",
+    "language": "pt",
+    "local_files_only": true
+  },
+  "environment": {
+    "python": "3.13.15",
+    "cpu": "AMD64 Family 25 Model 33 Stepping 0, AuthenticAMD",
+    "logical_threads": 12,
+    "ram_bytes": 34277343232,
+    "gpu_stt_acceleration": false,
+    "cuda": false
+  },
+  "corpus": {
+    "source": "none",
+    "license": "none",
+    "licensed_fixture_count": 0,
+    "human_speech_samples": 0,
+    "synthetic_speech_samples": 0,
+    "synthetic_performance_samples": 3,
+    "sufficient_for_quality": false
+  },
+  "quality": {
+    "reference_word_count": 0,
+    "substitutions": 0,
+    "deletions": 0,
+    "insertions": 0,
+    "aggregate_wer": null,
+    "results": []
+  },
+  "performance": {
+    "model_load_time_cold": 3.7225769999995464,
+    "warm_transcription_runs": 3,
+    "transcription_time_min": 1.3527733000000808,
+    "transcription_time_median": 9.476286699999946,
+    "transcription_time_mean": 7.170447266666694,
+    "transcription_time_max": 10.682281800000055,
+    "rtf_min": 0.3381933250000202,
+    "rtf_median": 5.341140900000028,
+    "rtf_mean": 5.051873641666664,
+    "rtf_max": 9.476286699999946,
+    "rtf_below_1": false
+  },
+  "memory": {
+    "base_process_rss": 42962944,
+    "post_model_load_rss": 527437824,
+    "peak_transcription_rss": 547631104,
+    "post_transcription_rss": 537919488,
+    "method": "psutil.Process(os.getpid()).memory_info().rss"
+  },
+  "safety": {
+    "model_downloads": false,
+    "network_stt_used": false,
+    "remote_stt_used": false,
+    "raw_audio_persisted": false,
+    "microphone_recorded": false,
+    "transcript_executes_core": false
+  },
+  "samples": [
+    {
+      "fixture_id": "synthetic-performance-1s",
+      "category": "synthetic_performance_non_speech",
+      "audio_duration": 1.0,
+      "reference": null,
+      "hypothesis": "",
+      "normalized_reference": null,
+      "normalized_hypothesis": "",
+      "transcription_time": 9.476286699999946,
+      "rtf": 9.476286699999946,
+      "quality_eligible": false
+    },
+    {
+      "fixture_id": "synthetic-performance-2s",
+      "category": "synthetic_performance_non_speech",
+      "audio_duration": 2.0,
+      "reference": null,
+      "hypothesis": "",
+      "normalized_reference": null,
+      "normalized_hypothesis": "",
+      "transcription_time": 10.682281800000055,
+      "rtf": 5.341140900000028,
+      "quality_eligible": false
+    },
+    {
+      "fixture_id": "synthetic-performance-4s",
+      "category": "synthetic_performance_non_speech",
+      "audio_duration": 4.0,
+      "reference": null,
+      "hypothesis": "",
+      "normalized_reference": null,
+      "normalized_hypothesis": "",
+      "transcription_time": 1.3527733000000808,
+      "rtf": 0.3381933250000202,
+      "quality_eligible": false
+    }
+  ]
+}
