@@ -14,6 +14,11 @@ from jarvis_core.realtime_voice.audio_queue import AudioFrameQueue
 from jarvis_core.realtime_voice.constants import FRAME_BYTES
 from jarvis_core.realtime_voice.integration import RealtimeVoicePipeline
 from jarvis_core.realtime_voice.vad import SileroVADAdapter, VADEvent, _Internal
+from jarvis_core.realtime_voice.state_machine import (
+    ConversationalState,
+    VoiceStateMachine,
+)
+from jarvis_core.realtime_voice.wake_lifecycle import WakeLifecycle
 
 
 def _frame(amplitude: int = 0) -> bytes:
@@ -98,3 +103,60 @@ def test_realtime_pipeline_reset_and_cancel_are_session_safe():
 
     asyncio.run(exercise())
 
+
+def test_wake_lifecycle_reuses_existing_state_machine():
+    machine = VoiceStateMachine(ConversationalState.IDLE)
+    lifecycle = WakeLifecycle(machine, session_id="session-a")
+
+    assert lifecycle.state_machine is machine
+    assert lifecycle.arm() is True
+    activation = lifecycle.activate("wake-1", observed_at=10.0)
+
+    assert activation is not None
+    assert activation.session_id == "session-a"
+    assert activation.sequence == 1
+    assert machine.state is ConversationalState.LISTENING
+
+
+def test_wake_duplicate_activation_is_idempotent():
+    lifecycle = WakeLifecycle(VoiceStateMachine(), session_id="session-a")
+    lifecycle.arm()
+    assert lifecycle.activate("wake-1") is not None
+    assert lifecycle.activate("wake-1") is None
+    assert lifecycle.activate("wake-2") is None
+
+
+def test_wake_stale_session_is_blocked():
+    lifecycle = WakeLifecycle(VoiceStateMachine(), session_id="session-new")
+    lifecycle.arm()
+    assert lifecycle.activate("wake-old", session_id="session-old") is None
+    assert lifecycle.active is None
+
+
+def test_wake_cancel_shutdown_and_restart():
+    machine = VoiceStateMachine()
+    lifecycle = WakeLifecycle(machine, session_id="session-a")
+    lifecycle.arm()
+    assert lifecycle.activate("wake-1") is not None
+    assert lifecycle.cancel() is True
+    assert lifecycle.armed is False
+    assert lifecycle.activate("wake-2") is None
+
+    lifecycle.arm()
+    assert lifecycle.activate("wake-2") is not None
+    lifecycle.shutdown()
+    assert machine.state is ConversationalState.STOPPED
+    assert lifecycle.armed is False
+
+
+def test_wake_reset_starts_clean_session():
+    lifecycle = WakeLifecycle(VoiceStateMachine(), session_id="session-a")
+    lifecycle.arm()
+    assert lifecycle.activate("wake-1") is not None
+    new_session = lifecycle.reset_session("session-b")
+
+    assert new_session == "session-b"
+    assert lifecycle.active is None
+    assert lifecycle.armed is False
+    lifecycle.arm()
+    assert lifecycle.activate("wake-1") is not None
