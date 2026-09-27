@@ -133,6 +133,9 @@ class VoiceService:
         self._tts_epoch = 0
         self._voice = None
         self._sapi = None
+        # Optional provider-neutral TTS/output seam.  The legacy Edge/SAPI
+        # path remains the default until a provider is explicitly configured.
+        self._tts_pipeline = None
         # P1.4C: TurnManager + barge-in + conversation context
         self._turn_manager = TurnManager()
         self._current_turn_id = 0
@@ -227,6 +230,8 @@ class VoiceService:
         return {"ok": True, "message": 'VoiceService iniciado. Diga "Jarvis" + comando.'}
 
     def stop(self) -> dict:
+        if self._tts_pipeline is not None:
+            self._tts_pipeline.cancel("runtime_shutdown")
         if self._audio_input_provider is not None:
             self._audio_input_provider.stop()
             if self._realtime_pipeline is not None:
@@ -258,6 +263,8 @@ class VoiceService:
     def cancel_current_operation(self, reason: str = "operation_cancelled") -> dict:
         """Cooperatively cancel the active turn/TTS boundary without killing a thread."""
         changed = self._operation_cancellation.cancel(reason)
+        if self._tts_pipeline is not None:
+            self._tts_pipeline.cancel(reason)
         self._barge_in_cancel.set()
         self._turn_manager.cancel_current()
         if self._realtime_pipeline is not None:
@@ -436,6 +443,44 @@ class VoiceService:
         self._realtime_pipeline = None
         self._wake_lifecycle.cancel()
         self._voice_session.state = self._state_machine.state
+
+    def configure_tts_pipeline(self, provider: Any, output: Any) -> dict[str, Any]:
+        """Install one provider-neutral TTS/output pipeline for this service.
+
+        This is an explicit injection seam for local providers and hardware-free
+        tests.  It does not create another Core, session, turn manager or
+        cancellation owner.
+        """
+        from .voice_tts import VoiceAudioPipeline
+
+        if self._tts_pipeline is not None:
+            self._tts_pipeline.release()
+        pipeline = VoiceAudioPipeline(provider, output)
+        try:
+            pipeline.warm()
+        except Exception:
+            pipeline.release()
+            raise
+        self._tts_pipeline = pipeline
+        return {
+            "ok": True,
+            "owner": "VoiceService",
+            "provider": type(provider).__name__,
+            "output": type(output).__name__,
+        }
+
+    def release_tts_pipeline(self) -> dict[str, Any]:
+        """Release the optional TTS/output adapters owned by this service."""
+        pipeline = self._tts_pipeline
+        self._tts_pipeline = None
+        if pipeline is not None:
+            pipeline.release()
+            return {"ok": True, "released": True}
+        return {"ok": True, "released": False}
+
+    def get_tts_pipeline(self) -> Any:
+        """Return the optional provider-neutral pipeline for diagnostics/tests."""
+        return self._tts_pipeline
 
     def request_utterance(self, session_id: str = "") -> dict:
         """Arm one capture while preserving wake-word checks otherwise."""
@@ -1348,6 +1393,23 @@ class VoiceService:
         self._tts_epoch += 1
         self._speaking_event.set()
         try:
+            if self._tts_pipeline is not None:
+                try:
+                    result = self._tts_pipeline.speak(
+                        text,
+                        session_id=self._voice_session.session_id,
+                        turn_id=self._current_turn_id,
+                        generation=self._tts_epoch,
+                    )
+                    if getattr(result, "accepted_chunks", 0):
+                        self._tts_first_audio_at = time.time()
+                    if getattr(result, "cancelled", False):
+                        self.state = "INTERRUPTED"
+                    return bool(getattr(result, "ok", False))
+                except Exception as exc:
+                    log.warning("Provider-neutral TTS failed: %s", exc)
+                    self.last_error = str(exc)
+                    return False
             if self.tts_mode in ("auto", "edge"):
                 if self._speak_edge(text):
                     return True
@@ -1471,6 +1533,14 @@ class VoiceService:
                 if self._audio_input_provider is not None
                 else {"running": False}
             ),
+            "tts_pipeline": {
+                "configured": self._tts_pipeline is not None,
+                "owner": "VoiceService" if self._tts_pipeline is not None else "",
+                "identity": (
+                    self._tts_pipeline.identity
+                    if self._tts_pipeline is not None else None
+                ),
+            },
             "stats": dict(self.stats),
             # P1.4C: Turn manager + barge-in status
             "turn_manager": {
