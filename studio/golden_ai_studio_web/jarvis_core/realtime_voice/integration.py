@@ -121,6 +121,10 @@ class RealtimeVoicePipeline:
         self._on_state_change = on_state_change
 
         self._queue.uncancel()
+        self._vad.reset()
+        self._hybrid.reset()
+        self._utterance.clear()
+        self._stats.clear()
         self._sm.force_idle()
 
         self._frame_task = asyncio.ensure_future(self._frame_loop())
@@ -136,6 +140,9 @@ class RealtimeVoicePipeline:
                 pass
             self._frame_task = None
         self._queue.cancel()
+        self._vad.reset()
+        self._hybrid.reset()
+        self._utterance.clear()
         self._sm.force_idle()
         log.info("[rvpipe] stopped")
 

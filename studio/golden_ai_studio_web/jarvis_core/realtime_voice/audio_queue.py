@@ -59,6 +59,8 @@ class AudioFrameQueue:
 
     def put_nowait(self, frame: bytes) -> None:
         """Put a frame into the queue. Drops oldest on overflow (backpressure)."""
+        if self._cancelled:
+            return
         if len(frame) != FRAME_BYTES:
             log.error(
                 "queue: wrong frame size %d (expected %d)",
