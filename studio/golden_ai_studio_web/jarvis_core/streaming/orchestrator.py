@@ -347,7 +347,29 @@ class StreamingOrchestrator:
                     self._metrics.chunks_emitted += 1
                     audio = await tts.synthesize_and_get(remaining.text, remaining.index, remaining.is_final)
                     if audio:
+                        # Synthesis may finish after barge-in.  The final
+                        # chunk needs the same stale/cancel gate as streamed
+                        # chunks before it can reach playback.
+                        stale_after_tts = (
+                            bool(cancel_event and cancel_event.is_set())
+                            or bool(turn_manager and turn_id and turn_manager.is_stale(turn_id))
+                        )
+                        if stale_after_tts:
+                            tts.cancel()
+                            player.stop()
+                            if audio.audio_path:
+                                import os
+                                try:
+                                    os.unlink(audio.audio_path)
+                                except OSError:
+                                    pass
+                            self._metrics.chunks_discarded_stale += 1
+                            return {"ok": False, "error": "cancelled", "metrics": self._metrics}
                         await player.play(audio, cancel_event)
+                        if cancel_event and cancel_event.is_set():
+                            tts.cancel()
+                            player.stop()
+                            return {"ok": False, "error": "cancelled", "metrics": self._metrics}
                         self._metrics.chunks_played += 1
                         if audio.audio_path:
                             import os
@@ -358,6 +380,14 @@ class StreamingOrchestrator:
 
             # Wait for playback to finish
             await player.wait_for_speech_end()
+
+            if (
+                (cancel_event and cancel_event.is_set())
+                or (turn_manager and turn_id and turn_manager.is_stale(turn_id))
+            ):
+                tts.cancel()
+                player.stop()
+                return {"ok": False, "error": "cancelled", "metrics": self._metrics}
 
             clock.mark_response_complete()
 
