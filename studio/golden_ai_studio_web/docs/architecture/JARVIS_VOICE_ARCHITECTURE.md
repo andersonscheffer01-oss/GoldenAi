@@ -1,6 +1,6 @@
 # Jarvis Voice Runtime Foundation
 
-Status: `VAD_WAKE_FOUNDATION` (real audio providers remain deferred)
+Status: `REAL_AUDIO_BOUNDARY_FOUNDATION` (acoustic wake remains deferred)
 
 This document records the first Core-aligned Voice layer after Donor Audit 1B.
 It is a capability boundary, not a second Jarvis brain.
@@ -61,10 +61,12 @@ create independent Core or security paths.
 
 ## Audio and provider boundaries
 
-`voice_foundation.py` defines only contracts. The phase adds no audio device,
-model, cloud API, native audio stack, or provider implementation. Raw audio is
-kept in memory by the existing capture path and no raw recording or Voice
-database is created by the foundation.
+`AudioInputProvider` is the single VoiceService-owned hardware boundary. It
+lazy-imports `sounddevice`, owns one `RawInputStream`, and delivers canonical
+PCM frames into the existing bounded queue. It is started only through the
+explicit `VoiceService.start_audio_input()` lifecycle; VoiceService does not
+autostart the microphone at boot. Raw audio remains in memory and no raw
+recording or Voice database is created.
 
 The eventual audio runtime must preserve one owner for the active microphone
 stream and one owner for playback. The existing realtime queue, VAD, and
@@ -75,11 +77,14 @@ The current deterministic foundation reuses:
 - `SileroVADAdapter` with explicit PCM/frame constants and reset semantics;
 - `HybridEndpoint` for optional endpoint hangover behavior;
 - `AudioFrameQueue` and `RealtimeVoicePipeline` for bounded frame ownership;
+- `AudioInputProvider` and `FakeAudioInputProvider` for one-stream ownership
+  and hardware-free lifecycle tests;
 - `WakeLifecycle` and the injected canonical state machine in `VoiceService`.
 
 `VoiceService.get_realtime_voice_pipeline()` is the owner boundary for the
-optional pipeline. Synthetic frames can validate wake-to-VAD lifecycle without
-opening a device, loading a wake model, or invoking Jarvis Core.
+optional pipeline, while `start_audio_input()` explicitly binds one provider
+to that pipeline queue. Synthetic frames validate audio-to-VAD lifecycle
+without opening a device, loading a wake model, or invoking Jarvis Core.
 
 ## Security, audit, and privacy
 
@@ -116,16 +121,17 @@ The following are deliberately not implemented by this foundation:
 
 The following remain deliberately deferred:
 
-- real microphone capture and `sounddevice` installation;
-- real wake detector/model selection or model download;
+- acoustic wake detector/model selection and model download;
+- real hardware smoke, device selection, and disconnected-device recovery;
 - streaming STT/TTS and provider work;
 - barge-in execution, even though cancellation readiness is preserved;
 - Desktop, tray, overlay, installer, and UI integration.
 
-Donor Audit 1B remains the authority for the next audio capability after this
-foundation passes focused and relevant regression tests.
+Donor Audit 1B remains the authority for the acoustic wake capability after
+this audio boundary passes focused and relevant regression tests.
 
-The pre-Batch-02 real-audio and wake-provider gate is recorded in
+The pre-Batch-02 real-audio and wake-provider gate, plus the Batch 02A result,
+is recorded in
 `JARVIS_VOICE_REAL_AUDIO_DECISION.md`. It selects adaptation of the existing
-sounddevice capture behind one VoiceService-owned provider, while leaving the
-acoustic wake provider and model-license decision pending human review.
+sounddevice capture behind one VoiceService-owned provider. The acoustic wake
+provider and model-license decision remain pending human review.

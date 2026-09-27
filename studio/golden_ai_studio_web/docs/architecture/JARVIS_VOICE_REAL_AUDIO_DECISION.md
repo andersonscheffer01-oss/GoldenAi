@@ -1,11 +1,13 @@
 # Jarvis Real Audio and Wake Provider Decision
 
-Status: `PRE-BATCH-02 GATE`  
-Runtime changes in this gate: `NONE`
+Status: `BATCH-02A IMPLEMENTED`  
+Runtime scope: audio input boundary only; acoustic wake remains deferred.
 
-This record audits the existing Golden/Jarvis voice paths and defines the
-boundary for a future real-audio batch. It does not install a package, open a
-microphone, download a model, or activate continuous listening.
+This record audits the existing Golden/Jarvis voice paths, records the Batch
+02A implementation, and defines the remaining acoustic-wake gate. Batch 02A
+declares the existing backend, adds the provider boundary, and validates it
+with fake frames. It does not download a model or activate continuous boot
+listening.
 
 ## Baseline and evidence
 
@@ -54,11 +56,11 @@ TaskDatabase, or the wake lifecycle.
 
 `SELECTED_AUDIO_PROVIDER: ADAPT_EXISTING (sounddevice backend)`
 
-This is an architectural selection, not an implementation or installation.
-The repository already uses `sounddevice` and the existing `.venv` contains
-`sounddevice 0.5.6`, while the canonical `C:\GoldenAI\requirements.txt`
-does not declare it. Batch 02 must pin and declare the dependency before
-runtime activation; this gate deliberately does not change that file.
+This is now implemented as the Batch 02A provider boundary. The repository
+already used `sounddevice`, the existing `.venv` contains `sounddevice 0.5.6`,
+and the canonical `C:\GoldenAI\requirements.txt` now declares the exact
+installed version. The provider is lazy-imported and is started only by an
+explicit VoiceService call.
 
 The target is exactly one active `InputStream` or `RawInputStream` for the
 VoiceService. The callback/read boundary performs capture, monotonic
@@ -187,21 +189,22 @@ disconnect should emit a sanitized structural audit/health event, leave Core
 alive, and require explicit retry or device selection. Automatic device-ID
 persistence and recovery are deferred.
 
-## Dependency plan
+## Batch 02A result and remaining dependency plan
 
-### REQUIRED_NOW
+### COMPLETED_IN_BATCH_02A
 
-- None. No package, model, driver, or device change is authorized by this
-  gate.
+- `sounddevice==0.5.6` declared in the canonical requirements file.
+- `AudioInputProvider` implemented with lazy import, one stream, bounded queue,
+  diagnostics, controlled device errors, and idempotent lifecycle.
+- `FakeAudioInputProvider` added for hardware-free tests.
+- VoiceService explicit start/stop/restart integration added without boot
+  autostart.
 
-### REQUIRED_BATCH_02
+### REQUIRED_NEXT
 
-- Pin and declare the already-selected `sounddevice` backend in the canonical
-  requirements file.
-- Implement the `AudioInputProvider` boundary and its fake-device tests.
-- Validate the Windows PortAudio wheel/architecture and device enumeration.
-- Keep using existing NumPy, ONNX Runtime, VAD, queue, and cancellation
-  components.
+- Optional short Windows hardware smoke, with no recording or persistence.
+- Explicit device selection and disconnected-device recovery.
+- Human approval of an acoustic wake provider, model, and license.
 
 ### OPTIONAL_LATER
 
@@ -230,36 +233,30 @@ persistence and recovery are deferred.
   the schema check and was not modified.
 - `DEVICE_REGISTRY_TOUCHED: NO`.
 
-## Batch 02 readiness
+## Batch 02A readiness
 
 `REAL_AUDIO_ARCHITECTURE_DECIDED: YES`  
 `WAKE_PROVIDER_STRATEGY_DECIDED: NO, PROVIDER/MODEL HUMAN GATE PENDING`  
-`DEPENDENCY_PLAN_COMPLETE: PARTIAL`  
+`DEPENDENCY_PLAN_COMPLETE: PASS_WITH_RESTRICTIONS`  
+`READY_FOR_ACOUSTIC_WAKE_DECISION: YES`  
 `READY_FOR_AUTONOMOUS_BATCH_02: NO`
 
-The audio architecture is ready for implementation review, but the overall
-batch is not marked ready because the wake provider and model license gate are
-still unresolved, and the single-stream boundary has not yet been implemented.
+The real-audio boundary is implemented and ready for optional hardware review.
+The overall voice batch is not marked ready for acoustic implementation
+because the wake provider, model, and license gate remain unresolved.
 
-## Proposed Autonomous Batch 02
+## Next proposal: acoustic wake gate
 
-This is a proposal only; it is not executed by this gate.
+This is a proposal only; it was not executed by Batch 02A.
 
-### Phase 1 - Real Audio Input Boundary
-
-Adapt the existing `sounddevice` calls into one `AudioInputProvider` owned by
-`VoiceService`. Add fake-device, bounded-queue, device-error, cancellation,
-shutdown, restart, and optional hardware-smoke tests. Do not touch
-`device_registry.json`.
-
-### Phase 2 - Approved Local Wake Provider
+### Phase 1 - Approved Local Wake Provider
 
 Only after human approval of provider, model, phrase, license, and dependency
 pinning. Feed the same provider frames into the existing `WakeLifecycle`; add
 stale, duplicate, threshold, false-positive fixture, and failure-isolation
 tests. No cloud audio and no automatic model download.
 
-### Phase 3 - Real Audio + Wake + VAD E2E
+### Phase 2 - Real Audio + Wake + VAD E2E
 
 Run an explicitly optional Windows hardware smoke test, then validate one
 stream, wake activation, VAD endpointing, VoiceService cancellation/shutdown,
@@ -278,4 +275,5 @@ must remain hardware-free.
 - Picovoice official Porcupine Python quick start: Windows support and
   AccessKey requirement.
 
-No donor code was copied. No runtime file was modified by this decision gate.
+No donor code was copied. Batch 02A did not modify `device_registry.json`, the
+canonical task database, or any raw-audio file.

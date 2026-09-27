@@ -247,8 +247,15 @@ class FakeAudioInputProvider(AudioInputProvider):
         *,
         frame_queue: Optional[AudioFrameQueue] = None,
         frames: Optional[list[bytes]] = None,
+        device: Any = None,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> None:
-        super().__init__(frame_queue=frame_queue, stream_factory=lambda **_: _FakeStream())
+        super().__init__(
+            frame_queue=frame_queue,
+            device=device,
+            loop=loop,
+            stream_factory=lambda **_: _FakeStream(),
+        )
         self._pending_frames = deque(frames or [])
 
     def start(self) -> dict[str, Any]:

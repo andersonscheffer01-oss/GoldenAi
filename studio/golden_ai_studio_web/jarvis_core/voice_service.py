@@ -35,6 +35,7 @@ TTS (ordem no modo auto):
     2. SAPI do Windows via pywin32 (offline) — sempre disponivel.
 """
 
+import asyncio
 import io
 import os
 import tempfile
@@ -43,6 +44,7 @@ import time
 import uuid
 import wave
 from pathlib import Path
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -54,6 +56,7 @@ from .realtime_voice.state_machine import (
     IllegalTransition,
     VoiceStateMachine,
 )
+from .realtime_voice.audio_input import AudioInputProvider
 from .realtime_voice.wake_lifecycle import WakeLifecycle
 from .streaming import is_streaming_enabled, is_barge_in_enabled
 from .streaming.turn_manager import TurnManager
@@ -107,6 +110,7 @@ class VoiceService:
             self._state_machine, session_id=self._session_id
         )
         self._realtime_pipeline = None
+        self._audio_input_provider: Optional[AudioInputProvider] = None
         self.state = "OFF"
         self.thread: threading.Thread | None = None
         self.stop_event = threading.Event()
@@ -200,6 +204,11 @@ class VoiceService:
         """Inicia a escuta local. `service` = JarvisService (obrigatorio)."""
         if self.is_running():
             return {"ok": True, "message": "VoiceService ja esta rodando."}
+        if self._audio_input_provider is not None and self._audio_input_provider.is_running:
+            return {
+                "ok": False,
+                "error": "AudioInputProvider ja esta capturando; recuse o loop legado.",
+            }
         if service is None:
             return {"ok": False, "error": "JarvisService nao fornecido."}
         self.service = service
@@ -217,6 +226,10 @@ class VoiceService:
         return {"ok": True, "message": 'VoiceService iniciado. Diga "Jarvis" + comando.'}
 
     def stop(self) -> dict:
+        if self._audio_input_provider is not None:
+            self._audio_input_provider.stop()
+            if self._realtime_pipeline is not None:
+                self._realtime_pipeline.queue.cancel()
         self._wake_lifecycle.shutdown()
         self._voice_session.cancel("runtime_shutdown")
         self._operation_cancellation.cancel("runtime_shutdown")
@@ -307,8 +320,94 @@ class VoiceService:
             )
         return self._realtime_pipeline
 
+    def get_audio_input_provider(self) -> Optional[AudioInputProvider]:
+        """Return the single provider owned by this VoiceService, if created."""
+        return self._audio_input_provider
+
+    async def start_audio_input(
+        self,
+        *,
+        device: Any = None,
+        loop: Optional[Any] = None,
+        provider_factory: Optional[Callable[..., AudioInputProvider]] = None,
+        on_transcription: Optional[Callable[[str], None]] = None,
+        on_state_change: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        """Explicitly start one provider and route frames into the VAD pipeline."""
+        if self.is_running():
+            return {
+                "ok": False,
+                "error": "VoiceService legacy loop ja esta capturando; pare-o antes do provider.",
+            }
+        pipeline = self.get_realtime_voice_pipeline()
+        active_loop = loop
+        if active_loop is None:
+            try:
+                active_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                active_loop = None
+
+        provider = self._audio_input_provider
+        if provider is not None and provider.is_running:
+            return {
+                "ok": True,
+                "started": False,
+                "already_running": True,
+                "audio_input": provider.diagnostics(),
+            }
+
+        if provider is None:
+            factory = provider_factory or AudioInputProvider
+            provider = factory(
+                frame_queue=pipeline.queue,
+                device=device,
+                loop=active_loop,
+            )
+            self._audio_input_provider = provider
+
+        frame_task = getattr(pipeline, "_frame_task", None)
+        if frame_task is None or frame_task.done():
+            await pipeline.start(
+                loop=active_loop,
+                on_transcription=on_transcription,
+                on_state_change=on_state_change,
+            )
+
+        result = provider.start()
+        if not result.get("ok"):
+            await pipeline.stop()
+            self._wake_lifecycle.cancel()
+            self._voice_session.state = self._state_machine.state
+            return {**result, "audio_input": provider.diagnostics()}
+        return {**result, "audio_input": provider.diagnostics()}
+
+    async def stop_audio_input(self) -> dict:
+        """Stop provider and pipeline cooperatively without touching Core."""
+        provider = self._audio_input_provider
+        provider_result = (
+            provider.stop()
+            if provider is not None
+            else {"ok": True, "stopped": False, "already_stopped": True}
+        )
+        pipeline = self._realtime_pipeline
+        if pipeline is not None:
+            await pipeline.stop()
+        self._wake_lifecycle.cancel()
+        self._voice_session.state = self._state_machine.state
+        return {
+            "ok": bool(provider_result.get("ok")),
+            "provider": provider_result,
+            "audio_input": provider.diagnostics() if provider is not None else {},
+        }
+
+    async def restart_audio_input(self, **kwargs: Any) -> dict:
+        """Restart the same owned provider without creating a second stream."""
+        await self.stop_audio_input()
+        return await self.start_audio_input(**kwargs)
+
     async def stop_realtime_voice_pipeline(self) -> None:
         """Stop and release the optional pipeline without touching Core."""
+        await self.stop_audio_input()
         pipeline = self._realtime_pipeline
         if pipeline is None:
             return
@@ -1324,6 +1423,11 @@ class VoiceService:
             "last_event": dict(self.last_event),
             "last_rejection": dict(self.last_rejection),
             "capture_requested": self._push_to_talk_requested.is_set(),
+            "audio_input": (
+                self._audio_input_provider.diagnostics()
+                if self._audio_input_provider is not None
+                else {"running": False}
+            ),
             "stats": dict(self.stats),
             # P1.4C: Turn manager + barge-in status
             "turn_manager": {
