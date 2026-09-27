@@ -54,6 +54,7 @@ from .realtime_voice.state_machine import (
     IllegalTransition,
     VoiceStateMachine,
 )
+from .realtime_voice.wake_lifecycle import WakeLifecycle
 from .streaming import is_streaming_enabled, is_barge_in_enabled
 from .streaming.turn_manager import TurnManager
 from .streaming.barge_in_calibration import (
@@ -102,6 +103,10 @@ class VoiceService:
                                            metadata={"owner": "VoiceService"})
         self._operation_cancellation = VoiceCancellation()
         self._session_id = self._voice_session.session_id
+        self._wake_lifecycle = WakeLifecycle(
+            self._state_machine, session_id=self._session_id
+        )
+        self._realtime_pipeline = None
         self.state = "OFF"
         self.thread: threading.Thread | None = None
         self.stop_event = threading.Event()
@@ -200,6 +205,8 @@ class VoiceService:
         self.service = service
         self._voice_session = VoiceSession(metadata={"owner": "VoiceService"})
         self._session_id = self._voice_session.session_id
+        self._wake_lifecycle.reset_session(self._session_id)
+        self._wake_lifecycle.arm()
         self._operation_cancellation = VoiceCancellation()
         self.stop_event.clear()
         self._voice = get_voice()
@@ -210,6 +217,7 @@ class VoiceService:
         return {"ok": True, "message": 'VoiceService iniciado. Diga "Jarvis" + comando.'}
 
     def stop(self) -> dict:
+        self._wake_lifecycle.shutdown()
         self._voice_session.cancel("runtime_shutdown")
         self._operation_cancellation.cancel("runtime_shutdown")
         self._turn_manager.cancel_current()
@@ -247,6 +255,67 @@ class VoiceService:
         if not self.enabled:
             return {**self.stop(), "enabled": False}
         return {"ok": True, "enabled": True}
+
+    def arm_wake(self) -> dict:
+        """Arm the existing wake lifecycle without opening audio hardware."""
+        changed = self._wake_lifecycle.arm()
+        self._voice_session.state = self._state_machine.state
+        self.state = "WAITING_WAKE"
+        return {
+            "ok": True,
+            "armed": self._wake_lifecycle.armed,
+            "changed": changed,
+            "session_id": self._wake_lifecycle.session_id,
+        }
+
+    def activate_wake(self, activation_id: str, session_id: str = "") -> dict:
+        """Accept one wake event and move the shared machine to LISTENING."""
+        activation = self._wake_lifecycle.activate(
+            activation_id, session_id=session_id or None
+        )
+        if activation is None:
+            return {"ok": False, "reason": "stale_or_duplicate_wake"}
+        self.state = "WAKE_DETECTED"
+        return {
+            "ok": True,
+            "session_id": activation.session_id,
+            "activation_id": activation.activation_id,
+            "sequence": activation.sequence,
+            "observed_at": activation.observed_at,
+        }
+
+    def complete_wake(self, activation_id: str = "") -> dict:
+        """Complete the current wake activation without invoking Core."""
+        completed = self._wake_lifecycle.complete(activation_id or None)
+        if completed and self._wake_lifecycle.armed:
+            self.state = "WAITING_WAKE"
+        return {"ok": completed, "armed": self._wake_lifecycle.armed}
+
+    def cancel_wake(self) -> dict:
+        """Disarm wake cooperatively and discard the active activation."""
+        changed = self._wake_lifecycle.cancel()
+        self._voice_session.state = self._state_machine.state
+        self.state = "OFF"
+        return {"ok": True, "changed": changed, "armed": False}
+
+    def get_realtime_voice_pipeline(self):
+        """Return the optional realtime pipeline owned by this service."""
+        if self._realtime_pipeline is None:
+            from .realtime_voice.integration import RealtimeVoicePipeline
+            self._realtime_pipeline = RealtimeVoicePipeline(
+                state_machine=self._state_machine
+            )
+        return self._realtime_pipeline
+
+    async def stop_realtime_voice_pipeline(self) -> None:
+        """Stop and release the optional pipeline without touching Core."""
+        pipeline = self._realtime_pipeline
+        if pipeline is None:
+            return
+        await pipeline.unload()
+        self._realtime_pipeline = None
+        self._wake_lifecycle.cancel()
+        self._voice_session.state = self._state_machine.state
 
     def request_utterance(self, session_id: str = "") -> dict:
         """Arm one capture while preserving wake-word checks otherwise."""
@@ -329,6 +398,8 @@ class VoiceService:
                     continue
                 self.state = ("LISTENING" if self._push_to_talk_requested.is_set()
                               else "WAITING_WAKE")
+                if not self._push_to_talk_requested.is_set() and not self._wake_lifecycle.armed:
+                    self._wake_lifecycle.arm()
                 if self._speaking_event.is_set():
                     self.stop_event.wait(.1)
                     continue
@@ -393,10 +464,18 @@ class VoiceService:
                     self._utterance_source = "PUSH_TO_TALK"
                 else:
                     action = self._voice.process_voice_command(text)
+                    wake_activation = None
+                    if action.get("wake_word"):
+                        wake_result = self.activate_wake(utterance_id)
+                        if not wake_result.get("ok"):
+                            self._reject(utterance_id, "STALE_WAKE", "wake_lifecycle")
+                            continue
+                        wake_activation = utterance_id
                     if action.get("action") == "listen_more":
                         # Wake word sozinha: acorda, mas nao gera comando.
                         self.state = "WAKE_DETECTED"
                         self.stop_event.wait(1.2)
+                        self.complete_wake(wake_activation or utterance_id)
                         continue
                     if action.get("action") == "ignore":
                         continue
@@ -434,6 +513,8 @@ class VoiceService:
                     "stt_confidence": stt.get("stt_confidence", 0),
                     "model": stt.get("model", ""), "compute_type": stt.get("compute_type", ""),
                     "beam_size": stt.get("beam_size", 0), "rejected_reason": ""})
+                if wake_activation:
+                    self.complete_wake(wake_activation)
             except Exception as exc:  # nunca derrubar o daemon
                 self.last_error = str(exc)
                 self.stats["errors"] += 1

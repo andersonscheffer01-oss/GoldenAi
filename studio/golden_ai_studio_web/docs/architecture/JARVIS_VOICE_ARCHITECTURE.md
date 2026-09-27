@@ -1,6 +1,6 @@
 # Jarvis Voice Runtime Foundation
 
-Status: `FOUNDATION` (Voice 2.0 capabilities remain deferred)
+Status: `VAD_WAKE_FOUNDATION` (real audio providers remain deferred)
 
 This document records the first Core-aligned Voice layer after Donor Audit 1B.
 It is a capability boundary, not a second Jarvis brain.
@@ -42,6 +42,11 @@ transition error and moves to a deterministic error state when possible.
 Startup, shutdown, repeated shutdown, and restart are all lifecycle operations
 on the same `VoiceService` instance. No second voice loop is created.
 
+Wake activation is represented by `WakeLifecycle`, which composes with this
+same `VoiceStateMachine`. It owns only arm/disarm/activate/complete identity;
+it is not a second state machine or a wake-word model. Duplicate activation
+IDs, stale session IDs, and activation after cancellation are rejected.
+
 ## Cancellation
 
 `VoiceCancellation` is a small cooperative event with a stable reason. A
@@ -64,6 +69,17 @@ database is created by the foundation.
 The eventual audio runtime must preserve one owner for the active microphone
 stream and one owner for playback. The existing realtime queue, VAD, and
 barge-in components remain behind the `VoiceService` boundary.
+
+The current deterministic foundation reuses:
+
+- `SileroVADAdapter` with explicit PCM/frame constants and reset semantics;
+- `HybridEndpoint` for optional endpoint hangover behavior;
+- `AudioFrameQueue` and `RealtimeVoicePipeline` for bounded frame ownership;
+- `WakeLifecycle` and the injected canonical state machine in `VoiceService`.
+
+`VoiceService.get_realtime_voice_pipeline()` is the owner boundary for the
+optional pipeline. Synthetic frames can validate wake-to-VAD lifecycle without
+opening a device, loading a wake model, or invoking Jarvis Core.
 
 ## Security, audit, and privacy
 
@@ -98,5 +114,13 @@ The following are deliberately not implemented by this foundation:
 - Desktop, tray, overlay, installer, and UI integration;
 - new scheduler, task, approval, notification, memory, or database systems.
 
-The next capability must be selected from Donor Audit 1B after this foundation
-passes focused and relevant regression tests.
+The following remain deliberately deferred:
+
+- real microphone capture and `sounddevice` installation;
+- real wake detector/model selection or model download;
+- streaming STT/TTS and provider work;
+- barge-in execution, even though cancellation readiness is preserved;
+- Desktop, tray, overlay, installer, and UI integration.
+
+Donor Audit 1B remains the authority for the next audio capability after this
+foundation passes focused and relevant regression tests.

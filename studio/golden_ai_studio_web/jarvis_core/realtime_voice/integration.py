@@ -62,8 +62,10 @@ class RealtimeVoicePipeline:
     single async pipeline that can be toggled against the current pipeline.
     """
 
-    def __init__(self) -> None:
-        self._sm = VoiceStateMachine()
+    def __init__(self, state_machine: Optional[VoiceStateMachine] = None) -> None:
+        # VoiceService may inject its canonical machine. Standalone tests keep
+        # the historical local machine for adapter-only use.
+        self._sm = state_machine or VoiceStateMachine()
         self._vad = SileroVADAdapter()
         self._queue = AudioFrameQueue(maxsize=AUDIO_QUEUE_MAXSIZE)
         self._utterance = UtteranceBuffer()
@@ -125,7 +127,8 @@ class RealtimeVoicePipeline:
         self._hybrid.reset()
         self._utterance.clear()
         self._stats.clear()
-        self._sm.force_idle()
+        if self._sm.state is not ConversationalState.LISTENING:
+            self._sm.force_idle()
 
         self._frame_task = asyncio.ensure_future(self._frame_loop())
         log.info("[rvpipe] started")
