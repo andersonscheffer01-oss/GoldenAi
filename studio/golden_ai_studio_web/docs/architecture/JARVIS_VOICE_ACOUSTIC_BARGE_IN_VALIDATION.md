@@ -98,3 +98,50 @@ RECOMMENDED_NEXT_STRATEGY: WAITING_FOR_CONTROLLED_HUMAN_BARGE_IN_TEST
 
 No production code change is justified by the current evidence. Logical
 barge-in regression remains covered by the existing deterministic suite.
+
+## Hardened diagnostic harness
+
+The controlled coordinator is now persisted at
+`jarvis_core/realtime_voice/human_barge_in_harness.py`. It is opt-in and is
+not part of normal startup or the pytest collection. It uses the existing
+`AudioInputProvider`, `RealtimeVoicePipeline`, `SileroVADAdapter`,
+`BargeInController`, `VoiceService`, and provider-neutral audio output. The
+harness only observes the existing VAD and installed VoiceService callback; it
+does not call `accept_barge_in`, inject a VAD event, inject an endpoint, force a
+cancellation, or create a second audio owner.
+
+The coordinator now verifies microphone frame delivery before opening the
+human speech window, confirms the output stream is active before printing the
+human prompt, emits explicit playback/window timestamps, distinguishes
+`BARGE_IN` from `TIMEOUT`, and keeps the bounded PCM tone and all diagnostics
+in memory. It does not persist microphone audio or transcripts.
+
+## Follow-up controlled attempts
+
+The three earlier harness attempts remain historical attempts with
+`REAL_HUMAN_SPEECH_USED: NO` and `VALID_ACOUSTIC_BARGE_IN_ATTEMPTS: 0`.
+Three follow-up coordinator runs were made after hardening:
+
+| Attempt | Playback/window coordination | VAD | Abort cause | Human speech evidence | Valid acoustic attempt |
+|---:|---|---|---|---|---|
+| 4 | Coordinator prompt was not observable in time | triggered | `BARGE_IN` | not attributable to human speech | NO |
+| 5 | Coordinator prompt was not observable in time | triggered | `BARGE_IN` | not independently confirmed | NO |
+| 6 | Prompt was coordinated after the countdown | not triggered | `TIMEOUT` | none observed | NO |
+
+Attempts 4 and 5 prove only that the canonical pipeline can reach the
+production barge-in callback under real hardware conditions; without verified
+human speech during playback they are not acoustic barge-in evidence. Attempt
+6 proves the synchronized no-speech path and clean timeout teardown. No
+production thresholds, providers, devices, security boundaries, or turn-taking
+logic were changed.
+
+```yaml
+HARNESS_ATTEMPTS_PREVIOUS: 3
+HARNESS_ATTEMPTS_FOLLOW_UP: 3
+VALID_ACOUSTIC_BARGE_IN_ATTEMPTS: 0
+REAL_HUMAN_SPEECH_USED: NO
+PRODUCTION_VOICE_LOGIC_CHANGED: NO
+```
+
+The real human gate remains pending. It must be repeated only when the human
+operator can observe the live prompt and speak during confirmed playback.
