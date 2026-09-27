@@ -57,6 +57,7 @@ from .realtime_voice.state_machine import (
     VoiceStateMachine,
 )
 from .realtime_voice.audio_input import AudioInputProvider
+from .realtime_voice.barge_in import EchoDecision, SelfTriggerPolicy
 from .realtime_voice.wake_lifecycle import WakeLifecycle
 from .streaming import is_streaming_enabled, is_barge_in_enabled
 from .streaming.turn_manager import TurnManager
@@ -133,6 +134,8 @@ class VoiceService:
         self._tts_epoch = 0
         self._voice = None
         self._sapi = None
+        self._self_trigger_policy = SelfTriggerPolicy()
+        self._last_barge_in = {}
         # Optional provider-neutral TTS/output seam.  The legacy Edge/SAPI
         # path remains the default until a provider is explicitly configured.
         self._tts_pipeline = None
@@ -221,6 +224,7 @@ class VoiceService:
         self._wake_lifecycle.reset_session(self._session_id)
         self._wake_lifecycle.arm()
         self._operation_cancellation = VoiceCancellation()
+        self._tts_epoch = 0
         self.stop_event.clear()
         self._voice = get_voice()
         self._voice.warmup_async()
@@ -272,6 +276,106 @@ class VoiceService:
         if self.state in {"TRANSCRIBING", "PROCESSING", "SPEAKING"}:
             self.state = "INTERRUPTED"
         return {"ok": True, "cancelled": changed, "reason": reason}
+
+    def accept_barge_in(
+        self,
+        *,
+        source: str = "unknown",
+        audio_level: float = 0.0,
+        prepare_followup: bool = True,
+    ) -> dict[str, Any]:
+        """Invalidate the speaking turn before cancelling its work.
+
+        ``source`` is a classification hint from the VAD boundary, not an
+        acoustic claim. Unknown input is allowed after the normal speaking
+        gate; explicit self-output is ignored by the policy.
+        """
+        try:
+            decision = self._self_trigger_policy.classify(
+                source,
+                tts_active=self.state == "SPEAKING",
+                audio_level=audio_level,
+            )
+        except Exception as exc:
+            log.warning("Self-trigger policy failed safely: %s", exc)
+            self._last_barge_in = {
+                "accepted": False,
+                "decision": EchoDecision.UNCERTAIN.value,
+                "reason": "self_trigger_policy_failed",
+            }
+            return {"ok": False, **self._last_barge_in}
+        if decision is EchoDecision.IGNORE_AS_SELF_TRIGGER:
+            self._last_barge_in = {
+                "accepted": False,
+                "decision": decision.value,
+                "source": str(source or "unknown"),
+            }
+            return {"ok": True, **self._last_barge_in}
+        if self.state != "SPEAKING":
+            self._last_barge_in = {
+                "accepted": False,
+                "decision": decision.value,
+                "reason": "not_speaking",
+            }
+            return {"ok": False, **self._last_barge_in}
+
+        # Invalidate first. Every subsequent cancellation and late callback
+        # observes a generation/turn that is already obsolete.
+        self._tts_epoch += 1
+        invalidated_generation = self._tts_epoch
+        old_operation = self._operation_cancellation
+        old_operation.cancel("barge_in")
+        self._barge_in_cancel.set()
+        self._turn_manager.cancel_current()
+        if self._tts_pipeline is not None:
+            self._tts_pipeline.cancel("barge_in")
+
+        new_turn_id = self._turn_manager.new_turn()
+        self._current_turn_id = new_turn_id
+        # A new turn gets a fresh operation token; the old token remains
+        # cancelled for any work that still holds it.
+        self._operation_cancellation = VoiceCancellation()
+
+        if self._state_machine.state is ConversationalState.SPEAKING:
+            self.state = "INTERRUPTED"
+            self.state = "LISTENING"
+        if prepare_followup:
+            self._barge_in_followup_active = True
+            self._utterance_source = "BARGE_IN"
+        self._last_barge_in = {
+            "accepted": True,
+            "decision": decision.value,
+            "source": str(source or "unknown"),
+            "invalidated_generation": invalidated_generation,
+            "new_turn_id": new_turn_id,
+            "prepare_followup": prepare_followup,
+        }
+        log.info(
+            "[BARGE-IN] accepted: generation=%d new_turn=%d decision=%s",
+            invalidated_generation,
+            new_turn_id,
+            decision.value,
+        )
+        return {"ok": True, **self._last_barge_in}
+
+    def classify_input_during_output(
+        self, *, source: str = "unknown", audio_level: float = 0.0
+    ) -> str:
+        """Classify synthetic/input evidence while preserving output awareness."""
+        try:
+            return self._self_trigger_policy.classify(
+                source,
+                tts_active=self.state == "SPEAKING",
+                audio_level=audio_level,
+            ).value
+        except Exception:
+            return EchoDecision.UNCERTAIN.value
+
+    def accept_tts_chunk(self, chunk: Any) -> bool:
+        """Apply the current VoiceService owner gate to a provider callback."""
+        if self._tts_pipeline is None:
+            return False
+        return self._tts_pipeline.accept_chunk(chunk)
 
     def set_enabled(self, value: bool) -> dict:
         self.enabled = bool(value)
@@ -326,7 +430,13 @@ class VoiceService:
         if self._realtime_pipeline is None:
             from .realtime_voice.integration import RealtimeVoicePipeline
             self._realtime_pipeline = RealtimeVoicePipeline(
-                state_machine=self._state_machine
+                state_machine=self._state_machine,
+                self_trigger_policy=self._self_trigger_policy,
+            )
+            self._realtime_pipeline.barge_in.set_barge_in_handler(
+                lambda: self.accept_barge_in(
+                    source="user_speech", prepare_followup=False
+                )
             )
         return self._realtime_pipeline
 
@@ -568,6 +678,9 @@ class VoiceService:
                     command = output["content"] or command
 
                     # Execute as follow-up (preserves conversation context)
+                    # The old response was already invalidated; this new
+                    # input turn must not inherit its cancellation marker.
+                    self._barge_in_cancel.clear()
                     self._handle(command, decision=None, output=output, timings={
                         "utterance_id": record.get("utterance_id", ""),
                         "capture_ms": 0, "stt_ms": 0, "normalize_ms": 0,
@@ -869,8 +982,14 @@ class VoiceService:
                                 # Start fresh user audio capture after detection point
                                 self._barge_in_user_audio = []
 
-                                self._barge_in_cancel.set()
-                                self._turn_manager.cancel_current()
+                                coordination = self.accept_barge_in(
+                                    source="user_speech",
+                                    audio_level=rms,
+                                    prepare_followup=True,
+                                )
+                                if not coordination.get("accepted"):
+                                    speech_count = 0
+                                    continue
                                 log.info(
                                     "[BARGE-IN] DETECTED: rms=%.0f threshold=%.0f "
                                     "persistence=%d/%d elapsed=%.1fs preroll=%d",
@@ -998,6 +1117,18 @@ class VoiceService:
             return True
         return False
 
+    def accepts_core_output(self, *, turn_id: int, generation: int) -> bool:
+        """Return whether a Core completion still belongs to the active turn."""
+        try:
+            return (
+                int(turn_id) == self._current_turn_id
+                and int(generation) == self._tts_epoch
+                and not self._turn_manager.is_stale(int(turn_id))
+                and not self._turn_manager.is_cancelled(int(turn_id))
+            )
+        except (TypeError, ValueError):
+            return False
+
     # ═══════════════════════════════════════════════════════════════
     # EXECUCAO DO COMANDO (mesmo fluxo de /api/jarvis/chat)
     # ═══════════════════════════════════════════════════════════════
@@ -1041,10 +1172,11 @@ class VoiceService:
 
             # P1.4C: Create new turn (cancels previous)
             self._current_turn_id = self._turn_manager.new_turn()
+            turn_id = self._current_turn_id
             self._barge_in_cancel.clear()
 
             # Get cancel event for this turn
-            cancel_event = self._turn_manager.get_cancel_event(self._current_turn_id)
+            cancel_event = self._turn_manager.get_cancel_event(turn_id)
 
             # Determine provider from orchestrator
             provider = "groq"
@@ -1076,12 +1208,21 @@ class VoiceService:
                 messages=messages,
                 provider=provider,
                 model=model,
-                turn_id=self._current_turn_id,
+                turn_id=turn_id,
                 turn_manager=self._turn_manager,
             ))
 
             # P1.4C: Stop barge-in monitoring
             self._stop_barge_in_monitor()
+
+            # A provider may finish after cancellation.  Do not let that old
+            # response fall through to Core/TTS after a newer turn exists.
+            if self._turn_manager.is_stale(turn_id):
+                return {
+                    "handled": True,
+                    "cancelled": True,
+                    "metrics": result.get("metrics"),
+                }
 
             # TOOL CALL SAFETY: If tool call detected, return to legacy path
             if not result.get("ok") and result.get("error") == "tool_call_detected":
@@ -1190,6 +1331,19 @@ class VoiceService:
         base_timings = {"capture_ms": 0, "stt_ms": 0}
         base_timings.update(dict(timings or {}))
         timings = base_timings
+        if "turn_id" in timings and "generation" in timings:
+            if not self.accepts_core_output(
+                turn_id=timings["turn_id"], generation=timings["generation"]
+            ):
+                self.last_rejection = {
+                    "classification": "STALE_OUTPUT",
+                    "rejected_reason": "obsolete_turn_generation",
+                    "turn_id": timings["turn_id"],
+                    "generation": timings["generation"],
+                    "at": time.time(),
+                }
+                self.stats["stale_outputs"] = self.stats.get("stale_outputs", 0) + 1
+                return
         try:
             from .readiness import get_readiness
             warming = get_readiness().is_warming()
@@ -1386,11 +1540,15 @@ class VoiceService:
     def _speak(self, text: str) -> bool:
         if not text:
             return False
+        operation_cancellation = self._operation_cancellation
         if (self._voice_session.cancellation.is_cancelled
-                or self._operation_cancellation.is_cancelled):
+                or operation_cancellation.is_cancelled):
             self.state = "INTERRUPTED"
             return False
         self._tts_epoch += 1
+        # A new valid response owns a fresh operation token; the old
+        # barge-in marker must not poison later turns.
+        self._barge_in_cancel.clear()
         self._speaking_event.set()
         try:
             if self._tts_pipeline is not None:
@@ -1420,7 +1578,7 @@ class VoiceService:
             self._ignore_input_until = time.time() + max(.2, float(
                 os.getenv("JARVIS_TTS_INPUT_GUARD_SECONDS", ".6")))
             self._speaking_event.clear()
-            if self._barge_in_cancel.is_set() or self._operation_cancellation.is_cancelled:
+            if self._barge_in_cancel.is_set() or operation_cancellation.is_cancelled:
                 self.state = "INTERRUPTED"
 
     def _speak_edge(self, text: str) -> bool:
@@ -1541,6 +1699,7 @@ class VoiceService:
                     if self._tts_pipeline is not None else None
                 ),
             },
+            "barge_in": dict(self._last_barge_in),
             "stats": dict(self.stats),
             # P1.4C: Turn manager + barge-in status
             "turn_manager": {

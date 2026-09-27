@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional
 
 from jarvis_core.realtime_voice.audio_queue import AudioFrameQueue, UtteranceBuffer
 from jarvis_core.realtime_voice.barge_in import BargeInController
+from jarvis_core.realtime_voice.barge_in import SelfTriggerPolicy
 from jarvis_core.realtime_voice.constants import (
     AUDIO_QUEUE_MAXSIZE,
     FRAME_BYTES,
@@ -70,14 +71,20 @@ class RealtimeVoicePipeline:
     single async pipeline that can be toggled against the current pipeline.
     """
 
-    def __init__(self, state_machine: Optional[VoiceStateMachine] = None) -> None:
+    def __init__(
+        self,
+        state_machine: Optional[VoiceStateMachine] = None,
+        self_trigger_policy: Optional[SelfTriggerPolicy] = None,
+    ) -> None:
         # VoiceService may inject its canonical machine. Standalone tests keep
         # the historical local machine for adapter-only use.
         self._sm = state_machine or VoiceStateMachine()
         self._vad = SileroVADAdapter()
         self._queue = AudioFrameQueue(maxsize=AUDIO_QUEUE_MAXSIZE)
         self._utterance = UtteranceBuffer()
-        self._barge_in = BargeInController(self._sm)
+        self._barge_in = BargeInController(
+            self._sm, self_trigger_policy=self_trigger_policy
+        )
         self._hybrid = HybridEndpoint(
             hangover_ms=HYBRID_HANGOVER_MS_DEFAULT,
             rms_threshold=HYBRID_RMS_THRESHOLD_DEFAULT,
@@ -194,6 +201,17 @@ class RealtimeVoicePipeline:
             except Exception:
                 log.exception("on_state_change raised")
 
+    async def _feed_vad_safely(self, frame: bytes) -> Optional[VADEvent]:
+        """Keep one bad VAD frame/model call from killing the voice loop."""
+        try:
+            return await self._vad.feed(frame)
+        except Exception as exc:
+            self._stats["vad_errors"] = int(self._stats.get("vad_errors", 0)) + 1
+            self._stats["last_vad_error"] = str(exc)[:240]
+            log.warning("VAD failed safely: %s", exc)
+            self._vad.reset()
+            return None
+
     async def _frame_loop(self) -> None:
         """Central routing loop: reads frames, routes to VAD/utterance buffer."""
         blackout_frames = POST_WAKE_BLACKOUT_MS // 30  # approx
@@ -239,7 +257,7 @@ class RealtimeVoicePipeline:
                         continue
 
                 # Feed VAD
-                event = await self._vad.feed(frame)
+                event = await self._feed_vad_safely(frame)
 
                 if event == VADEvent.SPEECH_STARTED:
                     self._utterance.start()
@@ -290,22 +308,24 @@ class RealtimeVoicePipeline:
 
             # THINKING: keep VAD warm but don't act
             elif state == ConversationalState.THINKING:
-                await self._vad.feed(frame)
+                await self._feed_vad_safely(frame)
 
             # SPEAKING: check for barge-in
             elif state == ConversationalState.SPEAKING:
-                event = await self._vad.feed(frame)
+                event = await self._feed_vad_safely(frame)
                 if event == VADEvent.SPEECH_STARTED:
-                    if self._barge_in.check_barge_in():
+                    if self._barge_in.trigger_barge_in():
                         log.info("barge-in detected")
                         self._vad.reset()
                         self._utterance.clear()
                         self._hybrid.reset()
-                        self._sm.transition(ConversationalState.INTERRUPTED)
-                        self._emit_state(ConversationalState.INTERRUPTED)
-                        # Transition to LISTENING
-                        self._sm.transition(ConversationalState.LISTENING)
-                        self._emit_state(ConversationalState.LISTENING)
+                        # VoiceService owns cancellation and state transitions
+                        # when this pipeline is attached to the real service.
+                        if not self._barge_in.handler_installed:
+                            self._sm.transition(ConversationalState.INTERRUPTED)
+                            self._emit_state(ConversationalState.INTERRUPTED)
+                            self._sm.transition(ConversationalState.LISTENING)
+                            self._emit_state(ConversationalState.LISTENING)
                         listening_start = time.monotonic()
                         continue
 

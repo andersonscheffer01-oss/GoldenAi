@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from enum import Enum
 from typing import Callable, Optional
 
 from jarvis_core.realtime_voice.constants import BARGE_IN_GRACE_SECONDS
@@ -23,6 +24,39 @@ from jarvis_core.realtime_voice.state_machine import (
 )
 
 log = logging.getLogger(__name__)
+
+
+class EchoDecision(str, Enum):
+    """Input classification used by the output-aware VAD boundary."""
+
+    ALLOW_BARGE_IN = "allow_barge_in"
+    IGNORE_AS_SELF_TRIGGER = "ignore_as_self_trigger"
+    UNCERTAIN = "uncertain"
+
+
+class SelfTriggerPolicy:
+    """Deterministic self-trigger policy; this is not acoustic echo cancellation."""
+
+    def __init__(self, *, self_output_threshold: float = 500.0) -> None:
+        self.self_output_threshold = float(self_output_threshold)
+
+    def classify(
+        self,
+        source: str = "unknown",
+        *,
+        tts_active: bool = False,
+        audio_level: float = 0.0,
+    ) -> EchoDecision:
+        normalized = str(source or "unknown").strip().lower()
+        if normalized in {"user", "user_speech", "human", "speech"}:
+            return EchoDecision.ALLOW_BARGE_IN
+        if normalized in {"self", "self_output", "tts", "echo"}:
+            return EchoDecision.IGNORE_AS_SELF_TRIGGER
+        # Preserve the existing energy heuristic as a guard only. It does not
+        # identify a speaker and must not suppress all speech during playback.
+        if tts_active and float(audio_level) > self.self_output_threshold:
+            return EchoDecision.IGNORE_AS_SELF_TRIGGER
+        return EchoDecision.UNCERTAIN
 
 
 class BargeInController:
@@ -41,10 +75,12 @@ class BargeInController:
         *,
         grace_seconds: float = BARGE_IN_GRACE_SECONDS,
         self_audio_protection: bool = True,
+        self_trigger_policy: Optional[SelfTriggerPolicy] = None,
     ) -> None:
         self._sm = state_machine
         self._grace_seconds = grace_seconds
         self._self_audio_protection = self_audio_protection
+        self._self_trigger_policy = self_trigger_policy or SelfTriggerPolicy()
         self._tts_started_at: Optional[float] = None
         self._tts_active = False
         self._on_barge_in: Optional[Callable[[], None]] = None
@@ -61,6 +97,14 @@ class BargeInController:
 
     def set_barge_in_handler(self, handler: Callable[[], None]) -> None:
         self._on_barge_in = handler
+
+    @property
+    def handler_installed(self) -> bool:
+        return self._on_barge_in is not None
+
+    @property
+    def self_trigger_policy(self) -> SelfTriggerPolicy:
+        return self._self_trigger_policy
 
     def tts_started(self) -> None:
         """Mark TTS playback as started."""
@@ -101,6 +145,14 @@ class BargeInController:
         self._tts_started_at = None
         return True
 
+    def trigger_barge_in(self) -> bool:
+        """Validate and notify the owner without creating another authority."""
+        if not self.check_barge_in():
+            return False
+        if self._on_barge_in is not None:
+            self._on_barge_in()
+        return True
+
     def is_self_audio(self, audio_level: float, threshold: float = 500) -> bool:
         """Heuristic: detect if audio is likely TTS playback leaking into mic.
 
@@ -109,10 +161,12 @@ class BargeInController:
         """
         if not self._self_audio_protection:
             return False
-        # During active TTS, high energy is expected from speaker output
-        if self._tts_active and audio_level > threshold:
-            return True
-        return False
+        policy = self._self_trigger_policy
+        if threshold != 500:
+            policy = SelfTriggerPolicy(self_output_threshold=threshold)
+        return policy.classify(
+            "unknown", tts_active=self._tts_active, audio_level=audio_level
+        ) is EchoDecision.IGNORE_AS_SELF_TRIGGER
 
     def reset(self) -> None:
         """Reset barge-in state (e.g., on new listen cycle)."""
