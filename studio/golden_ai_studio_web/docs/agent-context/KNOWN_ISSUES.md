@@ -112,6 +112,17 @@
   `tests/live_smoke_test.py::test_streaming` during setup because fixture `question` is absent.
   This is a pre-existing live/integration test issue; no stall, deadlock, SQLite lock, or
   8D.5 resource leak was observed. It remains outside this phase.
+
+## Computer Use 8D Closure
+
+- `COMPUTER_USE_8D` is closed after the temporary-DB E2E/closure gate passed. The gate does
+  not claim the unrelated full suite is green: the latest collection is `1763`, while the
+  controlled run fails at live smoke setup because fixture `question` is missing.
+- No automatic dismissal state was added. `DISMISS_PERSISTENCE: DEFERRED` remains an explicit
+  product decision and does not affect approval, task, run, scheduler, or audit correctness.
+- Existing general service lifecycle code contains pre-existing process-control paths used by
+  restart/shutdown. The 8D task controls remain cooperative and introduced no unsafe process
+  kill path.
 # Computer Use 7D.1
 
 - Internal background scheduling infrastructure is implemented and structurally

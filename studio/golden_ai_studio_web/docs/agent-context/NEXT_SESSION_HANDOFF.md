@@ -467,4 +467,22 @@ Date: 2026-09-26
   after `51.58s`. Do not report full suite as passing or fold that unrelated fix into 8D.5.
 - Schema gate: all health fields are derived; `SCHEMA_MIGRATION: NONE`, `SCHEMA_VERSION: 5`.
   Preserve `device_registry.json`, runtime DBs, build/dist, Browser/UIA changes, and all
-  unrelated dirty artifacts. Do not start the final 8D closure gate in this session.
+  unrelated dirty artifacts. The final 8D closure gate is recorded below.
+
+## Computer Use 8D Closure Handoff
+
+Date: 2026-09-26
+
+- `COMPUTER_USE_8D: CLOSED` and `COMPUTER_USE_8D_CLOSURE_GATE: PASS` are supported by
+  `tests/test_computer_use_8d_closure.py` plus the relevant 8D regression suite (`182 passed`).
+- Closure evidence includes v2→v5 migration preservation/idempotence, v5 restart, the full
+  controlled background lifecycle, approval observation and single-use decision, safe retry
+  provenance, post-completion health, cancel safety, no duplicate side effect, concurrency
+  regressions, and audit-trail assertions. Tests use temporary databases only.
+- Full collection is `1763`. Full execution remains `NOT_COMPLETED` because the pre-existing
+  live smoke test fails during setup with missing fixture `question`; do not report full-suite
+  PASS or repair that unrelated test in the next phase.
+- `device_registry.json`, runtime DBs, build/dist, Browser/UIA changes, and unrelated dirty
+  artifacts remain outside the closure commit. `DISMISS_PERSISTENCE` is deferred.
+- Next step after this closure is the separately requested donor audit 1B; do not begin it
+  automatically in this session.

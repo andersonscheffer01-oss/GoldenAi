@@ -347,6 +347,27 @@ Próximo: aguardar autorização; não iniciar M1.6.
   `1760`; the controlled full run stopped at the pre-existing live smoke fixture error
   (`question` missing), not a scheduler stall. No GUI, Core, process, or push action was used.
 
+# Computer Use 8D - Final E2E / Closure Gate
+
+**Date:** 2026-09-26
+**Status:** `COMPUTER_USE_8D_PHASE: CLOSED`; `COMPUTER_USE_8D_CLOSURE_GATE: PASS`
+
+- The closure gate verified one Jarvis Core, one service-wired SecurityManager, one task
+  system/database, one scheduler, one Control Center, and the existing AuditLog path.
+  No parallel health, notification, approval, retry, recovery, or scheduler engine exists.
+- A temporary v2 database migrated to v5 with legacy task/run/approval data preserved and
+  restart idempotence verified. No schema v6 or canonical runtime database mutation was used.
+- The integrated temporary-DB scenario covered schedule, observe, pause, resume, dispatch,
+  controlled failure, retry eligibility, safe retry, approval observation/decision/consume,
+  completion, post-completion health, restart durability, and audit evidence. A separate
+  cancel scenario blocked old approval/retry without execution or reactivation.
+- Closure tests plus relevant scheduler/security/task/approval/recovery regressions passed:
+  `182 passed`. Full collection is `1763`; full execution remains blocked by the known
+  pre-existing `tests/live_smoke_test.py::test_streaming` fixture error (`question` missing),
+  reproducible before closure and unrelated to Computer Use 8D.
+- `DISMISS_PERSISTENCE` remains deferred by design. No real GUI/Core operation, process kill,
+  `device_registry.json` change, runtime DB change, or push was performed.
+
 # Computer Use 8D.4 - Notifications and Approval Center
 
 **Date:** 2026-09-26
