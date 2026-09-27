@@ -44,6 +44,8 @@ class AudioFrameQueue:
         self._queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue(maxsize=maxsize)
         self._cancelled = False
         self._maxsize = maxsize
+        self._overflow_count = 0
+        self._dropped_oldest = 0
 
     @property
     def maxsize(self) -> int:
@@ -56,6 +58,14 @@ class AudioFrameQueue:
     @property
     def empty(self) -> bool:
         return self._queue.empty()
+
+    @property
+    def diagnostics(self) -> dict[str, int]:
+        """Return bounded-queue counters without exposing audio frames."""
+        return {
+            "overflow_count": self._overflow_count,
+            "dropped_oldest": self._dropped_oldest,
+        }
 
     def put_nowait(self, frame: bytes) -> None:
         """Put a frame into the queue. Drops oldest on overflow (backpressure)."""
@@ -70,8 +80,10 @@ class AudioFrameQueue:
         try:
             self._queue.put_nowait(frame)
         except asyncio.QueueFull:
+            self._overflow_count += 1
             try:
                 self._queue.get_nowait()  # drop oldest
+                self._dropped_oldest += 1
                 self._queue.put_nowait(frame)
                 log.warning("queue full; dropped oldest frame")
             except asyncio.QueueEmpty:
