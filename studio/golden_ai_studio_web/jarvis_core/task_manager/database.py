@@ -13,7 +13,7 @@ from .models import StepRecord, StepStatus, TaskPlan, TaskRecord, TaskStatus
 
 
 class TaskDatabase:
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def __init__(self, path):
         self.path = Path(path)
@@ -116,6 +116,9 @@ class TaskDatabase:
                         single_use INTEGER NOT NULL,
                         consumed_at REAL,
                         status TEXT NOT NULL,
+                        decision TEXT NOT NULL DEFAULT 'PENDING',
+                        decided_at REAL,
+                        decided_by TEXT,
                         FOREIGN KEY(task_id) REFERENCES background_tasks(task_id),
                         FOREIGN KEY(run_id) REFERENCES task_runs(run_id)
                     );
@@ -143,6 +146,15 @@ class TaskDatabase:
                 if "recovery_count" not in columns:
                     db.execute("ALTER TABLE task_runs ADD COLUMN recovery_count INTEGER NOT NULL DEFAULT 0")
                 db.execute("CREATE INDEX IF NOT EXISTS idx_runs_source ON task_runs(source_run_id)")
+            if current < 5:
+                columns = {item[1] for item in db.execute(
+                    "PRAGMA table_info(task_approvals)").fetchall()}
+                if "decision" not in columns:
+                    db.execute("ALTER TABLE task_approvals ADD COLUMN decision TEXT NOT NULL DEFAULT 'PENDING'")
+                if "decided_at" not in columns:
+                    db.execute("ALTER TABLE task_approvals ADD COLUMN decided_at REAL")
+                if "decided_by" not in columns:
+                    db.execute("ALTER TABLE task_approvals ADD COLUMN decided_by TEXT")
             db.execute("DELETE FROM task_schema_version")
             db.execute("INSERT INTO task_schema_version(version) VALUES(?)", (self.SCHEMA_VERSION,))
 
@@ -566,10 +578,17 @@ class TaskDatabase:
         with self._lock, self.connect() as db:
             db.execute("""INSERT INTO task_approvals(
                 approval_id,task_id,run_id,mission_id,scope,target,granted_at,
-                expires_at,single_use,status) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                expires_at,single_use,status,decision) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (approval_id, task_id, run_id, mission_id, scope, target,
-                 float(granted_at), float(expires_at), int(bool(single_use)), "ACTIVE"))
+                 float(granted_at), float(expires_at), int(bool(single_use)),
+                 "ACTIVE", "PENDING"))
         return approval_id
+
+    def get_task_approval(self, approval_id):
+        with self.connect(rows=True) as db:
+            row = db.execute("SELECT * FROM task_approvals WHERE approval_id=?",
+                             (str(approval_id),)).fetchone()
+        return dict(row) if row else None
 
     def list_task_approvals(self, task_id=None, run_id=None, status=None, limit=1000):
         """Return approvals without consuming or otherwise changing them."""
@@ -600,6 +619,8 @@ class TaskDatabase:
                 return False
             if row["status"] != "ACTIVE" or float(row["expires_at"]) < float(now):
                 return False
+            if row["decision"] in {"DENIED", "STALE"}:
+                return False
             if row["scope"] != scope or row["target"] != target:
                 return False
             if row["single_use"] and row["consumed_at"] is not None:
@@ -608,6 +629,51 @@ class TaskDatabase:
                 db.execute("UPDATE task_approvals SET consumed_at=?,status='CONSUMED' WHERE approval_id=?",
                            (float(now), approval_id))
             return True
+
+    def decide_task_approval(self, approval_id, decision, actor, now):
+        """Atomically record one approval decision on the canonical approval row."""
+        decision = str(decision).upper()
+        if decision not in {"APPROVED", "DENIED"}:
+            return {"success": False, "code": "UNKNOWN_APPROVAL_DECISION"}
+        with self._lock, self.connect(rows=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM task_approvals WHERE approval_id=?",
+                             (str(approval_id),)).fetchone()
+            if not row:
+                return {"success": False, "code": "APPROVAL_NOT_FOUND"}
+            if row["status"] != "ACTIVE":
+                return {"success": False, "code": "APPROVAL_NOT_ACTIVE",
+                        "approval": dict(row)}
+            if row["decision"] != "PENDING":
+                return {"success": False, "code": "APPROVAL_ALREADY_DECIDED",
+                        "approval": dict(row)}
+            task = db.execute("SELECT status FROM background_tasks WHERE task_id=?",
+                              (row["task_id"],)).fetchone()
+            stale_reason = None
+            if task is None:
+                stale_reason = "TASK_NOT_FOUND"
+            elif task["status"] in {"CANCELLED", "COMPLETED", "EXPIRED", "DISABLED", "FAILED"}:
+                stale_reason = f"TASK_{task['status']}"
+            elif float(row["expires_at"]) < float(now):
+                stale_reason = "APPROVAL_EXPIRED"
+            if stale_reason:
+                db.execute("""UPDATE task_approvals
+                    SET decision='STALE',decided_at=?,decided_by=?
+                    WHERE approval_id=? AND status='ACTIVE' AND decision='PENDING'""",
+                           (float(now), str(actor), str(approval_id)))
+                refreshed = db.execute("SELECT * FROM task_approvals WHERE approval_id=?",
+                                       (str(approval_id),)).fetchone()
+                return {"success": False, "code": "STALE_APPROVAL",
+                        "reason": stale_reason, "approval": dict(refreshed)}
+            db.execute("""UPDATE task_approvals
+                SET decision=?,decided_at=?,decided_by=?
+                WHERE approval_id=? AND status='ACTIVE' AND decision='PENDING'""",
+                       (decision, float(now), str(actor), str(approval_id)))
+            refreshed = db.execute("SELECT * FROM task_approvals WHERE approval_id=?",
+                                   (str(approval_id),)).fetchone()
+            return {"success": True,
+                    "code": "APPROVAL_APPROVED" if decision == "APPROVED" else "APPROVAL_DENIED",
+                    "approval": dict(refreshed)}
 
     def _update(self, table, key, identity, values):
         with self._lock, self.connect() as db:

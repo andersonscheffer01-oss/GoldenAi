@@ -51,7 +51,7 @@ class TaskManagerCase(unittest.TestCase):
         self.assertEqual("task_created", restored.events(task_id)[0]["event"])
         db = sqlite3.connect(restored.path)
         try:
-            self.assertEqual(4, db.execute("SELECT version FROM task_schema_version").fetchone()[0])
+            self.assertEqual(5, db.execute("SELECT version FROM task_schema_version").fetchone()[0])
         finally:
             db.close()
 

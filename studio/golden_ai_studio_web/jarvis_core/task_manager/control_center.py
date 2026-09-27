@@ -99,13 +99,147 @@ class BackgroundControlCenter:
 
     def list_pending_approvals(self, *, task_id=None, run_id=None, limit=100,
                                offset=0):
-        now = float(self.now_provider())
-        approvals = self.database.list_task_approvals(
-            task_id=task_id, run_id=run_id, status="ACTIVE", limit=5000)
-        views = [self._approval_view(row) for row in approvals
-                 if float(row.get("expires_at", 0) or 0) >= now]
+        tasks, _, approvals = self._state()
+        views = [self._approval_view(row) for row in
+                 self._pending_approval_rows(tasks, approvals)
+                 if (task_id is None or row.get("task_id") == str(task_id))
+                 and (run_id is None or row.get("run_id") == str(run_id))]
         start = max(0, int(offset))
         return views[start:start + max(1, min(int(limit), 1000))]
+
+    def get_pending_approval(self, approval_id):
+        row = self.database.get_task_approval(str(approval_id))
+        if row is None:
+            return None
+        task = self.database.get_background_task(row.get("task_id"))
+        stale_reason = self._approval_stale_reason(
+            row, task, float(self.now_provider()))
+        view = self._approval_view(row)
+        view["pending"] = stale_reason is None and row.get("status") == "ACTIVE" \
+            and row.get("decision", "PENDING") == "PENDING"
+        view["stale_reason"] = stale_reason
+        return view
+
+    def list_notifications(self, *, limit=100, offset=0, notification_type=None,
+                           severity=None, actionability=None):
+        notifications = self._notification_views()
+        if notification_type is not None:
+            notifications = [item for item in notifications
+                             if item["type"] == str(notification_type)]
+        if severity is not None:
+            notifications = [item for item in notifications
+                             if item["severity"] == str(severity)]
+        if actionability is not None:
+            notifications = [item for item in notifications
+                             if item["actionability"] == str(actionability)]
+        start = max(0, int(offset))
+        return notifications[start:start + max(1, min(int(limit), 1000))]
+
+    def get_notification(self, notification_id):
+        return next((item for item in self._notification_views()
+                     if item["notification_id"] == str(notification_id)), None)
+
+    def get_notification_summary(self):
+        notifications = self._notification_views()
+        return {
+            "total": len(notifications),
+            "action_required": sum(item["actionability"] in {
+                "APPROVAL_REQUIRED", "RECOVERY_DECISION_REQUIRED"
+            } for item in notifications),
+            "by_severity": {
+                severity: sum(item["severity"] == severity for item in notifications)
+                for severity in ("INFO", "WARNING", "ACTION_REQUIRED", "ERROR")
+            },
+            "read_only": True,
+        }
+
+    def _pending_approval_rows(self, tasks, approvals):
+        task_by_id = {task.task_id: task for task in tasks}
+        now = float(self.now_provider())
+        return [row for row in approvals
+                if row.get("status") == "ACTIVE"
+                and row.get("decision", "PENDING") == "PENDING"
+                and self._approval_stale_reason(
+                    row, task_by_id.get(row.get("task_id")), now) is None]
+
+    @staticmethod
+    def _approval_stale_reason(row, task, now):
+        if float(row.get("expires_at", 0) or 0) < float(now):
+            return "APPROVAL_EXPIRED"
+        if task is None:
+            return "TASK_NOT_FOUND"
+        if task.status.value in _TERMINAL:
+            return f"TASK_{task.status.value}"
+        if row.get("decision", "PENDING") in {"DENIED", "STALE"}:
+            return f"APPROVAL_{row.get('decision')}"
+        if row.get("status") != "ACTIVE":
+            return f"APPROVAL_{row.get('status')}"
+        return None
+
+    def _notification_views(self):
+        tasks, runs, approvals = self._state()
+        task_by_id = {task.task_id: task for task in tasks}
+        notifications = []
+        for row in self._pending_approval_rows(tasks, approvals):
+            notifications.append({
+                "notification_id": f"approval-required:{row['approval_id']}",
+                "type": "APPROVAL_REQUIRED", "severity": "ACTION_REQUIRED",
+                "title": "Ação aguardando aprovação",
+                "message": f"A aprovação {row['approval_id']} está aguardando decisão.",
+                "created_at": float(row.get("granted_at", 0) or 0),
+                "task_id": row.get("task_id"), "run_id": row.get("run_id"),
+                "mission_id": row.get("mission_id"),
+                "approval_id": row.get("approval_id"), "status": "NEW",
+                "source": "background_control_center",
+                "actionability": "APPROVAL_REQUIRED",
+            })
+        failed_runs = {}
+        for run in runs:
+            if run.get("status") != RunStatus.FAILED.value:
+                continue
+            if run.get("task_id") not in task_by_id:
+                continue
+            current = failed_runs.get(run.get("task_id"))
+            if current is None or self._run_sort_key(run) > self._run_sort_key(current):
+                failed_runs[run.get("task_id")] = run
+        for run in failed_runs.values():
+            notifications.append({
+                "notification_id": f"task-failed:{run['run_id']}",
+                "type": "TASK_FAILED", "severity": "ERROR",
+                "title": "Tarefa em background falhou",
+                "message": run.get("error_message") or run.get("error_code") or "Falha sem detalhes.",
+                "created_at": float(run.get("finished_at") or run.get("created_at") or 0),
+                "task_id": run.get("task_id"), "run_id": run.get("run_id"),
+                "mission_id": run.get("mission_id"), "approval_id": None,
+                "status": "NEW", "source": "background_control_center",
+                "actionability": "RECOVERY_DECISION_REQUIRED",
+            })
+        for task in tasks:
+            if task.status.value == BackgroundTaskStatus.PAUSED.value:
+                notifications.append(self._task_notification(
+                    task, "TASK_PAUSED", "WARNING", "Tarefa pausada",
+                    "CONTROL_AVAILABLE"))
+            elif task.status.value == BackgroundTaskStatus.CANCELLED.value:
+                notifications.append(self._task_notification(
+                    task, "TASK_CANCELLED", "INFO", "Tarefa cancelada",
+                    "INFORMATION_ONLY"))
+            elif task.status.value in _COMPLETED:
+                notifications.append(self._task_notification(
+                    task, "TASK_COMPLETED", "INFO", "Tarefa concluída",
+                    "INFORMATION_ONLY"))
+        notifications.sort(key=lambda item: (item["created_at"], item["notification_id"]))
+        return notifications
+
+    @staticmethod
+    def _task_notification(task, notification_type, severity, title, actionability):
+        return {
+            "notification_id": f"{notification_type.lower()}:{task.task_id}",
+            "type": notification_type, "severity": severity, "title": title,
+            "message": task.user_request, "created_at": float(task.updated_at),
+            "task_id": task.task_id, "run_id": None, "mission_id": None,
+            "approval_id": None, "status": "NEW",
+            "source": "background_control_center", "actionability": actionability,
+        }
 
     def control_task(self, action, task_id):
         """Delegate one already-authorized control to the canonical scheduler."""
@@ -139,10 +273,7 @@ class BackgroundControlCenter:
     def get_summary(self):
         tasks, runs, approvals = self._state()
         statuses = [task.status.value for task in tasks]
-        now = float(self.now_provider())
-        pending = [row for row in approvals
-                   if row.get("status") == "ACTIVE"
-                   and float(row.get("expires_at", 0) or 0) >= now]
+        pending = self._pending_approval_rows(tasks, approvals)
         return {
             "total_tasks": len(tasks),
             "enabled_tasks": sum(bool(task.enabled) for task in tasks),
@@ -157,6 +288,7 @@ class BackgroundControlCenter:
 
     def get_snapshot(self, *, recent_runs_limit=100):
         tasks, runs, approvals = self._state()
+        pending = self._pending_approval_rows(tasks, approvals)
         task_views = [self._task_view(task, runs, approvals) for task in tasks]
         task_views.sort(key=lambda item: (
             item["next_run_at"] is None,
@@ -175,10 +307,11 @@ class BackgroundControlCenter:
             "failed": [item for item in task_views
                        if item["status"] == BackgroundTaskStatus.FAILED.value],
             "completed": [item for item in task_views if item["status"] in _COMPLETED],
-            "pending_approvals": [self._approval_view(row) for row in approvals
-                                  if row.get("status") == "ACTIVE" and
-                                  float(row.get("expires_at", 0) or 0) >= float(self.now_provider())],
+            "pending_approvals": [self._approval_view(row) for row in pending],
             "recent_runs": run_views[:max(1, min(int(recent_runs_limit), 1000))],
+            "notifications": self._notification_views(),
+            "notification_summary": self.get_notification_summary(),
+            "action_required_count": self.get_notification_summary()["action_required"],
         }
 
     def _state(self):
@@ -199,6 +332,7 @@ class BackgroundControlCenter:
                                  for status in statuses),
             "completed_tasks": sum(status in _COMPLETED for status in statuses),
             "pending_approvals": sum(row.get("status") == "ACTIVE" and
+                                      row.get("decision", "PENDING") == "PENDING" and
                                       float(row.get("expires_at", 0) or 0) >= now
                                       for row in approvals),
             "next_due_task": self._next_due_from_views(task_views),
@@ -222,8 +356,7 @@ class BackgroundControlCenter:
         latest = task_runs[0] if task_runs else None
         current = next((run for run in task_runs if run.get("status") in _CURRENT_RUN), None)
         active_approvals = [row for row in approvals if row.get("task_id") == task.task_id
-                            and row.get("status") == "ACTIVE"
-                            and float(row.get("expires_at", 0) or 0) >= float(self.now_provider())]
+                            and row in self._pending_approval_rows([task], approvals)]
         failed = next((run for run in task_runs if run.get("status") == RunStatus.FAILED.value), None)
         return {
             "task_id": task.task_id,
@@ -252,6 +385,7 @@ class BackgroundControlCenter:
         now = float(self.now_provider())
         run_approvals = [row for row in approvals if row.get("run_id") == run.get("run_id")]
         active = [row for row in run_approvals if row.get("status") == "ACTIVE"
+                   and row.get("decision", "PENDING") == "PENDING"
                    and float(row.get("expires_at", 0) or 0) >= now]
         expires = run.get("claim_expires_at")
         return {
@@ -281,7 +415,8 @@ class BackgroundControlCenter:
     def _approval_view(row):
         return {key: row.get(key) for key in (
             "approval_id", "task_id", "run_id", "mission_id", "scope", "target",
-            "granted_at", "expires_at", "single_use", "status")}
+            "granted_at", "expires_at", "single_use", "status", "decision",
+            "decided_at", "decided_by")}
 
     @staticmethod
     def _failure_reason(run):

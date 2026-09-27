@@ -326,3 +326,22 @@ Próximo: aguardar autorização; não iniciar M1.6.
   SecurityManager, approvals, receipts, checkpoints, audit, and control-center views.
 - No real Windows GUI action was run. Preserve `device_registry.json`, runtime databases,
   build/dist artifacts, and unrelated Browser/UIA changes. No push.
+
+# Computer Use 8D.4 - Notifications and Approval Center
+
+**Date:** 2026-09-26
+**Status:** `COMPUTER_USE_8D_PHASE: IN_PROGRESS`; structural validation in progress
+
+- Notifications are derived from the canonical background task, run, and approval data.
+  No notification table, delivery engine, queue, scheduler, or channel adapter was added.
+- The existing `task_approvals` store remains canonical. Schema v4→v5 is additive and
+  adds `decision`, `decided_at`, and `decided_by` so approval/denial can be atomic,
+  durable, race-safe, and auditable without a second approval store.
+- Read-only approval and notification queries do not consume, authorize, dismiss, claim,
+  dispatch, or otherwise mutate background state. Notification status is ephemeral `NEW`;
+  dismiss is intentionally not implemented because dismissal must not resolve the task.
+- Approval decisions pass through the existing `SecurityManager` and `AuditLog`, preserve
+  task/run/mission scope and single-use consumption, and fail closed for stale, denied,
+  cancelled, terminal, or already-decided approvals. Approval does not dispatch work.
+- Focused 8D.4 coverage: 8 new tests plus 69 focused/regression tests passing. No GUI,
+  foreground, Core, process, `device_registry.json`, runtime DB, or push action was used.

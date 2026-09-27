@@ -85,6 +85,20 @@
   pending retry/recovery attempts cancelled; pause leaves them pending but undispatchable.
 - No real desktop validation is part of 8D.3. Existing Windows SQLite teardown failures in
   `test_jarvis_hardening.py` remain unrelated and were not changed.
+
+## Computer Use 8D.4
+
+- The notification foundation is derived and channel-neutral. It does not persist read or
+  dismiss state yet; `NEW` is an observation status and dismiss is not task resolution.
+- Schema v5 is required only because the existing `task_approvals` row had no durable
+  approval/denial decision state. The migration is additive; no second approval database
+  or notification engine exists.
+- Legacy direct consumers may still consume an active pending approval through the existing
+  scoped `consume_task_approval` contract. New approval-center decisions additionally block
+  denied/stale rows and expose `APPROVED` state for the existing consumer path. Approval
+  itself never dispatches a task or bypasses pause/cancel controls.
+- Full-suite execution remains incomplete because the earlier live/integration collection
+  stalled; focused 8D.4 plus 8D.1-8D.3 regression coverage passed.
 # Computer Use 7D.1
 
 - Internal background scheduling infrastructure is implemented and structurally

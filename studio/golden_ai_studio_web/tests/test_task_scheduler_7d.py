@@ -38,7 +38,7 @@ def test_schema_v1_migrates_without_losing_legacy_task(tmp_path):
     assert store.get_task("legacy").title == "legacy"
     assert store.connect
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version FROM task_schema_version").fetchone()[0] == 4
+        assert db.execute("SELECT version FROM task_schema_version").fetchone()[0] == 5
         assert db.execute("SELECT name FROM sqlite_master WHERE name='background_tasks'").fetchone()
 
 

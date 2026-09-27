@@ -466,6 +466,109 @@ class TaskManager:
         return self.database.consume_task_approval(
             approval_id, task_id, run_id, scope, target, time.time())
 
+    def list_background_notifications(self, **kwargs):
+        return self.control_center.list_notifications(**kwargs)
+
+    def get_background_notification(self, notification_id):
+        return self.control_center.get_notification(notification_id)
+
+    def background_notification_summary(self):
+        return self.control_center.get_notification_summary()
+
+    def list_pending_background_approvals(self, **kwargs):
+        return self.control_center.list_pending_approvals(**kwargs)
+
+    def get_pending_background_approval(self, approval_id):
+        return self.control_center.get_pending_approval(approval_id)
+
+    def _authorize_approval_decision(self, action, approval, task,
+                                     confirmation_token, actor):
+        is_computer_use = task is not None and str(task.task_type).lower() == "computer_use"
+        risk = Risk.HIGH if is_computer_use else Risk.MEDIUM
+        tool = Tool(
+            f"background_approval_{action}",
+            f"Decide aprovação de background: {action}",
+            lambda **_kwargs: {}, risk=risk, confirmation=is_computer_use,
+            parameters={"approval_id": str, "task_id": str,
+                        "action": str, "actor": str})
+        arguments = {
+            "approval_id": str(approval.get("approval_id")),
+            "task_id": str(approval.get("task_id")),
+            "action": str(action), "actor": str(actor),
+        }
+        if confirmation_token:
+            item = self.security.consume(confirmation_token)
+            if not item or item.get("tool") != tool.name or item.get("arguments") != arguments:
+                return {"success": False, "code": "INVALID_CONFIRMATION"}
+        else:
+            decision = self.security.decision(
+                tool, risk=risk, requires_confirmation=tool.confirmation)
+            if decision == "deny":
+                return {"success": False, "code": "SECURITY_DENIED"}
+            if decision == "confirm":
+                return {
+                    "success": False, "confirmation_required": True,
+                    "token": self.security.create_confirmation(
+                        tool, arguments, action, risk),
+                    "code": "CONFIRMATION_REQUIRED",
+                }
+        return {"success": True}
+
+    def decide_background_approval(self, approval_id, decision,
+                                   confirmation_token=None,
+                                   actor="background_control"):
+        approval = self.database.get_task_approval(str(approval_id))
+        if approval is None:
+            return {"success": False, "code": "APPROVAL_NOT_FOUND",
+                    "approval_id": str(approval_id)}
+        task = self.database.get_background_task(approval.get("task_id"))
+        action = "approve" if str(decision).upper() == "APPROVED" else "deny"
+        authorized = self._authorize_approval_decision(
+            action, approval, task, confirmation_token, actor)
+        if not authorized.get("success"):
+            if authorized.get("code") == "SECURITY_DENIED":
+                self._audit(approval.get("task_id", "desktop"),
+                            "APPROVAL_DECISION_BLOCKED", {
+                                "approval_id": str(approval_id),
+                                "decision": str(decision).upper(),
+                                "actor": str(actor), "reason": "SECURITY_DENIED"})
+            return {**authorized, "approval_id": str(approval_id)}
+        result = self.database.decide_task_approval(
+            str(approval_id), str(decision), str(actor), time.time())
+        event = {
+            "APPROVED": "APPROVAL_GRANTED",
+            "DENIED": "APPROVAL_DENIED",
+        }.get(str(decision).upper(), "APPROVAL_DECISION_BLOCKED")
+        if result.get("code") == "STALE_APPROVAL":
+            event = "APPROVAL_STALE"
+        elif result.get("code") in {"APPROVAL_ALREADY_DECIDED", "APPROVAL_NOT_ACTIVE"}:
+            event = "APPROVAL_REUSE_BLOCKED"
+        self._audit(approval.get("task_id", "desktop"), event, {
+            "approval_id": str(approval_id),
+            "decision": str(decision).upper(), "actor": str(actor),
+            "code": result.get("code")})
+        return {**result, "approval_id": str(approval_id)}
+
+    def approve_background_approval(self, approval_id,
+                                    confirmation_token=None,
+                                    actor="background_control"):
+        return self.decide_background_approval(
+            approval_id, "APPROVED", confirmation_token, actor)
+
+    def deny_background_approval(self, approval_id,
+                                 confirmation_token=None,
+                                 actor="background_control"):
+        return self.decide_background_approval(
+            approval_id, "DENIED", confirmation_token, actor)
+
+    def approve_pending_action(self, approval_id, confirmation_token=None,
+                               actor="background_control"):
+        return self.approve_background_approval(approval_id, confirmation_token, actor)
+
+    def deny_pending_action(self, approval_id, confirmation_token=None,
+                            actor="background_control"):
+        return self.deny_background_approval(approval_id, confirmation_token, actor)
+
     def shutdown(self, wait=True):
         self.scheduler.stop(wait=wait)
         self.runner.shutdown(wait=wait)

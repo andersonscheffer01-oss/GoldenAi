@@ -431,3 +431,22 @@ Date: 2026-09-26
   compile, selective staging and local commit remain to be completed.
 - Preserve `device_registry.json`, runtime DBs, build/dist, Browser/UIA changes, and all
   unrelated dirty artifacts. No real GUI action and no push.
+
+## Computer Use 8D.4 Handoff
+
+Date: 2026-09-26
+
+- Notifications and approval-center foundations are in the canonical task manager files;
+  notifications are derived, stable-ID, read-only views. No new queue, scheduler, server,
+  notification table, or delivery adapter was introduced.
+- `task_approvals` is still the canonical approval store. Schema is now v5 with additive
+  decision columns. `TaskManager` gates approval/denial through `SecurityManager`, applies
+  one atomic database decision, and audits the result. `AuditLog` remains authoritative.
+- New regression coverage is in `tests/test_background_notifications_approval_center.py`.
+  Focused 8D.4 and prior background-control tests pass. Full-suite execution is still not
+  complete and must not be reported as passing.
+- Schema gate: notifications derive from existing data; pending approval views reuse the
+  existing table; stable IDs provide deduplication; dismiss state remains ephemeral/not
+  implemented. Do not add a second approval or notification store.
+- Preserve `device_registry.json`, runtime DBs, build/dist, Browser/UIA changes, and all
+  unrelated dirty artifacts. Do not start 8D.5 or push.

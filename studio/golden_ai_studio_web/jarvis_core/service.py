@@ -600,6 +600,41 @@ class JarvisService:
         """Expose the canonical read-only background control snapshot."""
         return self.task_manager.control_center.get_snapshot(**kwargs)
 
+    def list_background_notifications(self, **kwargs):
+        return self.task_manager.list_background_notifications(**kwargs)
+
+    def get_background_notification(self, notification_id):
+        return self.task_manager.get_background_notification(notification_id)
+
+    def background_notification_summary(self):
+        return self.task_manager.background_notification_summary()
+
+    def list_pending_background_approvals(self, **kwargs):
+        return self.task_manager.list_pending_background_approvals(**kwargs)
+
+    def get_pending_background_approval(self, approval_id):
+        return self.task_manager.get_pending_background_approval(approval_id)
+
+    def approve_background_action(self, approval_id, confirmation_token=None,
+                                  actor="service"):
+        return self.task_manager.approve_background_approval(
+            approval_id, confirmation_token, actor)
+
+    def deny_background_action(self, approval_id, confirmation_token=None,
+                               actor="service"):
+        return self.task_manager.deny_background_approval(
+            approval_id, confirmation_token, actor)
+
+    def approve_pending_action(self, approval_id, confirmation_token=None,
+                               actor="service"):
+        return self.task_manager.approve_pending_action(
+            approval_id, confirmation_token, actor)
+
+    def deny_pending_action(self, approval_id, confirmation_token=None,
+                            actor="service"):
+        return self.task_manager.deny_pending_action(
+            approval_id, confirmation_token, actor)
+
     def pause_background_task(self, task_id, confirmation_token=None, actor="service"):
         return self.task_manager.pause_background(task_id, confirmation_token, actor)
 
