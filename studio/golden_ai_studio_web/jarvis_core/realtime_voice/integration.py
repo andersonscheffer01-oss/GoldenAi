@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from typing import Any, Callable, Optional
 
 from jarvis_core.realtime_voice.audio_queue import AudioFrameQueue, UtteranceBuffer
@@ -39,6 +40,13 @@ from jarvis_core.realtime_voice.state_machine import (
 )
 from jarvis_core.realtime_voice.vad import SileroVADAdapter, VADEvent
 from jarvis_core.realtime_voice import is_hybrid_enabled
+from jarvis_core.voice_foundation import (
+    SpeechToTextProvider,
+    TranscriptAcceptanceGate,
+    TranscriptEvent,
+    VoiceCancellation,
+    VoiceCancelledError,
+)
 
 log = logging.getLogger(__name__)
 
@@ -78,9 +86,13 @@ class RealtimeVoicePipeline:
         self._frame_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._listening_timeout = LISTENING_TIMEOUT_DEFAULT
-        self._on_transcription: Optional[Callable[[str], None]] = None
+        self._on_transcription: Optional[Callable[[Any], None]] = None
         self._on_state_change: Optional[Callable[[str], None]] = None
         self._stats: dict[str, Any] = {}
+        self._stt_provider: Optional[SpeechToTextProvider] = None
+        self._stt_cancellation = VoiceCancellation()
+        self._session_id = ""
+        self._transcript_gate = TranscriptAcceptanceGate()
 
         # Metrics
         self._speech_started_at: float = 0.0
@@ -102,6 +114,14 @@ class RealtimeVoicePipeline:
     def stats(self) -> dict[str, Any]:
         return dict(self._stats)
 
+    @property
+    def stt_provider(self) -> Optional[SpeechToTextProvider]:
+        return self._stt_provider
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
     async def load(self) -> None:
         """Load VAD model."""
         await self._vad.load()
@@ -114,13 +134,20 @@ class RealtimeVoicePipeline:
     async def start(
         self,
         loop: Optional[asyncio.AbstractEventLoop] = None,
-        on_transcription: Optional[Callable[[str], None]] = None,
+        on_transcription: Optional[Callable[[Any], None]] = None,
         on_state_change: Optional[Callable[[str], None]] = None,
+        stt_provider: Optional[SpeechToTextProvider] = None,
+        session_id: str = "",
+        cancellation: Optional[VoiceCancellation] = None,
     ) -> None:
         """Start the frame processing loop."""
         self._loop = loop or asyncio.get_event_loop()
         self._on_transcription = on_transcription
         self._on_state_change = on_state_change
+        self._stt_provider = stt_provider
+        self._stt_cancellation = cancellation or VoiceCancellation()
+        self._session_id = str(session_id or uuid.uuid4().hex)
+        self._transcript_gate.begin(self._session_id)
 
         self._queue.uncancel()
         self._vad.reset()
@@ -143,11 +170,18 @@ class RealtimeVoicePipeline:
                 pass
             self._frame_task = None
         self._queue.cancel()
+        self._stt_cancellation.cancel("pipeline_stopped")
+        self._transcript_gate.cancel()
         self._vad.reset()
         self._hybrid.reset()
         self._utterance.clear()
         self._sm.force_idle()
         log.info("[rvpipe] stopped")
+
+    def cancel_transcription(self, reason: str = "transcription_cancelled") -> None:
+        """Invalidate current STT results; worker cancellation remains cooperative."""
+        self._stt_cancellation.cancel(reason)
+        self._transcript_gate.cancel()
 
     def feed_frame(self, frame: bytes) -> None:
         """Feed a raw audio frame from the mic thread (thread-safe)."""
@@ -296,6 +330,48 @@ class RealtimeVoicePipeline:
 
         self._stats["last_utterance_ms"] = duration_ms
         self._stats["last_utterance_samples"] = len(audio_bytes) // 2
+
+        if self._stt_provider is not None:
+            utterance_id = uuid.uuid4().hex
+            self._stats["stt_calls"] = int(self._stats.get("stt_calls", 0)) + 1
+            try:
+                if self._sm.state is ConversationalState.LISTENING:
+                    self._sm.transition(ConversationalState.TRANSCRIBING)
+                    self._emit_state(ConversationalState.TRANSCRIBING)
+                event = await asyncio.to_thread(
+                    self._stt_provider.transcribe,
+                    audio_bytes,
+                    sample_rate=SAMPLE_RATE,
+                    cancellation=self._stt_cancellation,
+                    session_id=self._session_id,
+                    utterance_id=utterance_id,
+                    epoch=self._transcript_gate.epoch,
+                )
+                if not isinstance(event, TranscriptEvent):
+                    raise TypeError("STT provider must return TranscriptEvent")
+                if event.is_final:
+                    if self._transcript_gate.accept(event):
+                        self._stats["accepted_finals"] = int(
+                            self._stats.get("accepted_finals", 0)
+                        ) + 1
+                        if self._on_transcription is not None:
+                            self._on_transcription(event)
+                    else:
+                        self._stats["discarded_transcripts"] = int(
+                            self._stats.get("discarded_transcripts", 0)
+                        ) + 1
+                elif self._on_transcription is not None:
+                    # Partial events are observable only; VoiceService never routes them to Core.
+                    self._on_transcription(event)
+            except VoiceCancelledError:
+                self._stats["cancelled_transcriptions"] = int(
+                    self._stats.get("cancelled_transcriptions", 0)
+                ) + 1
+            except Exception as exc:
+                self._stats["stt_errors"] = int(self._stats.get("stt_errors", 0)) + 1
+                self._stats["last_stt_error"] = str(exc)[:240]
+                log.warning("STT provider failed safely: %s", exc)
+            return
 
         if self._on_transcription is not None:
             try:

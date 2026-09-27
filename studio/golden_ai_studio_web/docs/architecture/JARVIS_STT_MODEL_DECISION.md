@@ -182,7 +182,22 @@ factor, plus the need to replace the current symbolic model name with a pinned
 local artifact path in the future adapter. These are implementation and
 validation constraints, not unresolved artifact identity.
 
-## Next authorized batch outline
+## Implementation batch status
+
+The authorized implementation batch completed in three isolated commits:
+
+- `254de78`: STT contracts, immutable `TranscriptEvent`, acceptance gate, and
+  deterministic fake provider.
+- `170933a`: fail-closed local faster-whisper adapter and legacy-path model
+  resolution hardening.
+- `dc9613e`: explicit Audio -> VAD -> STT -> VoiceService integration and
+  hardware-free E2E coverage.
+
+The implementation still preserves the decision constraints: one microphone
+owner, no download, no raw-audio persistence, no direct provider-to-Core path,
+and no true streaming claim.
+
+## Future validation plan
 
 - Phase 1: STT contracts, `TranscriptEvent`, and deterministic fake provider.
 - Phase 2: faster-whisper adapter using the approved local artifact, with

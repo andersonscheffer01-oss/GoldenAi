@@ -49,7 +49,7 @@ from typing import Any, Callable, Optional
 import numpy as np
 
 from .voice import get_voice
-from .voice_foundation import VoiceCancellation, VoiceSession
+from .voice_foundation import VoiceCancellation, VoiceSession, TranscriptEvent
 from .output_mode import get_output_mode_manager, to_spoken_text
 from .realtime_voice.state_machine import (
     ConversationalState,
@@ -111,6 +111,7 @@ class VoiceService:
         )
         self._realtime_pipeline = None
         self._audio_input_provider: Optional[AudioInputProvider] = None
+        self._realtime_cancellation: Optional[VoiceCancellation] = None
         self.state = "OFF"
         self.thread: threading.Thread | None = None
         self.stop_event = threading.Event()
@@ -259,6 +260,8 @@ class VoiceService:
         changed = self._operation_cancellation.cancel(reason)
         self._barge_in_cancel.set()
         self._turn_manager.cancel_current()
+        if self._realtime_pipeline is not None:
+            self._realtime_pipeline.cancel_transcription(reason)
         if self.state in {"TRANSCRIBING", "PROCESSING", "SPEAKING"}:
             self.state = "INTERRUPTED"
         return {"ok": True, "cancelled": changed, "reason": reason}
@@ -332,6 +335,7 @@ class VoiceService:
         provider_factory: Optional[Callable[..., AudioInputProvider]] = None,
         on_transcription: Optional[Callable[[str], None]] = None,
         on_state_change: Optional[Callable[[str], None]] = None,
+        stt_provider: Any = None,
     ) -> dict:
         """Explicitly start one provider and route frames into the VAD pipeline."""
         if self.is_running():
@@ -340,6 +344,18 @@ class VoiceService:
                 "error": "VoiceService legacy loop ja esta capturando; pare-o antes do provider.",
             }
         pipeline = self.get_realtime_voice_pipeline()
+        active_stt_provider = stt_provider
+        active_transcription_callback = on_transcription
+        if active_stt_provider is None and active_transcription_callback is None:
+            # The explicit audio path owns the approved local provider lazily;
+            # construction validates nothing and does not load or download a model.
+            from .stt_faster_whisper import FasterWhisperSTTProvider
+            active_stt_provider = FasterWhisperSTTProvider(
+                initial_prompt=getattr(self._voice, "initial_prompt", "")
+            )
+            active_transcription_callback = self._handle_transcript_event
+        elif active_stt_provider is not None and active_transcription_callback is None:
+            active_transcription_callback = self._handle_transcript_event
         active_loop = loop
         if active_loop is None:
             try:
@@ -367,10 +383,14 @@ class VoiceService:
 
         frame_task = getattr(pipeline, "_frame_task", None)
         if frame_task is None or frame_task.done():
+            self._realtime_cancellation = VoiceCancellation()
             await pipeline.start(
                 loop=active_loop,
-                on_transcription=on_transcription,
+                on_transcription=active_transcription_callback,
                 on_state_change=on_state_change,
+                stt_provider=active_stt_provider,
+                session_id=self._voice_session.session_id,
+                cancellation=self._realtime_cancellation,
             )
 
         result = provider.start()
@@ -392,6 +412,7 @@ class VoiceService:
         pipeline = self._realtime_pipeline
         if pipeline is not None:
             await pipeline.stop()
+        self._realtime_cancellation = None
         self._wake_lifecycle.cancel()
         self._voice_session.state = self._state_machine.state
         return {
@@ -426,6 +447,28 @@ class VoiceService:
         return {"ok": True, "running": True, "capture_requested": True,
                 "session_id": self._desktop_session_id,
                 "message": "Microfone pronto para um comando."}
+
+    def _handle_transcript_event(self, event: TranscriptEvent) -> None:
+        """Route only accepted final events through the existing Core boundary."""
+        if not isinstance(event, TranscriptEvent) or not event.is_final:
+            return
+        text = event.text.strip()
+        if not text:
+            return
+        self.last_heard = text
+        self.last_activity = time.time()
+        if self.service is None:
+            return
+        self._handle(
+            text,
+            timings={
+                "utterance_source": "AUDIO_INPUT",
+                "session_id": event.session_id,
+                "utterance_id": event.utterance_id,
+                "stt_provider": event.provider,
+            },
+            output={"speak": True, "mode": "VOICE"},
+        )
 
     # ═══════════════════════════════════════════════════════════════
     # LOOP PRINCIPAL (thread daemon)

@@ -135,3 +135,29 @@ is recorded in
 `JARVIS_VOICE_REAL_AUDIO_DECISION.md`. It selects adaptation of the existing
 sounddevice capture behind one VoiceService-owned provider. The acoustic wake
 provider and model-license decision remain pending human review.
+
+## Autonomous local STT implementation
+
+The approved local path is now implemented behind the existing voice
+boundaries. `FasterWhisperSTTProvider` resolves only the pinned
+`Systran/faster-whisper-small` CTranslate2 snapshot at revision
+`536b0662742c02347bc0e980a01041f333bce120`, uses CPU `int8`, and passes
+`local_files_only=True`. Missing or incomplete artifacts fail closed; there is
+no model substitution or network fallback.
+
+The provider accepts bounded in-memory PCM16/WAV utterances and emits final
+`TranscriptEvent` values. It does not open audio hardware, persist raw audio,
+call Core, execute tools, or create approval decisions. Cancellation is
+cooperative: the current session/epoch is invalidated and any late result is
+discarded by the transcript acceptance gate.
+
+The explicit `VoiceService.start_audio_input()` path owns the single
+`AudioInputProvider`, existing VAD/endpointing, and the STT provider. Only an
+accepted final event reaches the existing VoiceService -> JarvisService ->
+Core/SecurityManager boundary. Partial events are observable but cannot reach
+Core, and duplicate final identities are accepted once.
+
+This batch remains utterance-based rather than true streaming STT. Acoustic
+wake, TTS, barge-in execution, remote STT, and Desktop integration remain
+deferred. PT-BR quality, realtime factor, and model runtime RAM are still
+unmeasured.
