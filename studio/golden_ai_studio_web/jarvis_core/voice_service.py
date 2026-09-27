@@ -47,7 +47,13 @@ from pathlib import Path
 import numpy as np
 
 from .voice import get_voice
+from .voice_foundation import VoiceCancellation, VoiceSession
 from .output_mode import get_output_mode_manager, to_spoken_text
+from .realtime_voice.state_machine import (
+    ConversationalState,
+    IllegalTransition,
+    VoiceStateMachine,
+)
 from .streaming import is_streaming_enabled, is_barge_in_enabled
 from .streaming.turn_manager import TurnManager
 from .streaming.barge_in_calibration import (
@@ -88,6 +94,14 @@ class VoiceService:
     def __init__(self):
         self.enabled = os.getenv("JARVIS_VOICE_SERVICE", "1").lower() not in ("0", "false", "off")
         self.tts_mode = os.getenv("JARVIS_VOICE_TTS", "auto").lower()
+        self._state_machine = VoiceStateMachine(ConversationalState.STOPPED)
+        self._state_transition_errors = 0
+        self._last_state_error = ""
+        self._legacy_state = "OFF"
+        self._voice_session = VoiceSession(state=ConversationalState.STOPPED,
+                                           metadata={"owner": "VoiceService"})
+        self._operation_cancellation = VoiceCancellation()
+        self._session_id = self._voice_session.session_id
         self.state = "OFF"
         self.thread: threading.Thread | None = None
         self.stop_event = threading.Event()
@@ -126,7 +140,49 @@ class VoiceService:
         self._push_to_talk_requested = threading.Event()
         self._desktop_session_id: str = ""
         self._conversation_id: str = uuid.uuid4().hex  # persists across cancelled turns
-        self._session_id: str = uuid.uuid4().hex
+
+    _STATE_MAP = {
+        "OFF": ConversationalState.STOPPED,
+        "OUVINDO": ConversationalState.IDLE,
+        "WAITING_WAKE": ConversationalState.IDLE,
+        "WAKE_DETECTED": ConversationalState.LISTENING,
+        "LISTENING": ConversationalState.LISTENING,
+        "CAPTURING_FOLLOWUP": ConversationalState.LISTENING,
+        "TRANSCRIBING": ConversationalState.TRANSCRIBING,
+        "PROCESSING": ConversationalState.THINKING,
+        "SPEAKING": ConversationalState.SPEAKING,
+        "INTERRUPTED": ConversationalState.INTERRUPTED,
+        "ERROR": ConversationalState.ERROR,
+    }
+
+    @property
+    def state(self) -> str:
+        return self._legacy_state
+
+    @state.setter
+    def state(self, value: str) -> None:
+        legacy = str(value)
+        self._legacy_state = legacy
+        machine = getattr(self, "_state_machine", None)
+        if machine is None:
+            return
+        target = self._STATE_MAP.get(legacy)
+        if target is None:
+            self._last_state_error = f"unknown voice state: {legacy}"
+            self._state_transition_errors += 1
+            return
+        try:
+            machine.transition(target)
+        except IllegalTransition as exc:
+            self._last_state_error = str(exc)
+            self._state_transition_errors += 1
+            log.warning("Voice state transition rejected: %s", exc)
+            if machine.state is not ConversationalState.STOPPED and target is not ConversationalState.ERROR:
+                try:
+                    machine.transition(ConversationalState.ERROR)
+                except IllegalTransition:
+                    pass
+        self._voice_session.state = machine.state
 
     # ═══════════════════════════════════════════════════════════════
     # CICLO DE VIDA
@@ -142,6 +198,9 @@ class VoiceService:
         if service is None:
             return {"ok": False, "error": "JarvisService nao fornecido."}
         self.service = service
+        self._voice_session = VoiceSession(metadata={"owner": "VoiceService"})
+        self._session_id = self._voice_session.session_id
+        self._operation_cancellation = VoiceCancellation()
         self.stop_event.clear()
         self._voice = get_voice()
         self._voice.warmup_async()
@@ -151,6 +210,9 @@ class VoiceService:
         return {"ok": True, "message": 'VoiceService iniciado. Diga "Jarvis" + comando.'}
 
     def stop(self) -> dict:
+        self._voice_session.cancel("runtime_shutdown")
+        self._operation_cancellation.cancel("runtime_shutdown")
+        self._turn_manager.cancel_current()
         self._stop_barge_in_monitor()
         self._turn_manager.cleanup_all()
         self._barge_in_cancel.clear()
@@ -162,7 +224,6 @@ class VoiceService:
         self._push_to_talk_requested.clear()
         self._desktop_session_id = ""
         self._conversation_id = uuid.uuid4().hex
-        self._session_id = uuid.uuid4().hex
         if not self.is_running():
             self.state = "OFF"
             return {"ok": True, "message": "VoiceService nao estava rodando."}
@@ -171,6 +232,15 @@ class VoiceService:
             self.thread.join(timeout=2.0)
         self.state = "OFF"
         return {"ok": True, "message": "VoiceService parado."}
+
+    def cancel_current_operation(self, reason: str = "operation_cancelled") -> dict:
+        """Cooperatively cancel the active turn/TTS boundary without killing a thread."""
+        changed = self._operation_cancellation.cancel(reason)
+        self._barge_in_cancel.set()
+        self._turn_manager.cancel_current()
+        if self.state in {"TRANSCRIBING", "PROCESSING", "SPEAKING"}:
+            self.state = "INTERRUPTED"
+        return {"ok": True, "cancelled": changed, "reason": reason}
 
     def set_enabled(self, value: bool) -> dict:
         self.enabled = bool(value)
@@ -1048,6 +1118,10 @@ class VoiceService:
     def _speak(self, text: str) -> bool:
         if not text:
             return False
+        if (self._voice_session.cancellation.is_cancelled
+                or self._operation_cancellation.is_cancelled):
+            self.state = "INTERRUPTED"
+            return False
         self._tts_epoch += 1
         self._speaking_event.set()
         try:
@@ -1061,6 +1135,8 @@ class VoiceService:
             self._ignore_input_until = time.time() + max(.2, float(
                 os.getenv("JARVIS_TTS_INPUT_GUARD_SECONDS", ".6")))
             self._speaking_event.clear()
+            if self._barge_in_cancel.is_set() or self._operation_cancellation.is_cancelled:
+                self.state = "INTERRUPTED"
 
     def _speak_edge(self, text: str) -> bool:
         """edge-tts (voz neural) → mp3 → MediaPlayer nativo do Windows."""
@@ -1143,6 +1219,19 @@ class VoiceService:
             "running": self.is_running(),
             "enabled": self.enabled,
             "state": self.state,
+            "voice_state": self._state_machine.state.value,
+            "session_id": self._voice_session.session_id,
+            "voice_session": {
+                "session_id": self._voice_session.session_id,
+                "created_at": self._voice_session.created_at,
+                "cancellation_requested": self._voice_session.cancellation.is_cancelled,
+                "cancellation_reason": self._voice_session.cancellation.reason,
+            },
+            "state_machine": {
+                "transitions": len(self._state_machine.history),
+                "transition_errors": self._state_transition_errors,
+                "last_error": self._last_state_error,
+            },
             "wake_word": self._voice.WAKE_WORD if self._voice else "jarvis",
             "tts_mode": self.tts_mode,
             "whisper_model": os.getenv("JARVIS_WHISPER_MODEL", "small"),
