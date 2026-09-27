@@ -124,3 +124,8 @@ The following remain deliberately deferred:
 
 Donor Audit 1B remains the authority for the next audio capability after this
 foundation passes focused and relevant regression tests.
+
+The pre-Batch-02 real-audio and wake-provider gate is recorded in
+`JARVIS_VOICE_REAL_AUDIO_DECISION.md`. It selects adaptation of the existing
+sounddevice capture behind one VoiceService-owned provider, while leaving the
+acoustic wake provider and model-license decision pending human review.
