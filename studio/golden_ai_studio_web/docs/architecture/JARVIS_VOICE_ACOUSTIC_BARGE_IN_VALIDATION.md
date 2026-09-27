@@ -145,3 +145,52 @@ PRODUCTION_VOICE_LOGIC_CHANGED: NO
 
 The real human gate remains pending. It must be repeated only when the human
 operator can observe the live prompt and speak during confirmed playback.
+
+## Interactive human-confirmed attempt
+
+One interactive attempt was executed after baseline `7aeda32`. The operator
+confirmed `SIM` after the harness stopped and asked whether the phrase had been
+spoken during playback. This confirmation is kept separate from the technical
+signals.
+
+```yaml
+HUMAN_CONFIRMATION: SIM
+REAL_HUMAN_SPEECH_USED: YES
+VALID_ACOUSTIC_ATTEMPT: YES
+PLAYBACK_CONFIRMED_ACTIVE: YES
+MIC_CONFIRMED_ACTIVE: YES
+HUMAN_WINDOW_DURATION_SECONDS: 7.014
+MIC_FRAMES_DURING_WINDOW: 234
+INPUT_LEVEL_DURING_WINDOW: 246.46
+VAD_TRIGGERED: NO
+ENDPOINT_TRIGGERED: NO
+SELF_TRIGGER_POLICY_DECISION: NOT_REACHED
+OLD_GENERATION_INVALIDATED: NO
+QUEUE_FLUSHED: YES
+REAL_PLAYBACK_ABORTED: YES
+PLAYBACK_ABORT_CAUSE: TIMEOUT
+MIC_SURVIVED_ABORT: YES
+USER_UTTERANCE_REMAINS_VALID: NO
+LOCAL_STT_RECEIVED_USER_UTTERANCE: NO
+OLD_AUDIO_RESUMED: NO
+OLD_COMPLETION_IGNORED: NO
+```
+
+This is real evidence that the microphone path delivered frames while the
+speaker was active, but the production VAD did not emit `SPEECH_STARTED` for
+the confirmed human phrase. The deepest successful stage is
+`REAL_MIC_CAPTURE`; the failure stage is `VAD`. No VAD threshold, model,
+turn-taking, cancellation, or AEC behavior was changed. This gate therefore
+failed at VAD and is ready for a separate, narrow VAD sensitivity investigation.
+
+```yaml
+REAL_HUMAN_BARGE_IN_VALIDATION: FAILED
+ACOUSTIC_INTERRUPTION_VALIDATED: NO
+POST_BARGE_IN_STT_VALIDATED: NO
+SPEECH_SELF_TRIGGER_VALIDATION: INCONCLUSIVE
+REAL_ACOUSTIC_BARGE_IN_VALIDATED: NO
+AEC_NEEDED_BASED_ON_EVIDENCE: INCONCLUSIVE
+AEC_RESEARCH_REQUIRED: NO
+DEEPEST_SUCCESSFUL_STAGE: REAL_MIC_CAPTURE
+FAILURE_STAGE: VAD
+```
