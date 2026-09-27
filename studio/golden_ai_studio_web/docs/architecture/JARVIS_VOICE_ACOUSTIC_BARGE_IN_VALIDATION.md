@@ -45,6 +45,26 @@ memory, or a coordinated human test. It must measure microphone detection,
 VAD, endpointing, STT reachability, and whether a false user turn is formed in
 that order. A tone cannot establish speech self-transcription.
 
+## Controlled human attempts
+
+Three bounded attempts were authorized and executed. Attempts 1 and 2 used a
+short deterministic tone with the real input and output devices. Attempt 3 used
+the same path with a slightly more audible, still bounded tone. No attempt
+observed human speech while playback was active:
+
+| Attempt | Mic opened | Playback active | Human speech/VAD | Barge-in |
+|---:|---|---|---|---|
+| 1 | PASS | PASS | NOT DETECTED | NOT RUN |
+| 2 | PASS | PASS | NOT DETECTED | NOT RUN |
+| 3 | PASS | PASS | NOT DETECTED | NOT RUN |
+
+The first harness invocation was invalid before playback because of a local
+diagnostic variable error and was not counted as a controlled attempt. It was
+cleaned up by process exit; no audio or transcript was persisted. The valid
+attempts closed the input stream cleanly and aborted/flushed output on their
+bounded timeout. They do not provide evidence for genuine human interruption,
+generation invalidation, endpointing, or STT handling.
+
 ## Human barge-in procedure
 
 The human test remains intentionally pending because the agent cannot safely
