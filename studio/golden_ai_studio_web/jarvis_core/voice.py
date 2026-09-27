@@ -111,6 +111,7 @@ class JarvisVoice:
         self.model_name = os.getenv("JARVIS_WHISPER_MODEL", "small")
         self.compute_type = os.getenv("JARVIS_WHISPER_COMPUTE", "int8")
         self.language = os.getenv("JARVIS_STT_LANGUAGE", "pt")
+        self._whisper_error = ""
         self.beam_size = max(1, int(os.getenv("JARVIS_STT_BEAM", "1")))
         self.best_of = max(1, int(os.getenv("JARVIS_STT_BEST_OF", "1")))
         self.initial_prompt = os.getenv("JARVIS_STT_INITIAL_PROMPT",
@@ -142,10 +143,24 @@ class JarvisVoice:
                 return
             try:
                 from faster_whisper import WhisperModel
+                from .stt_faster_whisper import (
+                    validate_approved_model_path,
+                    APPROVED_MODEL_COMPUTE_TYPE,
+                )
+                approved_path = validate_approved_model_path(
+                    os.getenv("JARVIS_STT_MODEL_PATH")
+                )
                 self.whisper_model = WhisperModel(
-                    self.model_name, device="cpu", compute_type=self.compute_type)
+                    str(approved_path), device="cpu",
+                    compute_type=self.compute_type or APPROVED_MODEL_COMPUTE_TYPE,
+                    local_files_only=True,
+                )
             except ImportError:
                 self.whisper_model = None
+                self._whisper_error = "faster-whisper nao disponivel"
+            except Exception as exc:
+                self.whisper_model = None
+                self._whisper_error = str(exc)[:240]
 
     def warmup_async(self):
         if self._warmup_thread and self._warmup_thread.is_alive():
@@ -173,7 +188,7 @@ class JarvisVoice:
         """Transcreve audio (bytes WAV) para texto."""
         self._ensure_whisper()
         if not self.whisper_model:
-            return {"ok": False, "error": "faster-whisper nao disponivel"}
+            return {"ok": False, "error": self._whisper_error or "STT model unavailable"}
 
         tmp_path = None
         try:
@@ -580,6 +595,7 @@ class JarvisVoice:
             "mic": dict(self.mic_info),
             "last_capture": dict(self.last_capture),
             "warmup": dict(self.warmup),
+            "stt_error": self._whisper_error,
             "conversation_active": self.is_conversation_active(),
             "last_transcription": self.last_transcription,
         }
