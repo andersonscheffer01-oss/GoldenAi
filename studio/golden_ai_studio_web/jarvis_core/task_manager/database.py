@@ -13,7 +13,7 @@ from .models import StepRecord, StepStatus, TaskPlan, TaskRecord, TaskStatus
 
 
 class TaskDatabase:
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def __init__(self, path):
         self.path = Path(path)
@@ -97,6 +97,10 @@ class TaskDatabase:
                         claim_expires_at REAL,
                         error_code TEXT,
                         error_message TEXT,
+                        source_run_id TEXT,
+                        attempt_kind TEXT NOT NULL DEFAULT 'ORIGINAL',
+                        attempt INTEGER NOT NULL DEFAULT 1,
+                        recovery_count INTEGER NOT NULL DEFAULT 0,
                         UNIQUE(task_id, scheduled_for),
                         FOREIGN KEY(task_id) REFERENCES background_tasks(task_id)
                     );
@@ -127,6 +131,18 @@ class TaskDatabase:
                     "PRAGMA table_info(background_tasks)").fetchall()}
                 if "paused_from_status" not in columns:
                     db.execute("ALTER TABLE background_tasks ADD COLUMN paused_from_status TEXT")
+            if current < 4:
+                columns = {item[1] for item in db.execute(
+                    "PRAGMA table_info(task_runs)").fetchall()}
+                if "source_run_id" not in columns:
+                    db.execute("ALTER TABLE task_runs ADD COLUMN source_run_id TEXT")
+                if "attempt_kind" not in columns:
+                    db.execute("ALTER TABLE task_runs ADD COLUMN attempt_kind TEXT NOT NULL DEFAULT 'ORIGINAL'")
+                if "attempt" not in columns:
+                    db.execute("ALTER TABLE task_runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1")
+                if "recovery_count" not in columns:
+                    db.execute("ALTER TABLE task_runs ADD COLUMN recovery_count INTEGER NOT NULL DEFAULT 0")
+                db.execute("CREATE INDEX IF NOT EXISTS idx_runs_source ON task_runs(source_run_id)")
             db.execute("DELETE FROM task_schema_version")
             db.execute("INSERT INTO task_schema_version(version) VALUES(?)", (self.SCHEMA_VERSION,))
 
@@ -343,6 +359,13 @@ class TaskDatabase:
                     db.execute("""UPDATE background_tasks SET status=?,enabled=0,
                         paused_from_status=NULL,updated_at=? WHERE task_id=?""",
                                (new_status, time.time(), str(task_id)))
+                    db.execute("""UPDATE task_runs SET status=?,claim_token=NULL,
+                        claimed_by=NULL,claim_expires_at=NULL,error_code=?,
+                        error_message=? WHERE task_id=? AND status=? AND
+                        attempt_kind IN ('RETRY','RECOVERY')""",
+                               (RunStatus.CANCELLED.value, "TASK_CANCELLED",
+                                "cancelled before retry/recovery dispatch", str(task_id),
+                                RunStatus.PENDING.value))
             latest = db.execute("""SELECT run_id,status FROM task_runs
                 WHERE task_id=? ORDER BY COALESCE(started_at,created_at) DESC LIMIT 1""",
                                 (str(task_id),)).fetchone()
@@ -420,7 +443,8 @@ class TaskDatabase:
 
     def update_task_run(self, run_id, **fields):
         allowed = {"status", "started_at", "finished_at", "mission_id", "claim_token",
-                    "claimed_by", "claim_expires_at", "error_code", "error_message"}
+                    "claimed_by", "claim_expires_at", "error_code", "error_message",
+                    "source_run_id", "attempt_kind", "attempt", "recovery_count"}
         values = {key: value for key, value in fields.items() if key in allowed}
         if "status" in values:
             values["status"] = getattr(values["status"], "value", values["status"])
@@ -431,12 +455,105 @@ class TaskDatabase:
             db.execute(f"UPDATE task_runs SET {columns} WHERE run_id=?",
                        tuple(values.values()) + (run_id,))
 
+    def list_pending_attempts(self, now, limit=100):
+        """Return explicit retry/recovery runs due for the existing scheduler."""
+        with self.connect(rows=True) as db:
+            rows = db.execute(
+                "SELECT * FROM task_runs WHERE status=? AND scheduled_for<=? "
+                "AND attempt_kind IN ('RETRY','RECOVERY') "
+                "ORDER BY scheduled_for,created_at,run_id LIMIT ?",
+                (RunStatus.PENDING.value, float(now), max(1, min(int(limit), 500)))).fetchall()
+        return [dict(row) for row in rows]
+
+    def create_retry_run(self, source_run_id, scheduled_for, now=None):
+        """Atomically create one child run; repeated requests are idempotent."""
+        now = time.time() if now is None else float(now)
+        child_id = str(uuid.uuid4())
+        with self._lock, self.connect(rows=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            source = db.execute("SELECT * FROM task_runs WHERE run_id=?",
+                                (str(source_run_id),)).fetchone()
+            if not source:
+                return {"created": False, "code": "RUN_NOT_FOUND"}
+            existing = db.execute(
+                "SELECT * FROM task_runs WHERE source_run_id=? "
+                "AND attempt_kind='RETRY' ORDER BY created_at LIMIT 1",
+                (str(source_run_id),)).fetchone()
+            if existing:
+                return {"created": False, "code": "RETRY_ALREADY_EXISTS",
+                        "run": dict(existing)}
+            task = db.execute("SELECT * FROM background_tasks WHERE task_id=?",
+                              (source["task_id"],)).fetchone()
+            if not task:
+                return {"created": False, "code": "TASK_NOT_FOUND"}
+            if task["status"] in {BackgroundTaskStatus.PAUSED.value,
+                                   BackgroundTaskStatus.CANCELLED.value}:
+                return {"created": False, "code": "TASK_NOT_ELIGIBLE"}
+            db.execute("""INSERT INTO task_runs(
+                run_id,task_id,scheduled_for,status,created_at,source_run_id,
+                attempt_kind,attempt,recovery_count)
+                VALUES(?,?,?,?,?,?,?,?,?)""",
+                       (child_id, source["task_id"], float(scheduled_for),
+                        RunStatus.PENDING.value, now, str(source_run_id), "RETRY",
+                        int(source["attempt"] or 1) + 1, 0))
+            if task["status"] == BackgroundTaskStatus.FAILED.value:
+                db.execute("""UPDATE background_tasks SET status=?,enabled=1,
+                    next_run_at=?,updated_at=? WHERE task_id=?""",
+                           (BackgroundTaskStatus.SCHEDULED.value, float(scheduled_for),
+                            now, source["task_id"]))
+            row = db.execute("SELECT * FROM task_runs WHERE run_id=?",
+                             (child_id,)).fetchone()
+            return {"created": True, "code": "RETRY_CREATED", "run": dict(row)}
+
+    def recover_task_run(self, run_id, now=None, reason="STALE_LEASE"):
+        """Atomically recover one eligible run without creating a second run."""
+        now = time.time() if now is None else float(now)
+        with self._lock, self.connect(rows=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM task_runs WHERE run_id=?",
+                             (str(run_id),)).fetchone()
+            if not row:
+                return {"recovered": False, "code": "RUN_NOT_FOUND"}
+            row = dict(row)
+            stale = (row["status"] in {RunStatus.CLAIMED.value, RunStatus.RUNNING.value}
+                     and (row["claim_expires_at"] is None or
+                          float(row["claim_expires_at"]) <= now))
+            checkpoint_recovery = (row["status"] == RunStatus.FAILED.value and
+                                   row.get("mission_id"))
+            if not stale and not checkpoint_recovery:
+                return {"recovered": False, "code": "RECOVERY_NOT_ELIGIBLE",
+                        "run": row}
+            task = db.execute("SELECT * FROM background_tasks WHERE task_id=?",
+                              (row["task_id"],)).fetchone()
+            if not task or task["status"] in {BackgroundTaskStatus.PAUSED.value,
+                                               BackgroundTaskStatus.CANCELLED.value,
+                                               BackgroundTaskStatus.COMPLETED.value,
+                                               BackgroundTaskStatus.DISABLED.value}:
+                return {"recovered": False, "code": "TASK_NOT_ELIGIBLE",
+                        "run": row}
+            db.execute("""UPDATE task_runs SET status=?,claim_token=NULL,
+                claimed_by=NULL,claim_expires_at=NULL,error_code=?,
+                error_message=?,attempt_kind='RECOVERY',recovery_count=recovery_count+1
+                WHERE run_id=?""",
+                       (RunStatus.PENDING.value, "RECOVERY_READY",
+                        str(reason), str(run_id)))
+            if task["status"] == BackgroundTaskStatus.FAILED.value:
+                db.execute("""UPDATE background_tasks SET status=?,enabled=1,
+                    next_run_at=?,updated_at=? WHERE task_id=?""",
+                           (BackgroundTaskStatus.SCHEDULED.value, float(now), now,
+                            row["task_id"]))
+            refreshed = db.execute("SELECT * FROM task_runs WHERE run_id=?",
+                                   (str(run_id),)).fetchone()
+            return {"recovered": True, "code": "RECOVERY_STARTED",
+                    "run": dict(refreshed)}
+
     def recover_background_runs(self, now, lease_timeout=0.0):
         """Release stale claims without duplicating durable mission states."""
         cutoff = float(now) - float(lease_timeout)
         with self._lock, self.connect() as db:
             cursor = db.execute("""UPDATE task_runs SET status=?,claim_token=NULL,
                 claimed_by=NULL,claim_expires_at=NULL,error_code=?,error_message=?
+                ,attempt_kind='RECOVERY',recovery_count=recovery_count+1
                 WHERE status IN (?,?) AND (claim_expires_at IS NULL OR claim_expires_at<?)
                 AND mission_id IS NULL""", (RunStatus.PENDING.value, "STALE_CLAIM",
                     "claim recovered after restart", RunStatus.CLAIMED.value,

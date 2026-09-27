@@ -304,3 +304,25 @@ Próximo: aguardar autorização; não iniciar M1.6.
   fixtures do not close `JarvisService` before temporary-directory cleanup.
 - `py_compile` and `git diff --check` remain required before the dedicated 8D.2 commit.
 - No real GUI action, process kill, `device_registry.json` change, runtime DB change, or push.
+
+# Computer Use 8D.3 - Safe Retry and Recovery Controls
+
+**Date:** 2026-09-26
+**Status:** `COMPUTER_USE_8D_PHASE: IN_PROGRESS`; structural validation in progress
+
+- Retry and recovery reuse the canonical `TaskDatabase`, scheduler claim/lease,
+  `SecurityManager`, `AuditLog`, `MissionCheckpointStore`, checkpoints, and action receipts.
+- Schema v3→v4 is additive only on `task_runs`: `source_run_id`, `attempt_kind`,
+  `attempt`, and `recovery_count`. Retry creates a new child run; recovery keeps the
+  existing run and is idempotent after the recovery decision.
+- `retry_budget` remains task trigger configuration with a bounded default of one explicit
+  retry. There is no automatic broad retry and no second queue, scheduler, or retry store.
+- Verified receipts/checkpoints classify a Computer Use failure as `RECOVERY_ONLY`; an
+  in-flight-unknown receipt or explicit uncertain-side-effect error fails closed as
+  `UNSAFE_TO_REPLAY`. Existing recurring occurrences remain separate from manual retries.
+- Eligibility reads do not claim runs, consume approvals, create missions, or dispatch work.
+- Focused 8D.3 coverage: 17 tests, including v3 migration, retry provenance/budget,
+  stale lease recovery, restart idempotency, pause/cancel races, condition/recurrence,
+  SecurityManager, approvals, receipts, checkpoints, audit, and control-center views.
+- No real Windows GUI action was run. Preserve `device_registry.json`, runtime databases,
+  build/dist artifacts, and unrelated Browser/UIA changes. No push.

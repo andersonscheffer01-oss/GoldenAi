@@ -112,6 +112,7 @@ class BackgroundTaskScheduler:
     def tick(self):
         now = self.clock.now()
         actions = []
+        retry_task_ids = self._dispatch_pending_attempts(now, actions)
         for task in self.database.list_background_tasks(enabled=True):
             if not task.enabled or task.status in {BackgroundTaskStatus.CANCELLED,
                     BackgroundTaskStatus.DISABLED, BackgroundTaskStatus.COMPLETED}:
@@ -119,6 +120,11 @@ class BackgroundTaskScheduler:
             if task.status == BackgroundTaskStatus.FAILED:
                 # A one-shot failure is terminal unless explicitly re-enabled.
                 # Recurring failures are advanced by _finish to their next occurrence.
+                continue
+            # A manual retry/recovery owns this scheduler turn for the task.
+            # The next recurring occurrence remains a separate occurrence and
+            # is considered on a later tick, never in the same dispatch pass.
+            if task.task_id in retry_task_ids:
                 continue
             if task.max_runs is not None and task.run_count >= task.max_runs:
                 self.database.update_background_task(task.task_id,
@@ -174,6 +180,28 @@ class BackgroundTaskScheduler:
                                           started_at=now)
             actions.append((task.task_id, self._dispatch(task, claimed, now)))
         return actions
+
+    def _dispatch_pending_attempts(self, now, actions):
+        """Dispatch explicit retry/recovery runs through the existing claim path."""
+        handled = set()
+        for pending in self.database.list_pending_attempts(now):
+            task = self.database.get_background_task(pending["task_id"])
+            if task is None or not task.enabled or task.status in {
+                    BackgroundTaskStatus.PAUSED, BackgroundTaskStatus.CANCELLED,
+                    BackgroundTaskStatus.DISABLED, BackgroundTaskStatus.COMPLETED,
+                    BackgroundTaskStatus.EXPIRED, BackgroundTaskStatus.FAILED}:
+                continue
+            claimed = self.database.claim_task_run(
+                pending["run_id"], self.worker_id, now, self.lease_seconds)
+            if not claimed:
+                continue
+            self.database.update_background_task(task.task_id,
+                                                 status=BackgroundTaskStatus.RUNNING)
+            self.database.update_task_run(claimed["run_id"], status=RunStatus.RUNNING.value,
+                                          started_at=now)
+            handled.add(task.task_id)
+            actions.append((task.task_id, self._dispatch(task, claimed, now)))
+        return handled
 
     def _audit_condition_transition(self, task, condition, ready):
         """Audit only condition transitions, avoiding one event per tick."""
@@ -320,6 +348,18 @@ class BackgroundTaskScheduler:
                     last_run_at=now, run_count=task.run_count + 1)
             self._audit(task.task_id, "TASK_RUN_COMPLETED" if ok else "background_task_failed",
                         {"run_id": run["run_id"], "paused_during_run": True})
+            return
+        if run.get("attempt_kind") in {"RETRY", "RECOVERY"} and \
+                task.trigger_type == TriggerType.RECURRING:
+            # A retry/recovery of occurrence A must not consume or reschedule
+            # occurrence B. The canonical recurrence remains untouched.
+            self.database.update_background_task(
+                task.task_id, status=BackgroundTaskStatus.SCHEDULED,
+                enabled=True, last_run_at=current.last_run_at if current else task.last_run_at)
+            self._audit(task.task_id, "TASK_RUN_COMPLETED" if ok else "background_task_failed",
+                        {"run_id": run["run_id"], "attempt_kind": run.get("attempt_kind"),
+                         "occurrence_preserved": True})
+            self._audit(task.task_id, "CLAIM_FINALIZED", {"run_id": run["run_id"]})
             return
         if ok:
             self.database.update_background_task(task.task_id, status=BackgroundTaskStatus.COMPLETED,

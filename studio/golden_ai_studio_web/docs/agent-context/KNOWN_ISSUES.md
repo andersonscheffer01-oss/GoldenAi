@@ -70,6 +70,21 @@
   teardown because their `JarvisService` fixture is not closed. The assertions pass; the
   failure is a SQLite file lock outside the 8D.2 control path and remains intentionally
   unmodified in this phase.
+
+## Computer Use 8D.3
+
+- Task-run provenance is now schema version 4. The migration is additive and preserves
+  legacy v3 task/run data; only `task_runs` receives retry/recovery relationship fields.
+- Retry is explicit and bounded by `trigger_config.retry_budget` (default one). It creates
+  a new `TaskRun` and never reopens the failed source run. A repeated request for the same
+  source is idempotently blocked/identified rather than creating another child.
+- Computer Use runs with a valid checkpoint and verified action receipts are recovery-only;
+  they must resume through the existing mission path. `ACTION_IN_FLIGHT_UNKNOWN` and
+  `SIDE_EFFECT_UNCERTAIN` are blocked and are never blindly replayed.
+- A pending retry/recovery does not bypass a pause or cancellation. Cancellation marks
+  pending retry/recovery attempts cancelled; pause leaves them pending but undispatchable.
+- No real desktop validation is part of 8D.3. Existing Windows SQLite teardown failures in
+  `test_jarvis_hardening.py` remain unrelated and were not changed.
 # Computer Use 7D.1
 
 - Internal background scheduling infrastructure is implemented and structurally

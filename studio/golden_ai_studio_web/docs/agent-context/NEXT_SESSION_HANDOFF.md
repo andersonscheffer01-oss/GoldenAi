@@ -409,3 +409,25 @@ The next session must preserve these invariants:
   `git diff --check`, and selective staging. Do not include `device_registry.json`, runtime
   databases, build/dist, logs, or unrelated dirty files. Do not push.
 - Next step is review of the dedicated 8D.2 commit; do not begin 8D.3 retry/recovery controls.
+
+## Computer Use 8D.3 Handoff
+
+Date: 2026-09-26
+
+- 8D.3 implementation is in `jarvis_core/task_manager/database.py`, `manager.py`,
+  `scheduler.py`, `control_center.py`, and the service wrappers. Tests are in
+  `tests/test_background_retry_recovery.py`.
+- The canonical task store is still `jarvis/golden_tasks.db`; schema version is 4. The
+  migration from v3 is additive. Do not touch runtime databases during validation.
+- Retry eligibility is read-only and distinguishes `SAFE_TO_RETRY`,
+  `REQUIRES_CONFIRMATION`, `RECOVERY_ONLY`, `UNSAFE_TO_REPLAY`, and `NOT_ELIGIBLE`.
+  Retry creates a new run linked by `source_run_id`; recovery reuses the existing run with
+  `attempt_kind=RECOVERY` and a one-time `recovery_count` guard.
+- The existing scheduler dispatches due retry/recovery runs through the same claim/lease
+  path and suppresses a competing occurrence in that tick. Recurring next occurrences are
+  preserved. No second retry/recovery engine exists.
+- Focused structural validation currently passes: 17 new tests and 184 relevant regression
+  tests before the v3 migration test was added. Full collection, full suite, secret scan,
+  compile, selective staging and local commit remain to be completed.
+- Preserve `device_registry.json`, runtime DBs, build/dist, Browser/UIA changes, and all
+  unrelated dirty artifacts. No real GUI action and no push.

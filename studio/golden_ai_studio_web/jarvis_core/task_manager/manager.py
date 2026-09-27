@@ -17,6 +17,7 @@ from .planner import PlannerContracts
 from .runner import BackgroundJobRunner
 from .condition_executor import ConditionAuditExecutor
 from .control_center import BackgroundControlCenter
+from ..computer_use_mission import ActionState, MissionCheckpointStore
 
 
 class TaskManager:
@@ -34,7 +35,12 @@ class TaskManager:
             "condition_audit": ConditionAuditExecutor(self.audit),
         }
         self.scheduler = BackgroundTaskScheduler(self.database, audit=self.audit)
-        self.control_center = BackgroundControlCenter(self.database, self.scheduler)
+        self.control_center = BackgroundControlCenter(
+            self.database, self.scheduler,
+            retry_eligibility=lambda run_id: self.get_retry_eligibility(
+                run_id, record_audit=False),
+            recovery_eligibility=lambda run_id: self.get_recovery_eligibility(
+                run_id, record_audit=False))
 
     def create(self, plan):
         plan = PlannerContracts.validate(plan)
@@ -109,6 +115,237 @@ class TaskManager:
 
     def background_control_snapshot(self, **kwargs):
         return self.control_center.get_snapshot(**kwargs)
+
+    def _mission_safety(self, run):
+        """Inspect existing mission receipts/checkpoints without executing work."""
+        mission_id = str(run.get("mission_id") or "")
+        if not mission_id:
+            return {"classification": "NONE", "checkpoint_id": "", "receipt_count": 0}
+        store = MissionCheckpointStore(self.database)
+        receipts = store.receipts_for_mission(mission_id)
+        if any(item.get("result_state") == ActionState.IN_FLIGHT_UNKNOWN.value
+               for item in receipts):
+            return {"classification": "UNSAFE_TO_REPLAY",
+                    "reason": "SIDE_EFFECT_UNCERTAIN",
+                    "checkpoint_id": "", "receipt_count": len(receipts)}
+        checkpoint, error = store.latest(mission_id)
+        if checkpoint:
+            return {"classification": "RECOVERY_ONLY",
+                    "reason": "CHECKPOINT_AVAILABLE",
+                    "checkpoint_id": checkpoint.get("checkpoint_id", ""),
+                    "receipt_count": len(receipts)}
+        return {"classification": "NOT_ELIGIBLE",
+                "reason": error or "MISSION_CHECKPOINT_NOT_FOUND",
+                "checkpoint_id": "", "receipt_count": len(receipts)}
+
+    @staticmethod
+    def _retry_budget(task):
+        try:
+            return max(0, min(3, int(task.trigger_config.get("retry_budget", 1))))
+        except (AttributeError, TypeError, ValueError):
+            return 1
+
+    def _retry_eligibility(self, run_id):
+        run = self.database.get_task_run(str(run_id))
+        if not run:
+            return {"eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "RUN_NOT_FOUND", "run_id": str(run_id)}
+        task = self.database.get_background_task(run["task_id"])
+        base = {"run_id": run["run_id"], "task_id": run["task_id"],
+                "status": run.get("status"), "source_run_id": run.get("source_run_id"),
+                "attempt": int(run.get("attempt") or 1),
+                "retry_budget": self._retry_budget(task) if task else 0}
+        if not task:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "TASK_NOT_FOUND"}
+        if task.status == BackgroundTaskStatus.CANCELLED:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "TASK_CANCELLED"}
+        if task.status == BackgroundTaskStatus.PAUSED:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "TASK_PAUSED"}
+        if run["status"] == RunStatus.COMPLETED.value:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "RUN_ALREADY_COMPLETED"}
+        if run["status"] != RunStatus.FAILED.value:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "RUN_NOT_FAILED"}
+        if run.get("error_code") in {"SECURITY_DENIED", "APPROVAL_REQUIRED",
+                                      "USER_CONFIRMATION_REQUIRED"}:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "SECURITY_OR_APPROVAL_REQUIRED"}
+        if run.get("error_code") in {"SIDE_EFFECT_UNCERTAIN", "ACTION_IN_FLIGHT_UNKNOWN"}:
+            return {**base, "eligible": False, "classification": "UNSAFE_TO_REPLAY",
+                    "reason": "SIDE_EFFECT_UNCERTAIN"}
+        existing = [item for item in self.database.list_task_runs(run["task_id"], 500)
+                    if item.get("source_run_id") == run["run_id"] and
+                    item.get("attempt_kind") == "RETRY"]
+        if existing:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "RETRY_ALREADY_CREATED", "retry_run_id": existing[0]["run_id"]}
+        if int(run.get("attempt") or 1) > self._retry_budget(task):
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "RETRY_BUDGET_EXHAUSTED"}
+        safety = self._mission_safety(run)
+        if safety["classification"] == "UNSAFE_TO_REPLAY":
+            return {**base, "eligible": False, **safety}
+        if safety["classification"] == "RECOVERY_ONLY":
+            return {**base, "eligible": False, **safety}
+        if safety["classification"] == "NOT_ELIGIBLE":
+            return {**base, "eligible": False, **safety}
+        classification = ("REQUIRES_CONFIRMATION"
+                          if str(task.task_type).lower() == "computer_use"
+                          else "SAFE_TO_RETRY")
+        return {**base, "eligible": True, "classification": classification,
+                "reason": "FAILED_BEFORE_SIDE_EFFECT"}
+
+    def get_retry_eligibility(self, run_id, record_audit=True):
+        result = self._retry_eligibility(run_id)
+        if record_audit:
+            self._audit(result.get("task_id", "desktop"),
+                        "TASK_RUN_RETRY_EVALUATED", {
+                            "run_id": str(run_id), "eligible": result.get("eligible"),
+                            "classification": result.get("classification"),
+                            "reason": result.get("reason")})
+        return result
+
+    def _recovery_eligibility(self, run_id):
+        run = self.database.get_task_run(str(run_id))
+        if not run:
+            return {"eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "RUN_NOT_FOUND", "run_id": str(run_id)}
+        task = self.database.get_background_task(run["task_id"])
+        base = {"run_id": run["run_id"], "task_id": run["task_id"],
+                "status": run.get("status"), "mission_id": run.get("mission_id"),
+                "recovery_count": int(run.get("recovery_count") or 0)}
+        if not task:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "TASK_NOT_FOUND"}
+        if task.status in {BackgroundTaskStatus.CANCELLED, BackgroundTaskStatus.PAUSED}:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "TASK_CANCELLED" if task.status == BackgroundTaskStatus.CANCELLED
+                    else "TASK_PAUSED"}
+        if run.get("error_code") in {"SIDE_EFFECT_UNCERTAIN", "ACTION_IN_FLIGHT_UNKNOWN"}:
+            return {**base, "eligible": False, "classification": "UNSAFE_TO_REPLAY",
+                    "reason": "SIDE_EFFECT_UNCERTAIN"}
+        if run.get("recovery_count"):
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "RECOVERY_ALREADY_APPLIED"}
+        now = time.time()
+        stale = (run["status"] in {RunStatus.CLAIMED.value, RunStatus.RUNNING.value}
+                 and (run.get("claim_expires_at") is None or
+                      float(run["claim_expires_at"]) <= now))
+        failed_mission = (run["status"] == RunStatus.FAILED.value and
+                          bool(run.get("mission_id")))
+        if not stale and not failed_mission:
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "RUN_NOT_STALE_OR_RECOVERABLE"}
+        safety = self._mission_safety(run)
+        if safety["classification"] == "UNSAFE_TO_REPLAY":
+            return {**base, "eligible": False, **safety}
+        if run.get("mission_id") and not safety.get("checkpoint_id"):
+            return {**base, "eligible": False, "classification": "NOT_ELIGIBLE",
+                    "reason": "MISSION_CHECKPOINT_NOT_FOUND"}
+        classification = ("REQUIRES_CONFIRMATION"
+                          if str(task.task_type).lower() == "computer_use"
+                          else "RECOVERY_ONLY")
+        return {**base, "eligible": True, "classification": classification,
+                "reason": "STALE_LEASE" if stale else "CHECKPOINT_AVAILABLE",
+                "checkpoint_id": safety.get("checkpoint_id", "")}
+
+    def get_recovery_eligibility(self, run_id, record_audit=True):
+        result = self._recovery_eligibility(run_id)
+        if record_audit:
+            self._audit(result.get("task_id", "desktop"),
+                        "TASK_RUN_RECOVERY_EVALUATED", {
+                            "run_id": str(run_id), "eligible": result.get("eligible"),
+                            "classification": result.get("classification"),
+                            "reason": result.get("reason")})
+        return result
+
+    def _authorize_retry_action(self, action, task, run, confirmation_token, actor):
+        is_mutating = str(task.task_type).lower() == "computer_use"
+        risk = Risk.HIGH if is_mutating else Risk.MEDIUM
+        tool = Tool(f"background_task_{action}", f"Safe {action} of background run",
+                    lambda **_kwargs: {}, risk=risk, confirmation=is_mutating,
+                    parameters={"task_id": str, "run_id": str, "action": str})
+        arguments = {"task_id": str(task.task_id), "run_id": str(run["run_id"]),
+                     "action": action, "actor": str(actor)}
+        if confirmation_token:
+            item = self.security.consume(confirmation_token)
+            if not item or item.get("tool") != tool.name or item.get("arguments") != arguments:
+                return {"success": False, "code": "INVALID_CONFIRMATION"}
+        else:
+            decision = self.security.decision(tool, risk=risk,
+                                              requires_confirmation=tool.confirmation)
+            if decision == "deny":
+                return {"success": False, "code": "SECURITY_DENIED"}
+            if decision == "confirm":
+                return {"success": False, "confirmation_required": True,
+                        "token": self.security.create_confirmation(
+                            tool, arguments, action, risk), "code": "CONFIRMATION_REQUIRED"}
+        return {"success": True}
+
+    def retry_background_run(self, run_id, confirmation_token=None,
+                             actor="background_control"):
+        result = self.get_retry_eligibility(run_id)
+        task = self.database.get_background_task(result.get("task_id"))
+        run = self.database.get_task_run(str(run_id))
+        self._audit(result.get("task_id", "desktop"), "TASK_RUN_RETRY_REQUESTED",
+                    {"run_id": str(run_id), "actor": str(actor)})
+        if not result.get("eligible"):
+            event = "UNSAFE_REPLAY_BLOCKED" if result.get("classification") == "UNSAFE_TO_REPLAY" \
+                else "TASK_RUN_RETRY_BLOCKED"
+            self._audit(result.get("task_id", "desktop"), event, {
+                "run_id": str(run_id), "reason": result.get("reason"),
+                "classification": result.get("classification")})
+            return {"success": False, "code": result.get("reason"), **result}
+        if result.get("classification") == "RECOVERY_ONLY":
+            return {"success": False, "code": "RECOVERY_REQUIRED", **result}
+        authorized = self._authorize_retry_action(
+            "retry", task, run, confirmation_token, actor)
+        if not authorized.get("success"):
+            if authorized.get("code") == "SECURITY_DENIED":
+                self._audit(task.task_id, "TASK_RUN_RETRY_BLOCKED", {
+                    "run_id": str(run_id), "reason": "SECURITY_DENIED"})
+            return {**authorized, "run_id": str(run_id), "task_id": task.task_id}
+        now = time.time()
+        scheduled_for = max(now, max((item.get("scheduled_for") or 0
+                                      for item in self.database.list_task_runs(task.task_id, 500)),
+                                     default=0) + 0.001)
+        created = self.database.create_retry_run(str(run_id), scheduled_for, now)
+        if not created.get("created"):
+            return {"success": False, "code": created.get("code"), **created}
+        self._audit(task.task_id, "TASK_RUN_RETRY_STARTED", {
+            "source_run_id": str(run_id), "run_id": created["run"]["run_id"],
+            "attempt": created["run"].get("attempt"), "actor": str(actor)})
+        return {"success": True, "code": "RETRY_STARTED", **created,
+                "source_run_id": str(run_id)}
+
+    def recover_background_run(self, run_id, confirmation_token=None,
+                               actor="background_control"):
+        result = self.get_recovery_eligibility(run_id)
+        task = self.database.get_background_task(result.get("task_id"))
+        run = self.database.get_task_run(str(run_id))
+        if not result.get("eligible"):
+            event = "UNSAFE_REPLAY_BLOCKED" if result.get("classification") == "UNSAFE_TO_REPLAY" \
+                else "TASK_RUN_RECOVERY_BLOCKED"
+            self._audit(result.get("task_id", "desktop"), event, {
+                "run_id": str(run_id), "reason": result.get("reason"),
+                "classification": result.get("classification")})
+            return {"success": False, "code": result.get("reason"), **result}
+        authorized = self._authorize_retry_action(
+            "recovery", task, run, confirmation_token, actor)
+        if not authorized.get("success"):
+            return {**authorized, "run_id": str(run_id), "task_id": task.task_id}
+        recovered = self.database.recover_task_run(
+            str(run_id), reason=result.get("reason", "RECOVERY"))
+        if not recovered.get("recovered"):
+            return {"success": False, "code": recovered.get("code"), **recovered}
+        self._audit(task.task_id, "TASK_RUN_RECOVERY_STARTED", {
+            "run_id": str(run_id), "reason": result.get("reason"),
+            "checkpoint_id": result.get("checkpoint_id", ""), "actor": str(actor)})
+        return {"success": True, "code": "RECOVERY_STARTED", **recovered}
 
     def execute_background_task(self, task, run):
         """Dispatch a background task to its explicit non-GUI handler."""

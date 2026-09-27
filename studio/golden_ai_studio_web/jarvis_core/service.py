@@ -610,6 +610,22 @@ class JarvisService:
         return self.task_manager.control_background("cancel", task_id,
                                                    confirmation_token, actor)
 
+    def background_retry_eligibility(self, run_id):
+        return self.task_manager.get_retry_eligibility(run_id)
+
+    def retry_background_task_run(self, run_id, confirmation_token=None,
+                                  actor="service"):
+        return self.task_manager.retry_background_run(
+            run_id, confirmation_token, actor)
+
+    def background_recovery_eligibility(self, run_id):
+        return self.task_manager.get_recovery_eligibility(run_id)
+
+    def recover_background_task_run(self, run_id, confirmation_token=None,
+                                    actor="service"):
+        return self.task_manager.recover_background_run(
+            run_id, confirmation_token, actor)
+
     @staticmethod
     def _memory_record_dict(record):
         return {"id": record.id, "type": record.memory_type.value,

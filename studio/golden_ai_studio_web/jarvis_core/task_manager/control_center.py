@@ -33,10 +33,13 @@ _TERMINAL = _COMPLETED | {
 class BackgroundControlCenter:
     """Keep read-only views separate from explicit task control operations."""
 
-    def __init__(self, database, scheduler=None, now_provider=None):
+    def __init__(self, database, scheduler=None, now_provider=None,
+                 retry_eligibility=None, recovery_eligibility=None):
         self.database = database
         self.scheduler = scheduler
         self.now_provider = now_provider or time.time
+        self.retry_eligibility = retry_eligibility
+        self.recovery_eligibility = recovery_eligibility
 
     def get_scheduler_status(self):
         if self.scheduler is not None and hasattr(self.scheduler, "status"):
@@ -269,6 +272,9 @@ class BackgroundControlCenter:
             },
             "approval_state": {"status": "PENDING" if active else "NONE",
                                "count": len(active)},
+            **({"retry_eligibility": self.retry_eligibility(run["run_id"]),
+                "recovery_eligibility": self.recovery_eligibility(run["run_id"])}
+               if self.retry_eligibility and self.recovery_eligibility else {}),
         }
 
     @staticmethod
