@@ -246,6 +246,76 @@ class TestCancel:
             # The important thing is it doesn't hang
             assert result["ok"] in (True, False)
 
+    @pytest.mark.asyncio
+    async def test_orchestrator_cancel_is_idempotent_and_closes_stream(self):
+        """Direct cancel signals the active stream once and closes it."""
+        closed = False
+
+        async def slow_stream(messages, model):
+            nonlocal closed
+            try:
+                while True:
+                    yield "token "
+                    await asyncio.sleep(0.01)
+            finally:
+                closed = True
+
+        with patch("jarvis_core.streaming.orchestrator.stream_groq", slow_stream):
+            orch = StreamingOrchestrator()
+            task = asyncio.create_task(orch.run([], provider="groq"))
+            await asyncio.sleep(0.03)
+            assert orch.cancel() is True
+            assert orch.cancel() is False
+            result = await asyncio.wait_for(task, timeout=1.0)
+
+        assert result["ok"] is False
+        assert result["error"] == "cancelled"
+        assert closed is True
+
+    @pytest.mark.asyncio
+    async def test_cancel_before_stream_is_safe_and_does_not_poison_restart(self):
+        """A pre-start cancel is a no-op and a later run remains usable."""
+        async def completed_stream(messages, model):
+            yield "Finished."
+
+        with patch("jarvis_core.streaming.orchestrator.stream_groq", completed_stream):
+            with patch("jarvis_core.streaming.tts_pipeline.synthesize_sentence", return_value=None):
+                orch = StreamingOrchestrator()
+                assert orch.cancel() is False
+                result = await asyncio.wait_for(orch.run([], provider="groq"), timeout=1.0)
+
+        assert result["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_cancel_after_completion_does_not_affect_next_run(self):
+        """A stale cancel after completion cannot cancel a new run."""
+        async def completed_stream(messages, model):
+            yield "Finished."
+
+        with patch("jarvis_core.streaming.orchestrator.stream_groq", completed_stream):
+            with patch("jarvis_core.streaming.tts_pipeline.synthesize_sentence", return_value=None):
+                orch = StreamingOrchestrator()
+                first = await asyncio.wait_for(orch.run([], provider="groq"), timeout=1.0)
+                assert first["ok"] is True
+                assert orch.cancel() is False
+                second = await asyncio.wait_for(orch.run([], provider="groq"), timeout=1.0)
+
+        assert second["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_turn_manager_cancellation_is_session_isolated(self):
+        """Cancelling turn A does not cancel turn B's independent event."""
+        from jarvis_core.streaming.turn_manager import TurnManager
+
+        manager = TurnManager()
+        turn_a = manager.new_turn()
+        turn_b = manager.new_turn()
+
+        assert manager.is_cancelled(turn_a) is True
+        assert manager.is_cancelled(turn_b) is False
+        manager.cancel_turn(turn_a)
+        assert manager.is_cancelled(turn_b) is False
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

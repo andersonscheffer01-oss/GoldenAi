@@ -163,6 +163,8 @@ class StreamingOrchestrator:
 
     def __init__(self):
         self._metrics = StreamingMetrics()
+        self._cancel_lock = threading.Lock()
+        self._active_cancel_event: Optional[threading.Event] = None
 
     async def run(
         self,
@@ -192,9 +194,17 @@ class StreamingOrchestrator:
 
         # Get cancel event from TurnManager (threading.Event, cross-thread safe)
         cancel_event: Optional[threading.Event] = None
-        if turn_manager and turn_id:
+        if turn_manager is not None and turn_id is not None:
             cancel_event = turn_manager.get_cancel_event(turn_id)
+            if cancel_event is None:
+                cancel_event = threading.Event()
+                cancel_event.set()
             self._metrics.turn_id = turn_id
+        else:
+            cancel_event = threading.Event()
+
+        with self._cancel_lock:
+            self._active_cancel_event = cancel_event
 
         # TURN_START
         clock.mark_turn_start()
@@ -206,6 +216,8 @@ class StreamingOrchestrator:
 
         full_response = []
         first_audio_time = None
+
+        stream_iterator = None
 
         try:
             # Check cancellation before starting (threading.Event, cross-thread safe)
@@ -220,7 +232,8 @@ class StreamingOrchestrator:
             tool_call_stop = False
             first_audio_played = False
 
-            async for token in stream_fn(messages, model):
+            stream_iterator = stream_fn(messages, model)
+            async for token in stream_iterator:
                 # Check cancellation (threading.Event, cross-thread safe)
                 if cancel_event and cancel_event.is_set():
                     break
@@ -304,6 +317,13 @@ class StreamingOrchestrator:
                                 except OSError:
                                     pass
 
+            if cancel_event and cancel_event.is_set():
+                tts.cancel()
+                player.stop()
+                clock.mark_provider_complete()
+                clock.mark_response_complete()
+                return {"ok": False, "error": "cancelled", "metrics": self._metrics}
+
             # Mark provider complete
             clock.mark_provider_complete()
 
@@ -367,20 +387,33 @@ class StreamingOrchestrator:
             player.stop()
             return {"ok": False, "error": str(e)}
         finally:
+            if stream_iterator is not None:
+                close_stream = getattr(stream_iterator, "aclose", None)
+                if close_stream is not None:
+                    try:
+                        await close_stream()
+                    except Exception as exc:
+                        log.debug("Provider stream close failed: %s", exc)
             tts.cleanup()
             # Cleanup turn data
-            if turn_manager and turn_id:
+            if turn_manager is not None and turn_id is not None:
                 turn_manager.cleanup_turn(turn_id)
+            with self._cancel_lock:
+                if self._active_cancel_event is cancel_event:
+                    self._active_cancel_event = None
 
-    def cancel(self) -> None:
+    def cancel(self) -> bool:
         """Cancel the current streaming operation.
 
-        Note: Prefer using TurnManager.cancel_current() for cross-thread cancel.
-        This method is kept for backward compatibility.
+        Prefer using TurnManager.cancel_current() when a turn is available.
+        The local event keeps the standalone orchestrator contract cooperative.
         """
-        # This is a fallback. The preferred method is:
-        # turn_manager.cancel_current() which sets the threading.Event
-        log.warning("cancel() called directly — prefer TurnManager.cancel_current()")
+        with self._cancel_lock:
+            event = self._active_cancel_event
+            if event is None or event.is_set():
+                return False
+            event.set()
+            return True
 
     def _select_stream(self, provider: str):
         """Select the appropriate streaming function for the provider."""
