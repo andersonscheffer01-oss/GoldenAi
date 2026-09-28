@@ -1,16 +1,15 @@
 # JARVIS Voice Conversation Adapter Design
 
-Status: `ADAPTER_3_IMPLEMENTED`
+Status: `ADAPTER_4_IMPLEMENTED`
 Review result: `PASS_WITH_RESTRICTIONS`
-Baseline: `ec11f3d`
+Baseline: `3933f9b`
 Source audit: `docs/architecture/JARVIS_VOICE_CONVERSATION_STACK_AUDIT.md`
 Recommendation: `HYBRID`
 
 This document defines the smallest adapter layer for useful conversation
-patterns from Pipecat, LiveKit Agents, and Wyoming. Adapter 1, Adapter 2, and
-the bounded Adapter 3 TTS orchestration are implemented without adding
-dependencies, running the real-speech VAD gate, or replacing any Golden
-owner. Adapter 4 remains deferred.
+patterns from Pipecat, LiveKit Agents, and Wyoming. Adapters 1 through 4 are
+implemented without adding dependencies, running the real-speech VAD gate, or
+replacing any Golden owner. Real audio gates remain deferred.
 
 ## Adapter 1 implementation status
 
@@ -101,6 +100,46 @@ Normal completion, cancellation, provider failure, and session stop all drain
 the bounded queue and join the worker. Provider errors are returned as bounded
 results without corrupting `VoiceService`. No real TTS provider, model,
 microphone, speaker, network, or persistence path is used by this gate.
+
+## Adapter 4 implementation status
+
+`VOICE_ADAPTER_4` extends the existing `VoiceService` and
+`RealtimeVoicePipeline` lifecycle. `VoiceService` remains the only session
+owner, `TurnManager` remains the only turn owner, and the existing
+`VoiceStateMachine` remains the only state machine. A runtime restart creates a
+new `VoiceSession` and turn; double start is idempotent while a legacy loop is
+alive, and stop is idempotent after cancelling the session, output generation,
+turn, input provider, realtime queue, and owned monitoring worker.
+
+The synchronous stop boundary now requests the existing async realtime
+pipeline to finish on its own event loop. When stop is called from that same
+loop it schedules the existing `pipeline.stop()` task without blocking the
+loop; when called from another thread it waits only a bounded two seconds.
+`start_audio_input` awaits that owned cleanup task before reusing the same
+pipeline/provider, so restart cannot race the previous frame worker.
+
+Component failures use one bounded recovery transition: the failed operation
+and generation are invalidated first, the current turn is cancelled, one new
+turn is created through `TurnManager`, and the existing session returns to
+`WAITING_WAKE` when still active. STT and coordinator failures reset only the
+current realtime utterance and return the existing pipeline to `LISTENING`.
+Core failure does not speak an invented error response. TTS/output failures
+cancel pending work and use the same VoiceService recovery boundary. There is
+no automatic provider retry or task recreation loop.
+
+Late transcript callbacks are rejected when their session is stale or already
+cancelled. Late Core/TTS work continues to use the existing turn/generation
+guards. Partial transcripts remain observable-only and never cross the Core
+handoff. State callbacks from the realtime pipeline are mirrored into the
+existing VoiceService legacy state for consistency; no new state owner is
+created.
+
+Offline regression coverage is in `tests/test_voice_adapter4_lifecycle.py`.
+It covers deterministic start/stop/restart, double start/stop, rapid cycles,
+late session callbacks, stop during pending STT, STT/coordinator/Core/TTS/
+output failures, partial isolation, stale generation rejection, bounded worker
+cleanup, and future-turn recovery. No microphone, speaker, model, cloud,
+database, or raw audio path is used.
 
 ## Non-negotiable architecture
 
@@ -939,6 +978,99 @@ RUN_REAL_SPEECH_VAD_GATE_NOW: NO
 NEXT_GATE: IMPLEMENTATION AUTHORIZATION FOR VOICE_ADAPTER_1
 NEXT_STEP: Approve the design, then implement only the deterministic semantic adapter and its offline tests.
 KNOWN_RESTRICTIONS: No production implementation, no new dependency, no model download, no microphone, no playback, no device registry change, no database migration, no push.
+```
+
+## Adapter 4 verification record
+
+```yaml
+JARVIS_VOICE_PHASE: PARTIAL
+VOICE_ADAPTER_4: PASS_WITH_RESTRICTIONS
+BASELINE: 3933f9b
+IMPLEMENTATION_FORM: EXTEND_EXISTING
+
+VOICE_SERVICE_REMAINS_OWNER: YES
+TURN_MANAGER_REMAINS_OWNER: YES
+SECOND_STATE_MACHINE_CREATED: NO
+ADAPTER_1_PRESERVED: YES
+ADAPTER_2_PRESERVED: YES
+ADAPTER_3_PRESERVED: YES
+NEW_DEPENDENCY: NO
+
+SESSION_START: PASS
+SESSION_STOP: PASS
+DOUBLE_STOP: PASS
+DOUBLE_START: PASS
+SESSION_RESTART: PASS
+RAPID_START_STOP: PASS
+SESSION_ID_ISOLATION: PASS
+
+STOP_DURING_LISTENING: PASS
+STOP_DURING_TRANSCRIPTION: PASS
+STOP_DURING_THINKING: PASS
+STOP_DURING_SPEAKING: PASS
+LATE_OUTPUT_AFTER_STOP_REJECTED: YES
+
+STT_FAILURE: PASS
+SEMANTIC_FAILURE: PASS
+COORDINATOR_FAILURE: PASS
+CORE_FAILURE: PASS
+TTS_FAILURE: PASS
+AUDIO_OUTPUT_FAILURE: PASS
+RECOVERY_BOUNDED: YES
+FUTURE_TURN_AFTER_FAILURE: PASS
+
+STALE_SESSION_REJECTED: YES
+STALE_TURN_REJECTED: YES
+STALE_UTTERANCE_REJECTED: YES
+STALE_GENERATION_REJECTED: YES
+EXACTLY_ONCE_COMPLETION_PRESERVED: YES
+PARTIAL_TRANSCRIPT_EXECUTES_CORE: NO
+STALE_TTS_CAN_PLAY: NO
+
+ASYNC_TASK_OWNERSHIP_DEFINED: YES
+ZOMBIE_TASKS: NO
+MEMORY_BOUNDED: YES
+CLEANUP_ON_STOP: PASS
+CLEANUP_ON_FAILURE: PASS
+
+ADAPTER_1_TESTS: 14 passed
+ADAPTER_2_TESTS: 11 passed
+ADAPTER_3_TESTS: 12 passed
+NEW_ADAPTER_4_TESTS: 14 passed
+FOCUSED_TESTS: 162 passed
+BROADER_REGRESSION: PENDING_CLOSURE_RUN
+FAILED_NEW: NONE
+FAILED_PRE_EXISTING: NONE_IN_FOCUSED_RUN
+BLOCKED_ENVIRONMENT: sounddevice unavailable for the known runtime wiring gate
+PY_COMPILE: PASS
+SECRET_SCAN: PENDING_CLOSURE_RUN
+GIT_DIFF_CHECK: PASS
+
+CORE_GENERATION_CANCEL: PARTIAL
+LOCAL_TTS: PARTIAL
+REAL_SPEECH_VAD: NOT_RUN
+HUMAN_BARGE_IN_RETEST: NOT_RUN
+FULL_NATURAL_CONVERSATION_E2E: NOT_RUN
+
+MICROPHONE_OPENED: NO
+AUDIO_PLAYED: NO
+MODELS_DOWNLOADED: NO
+REMOTE_AUDIO_SENT: NO
+REMOTE_TEXT_SENT: NO
+DEVICE_REGISTRY_TOUCHED: NO
+TASK_DB_SCHEMA_MIGRATION: NONE
+UNRELATED_WORKTREE_CHANGES_PRESERVED: YES
+PUSH: NO
+
+FILES_CREATED:
+  - tests/test_voice_adapter4_lifecycle.py
+FILES_MODIFIED:
+  - jarvis_core/voice_service.py
+  - jarvis_core/realtime_voice/integration.py
+  - docs/architecture/JARVIS_VOICE_CONVERSATION_ADAPTER_DESIGN.md
+NEXT_GATE: VOICE_CONVERSATION_ADAPTER_CLOSURE_REVIEW
+NEXT_STEP: Run closure review after the full static/regression gate.
+KNOWN_RESTRICTIONS: Core generation cancellation remains cooperative/partial; local TTS remains partial; real speech/audio gates were not run; the known sounddevice runtime wiring block remains unchanged.
 ```
 
 ## Adapter 2 verification record

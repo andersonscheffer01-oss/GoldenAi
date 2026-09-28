@@ -108,6 +108,7 @@ class RealtimeVoicePipeline:
         self._turn_id = 0
         self._transcript_gate = TranscriptAcceptanceGate()
         self._conversation_coordinator = ConversationStreamCoordinator()
+        self._recovery_requested = False
 
         # Metrics
         self._speech_started_at: float = 0.0
@@ -184,6 +185,7 @@ class RealtimeVoicePipeline:
         self._hybrid.reset()
         self._utterance.clear()
         self._stats.clear()
+        self._recovery_requested = False
         if self._sm.state is not ConversationalState.LISTENING:
             self._sm.force_idle()
 
@@ -203,6 +205,7 @@ class RealtimeVoicePipeline:
         self._stt_cancellation.cancel("pipeline_stopped")
         self._transcript_gate.cancel()
         self._conversation_coordinator.cancel("pipeline_stopped")
+        self._recovery_requested = False
         self._vad.reset()
         self._hybrid.reset()
         self._utterance.clear()
@@ -383,7 +386,10 @@ class RealtimeVoicePipeline:
         self, completion: ConversationCompletion | None
     ) -> None:
         """Return to listening only when the coordinator requests continuation."""
-        if (
+        if self._recovery_requested:
+            self._recovery_requested = False
+            target = ConversationalState.LISTENING
+        elif (
             completion is not None
             and completion.status is ConversationResultStatus.WAITING_CONTINUATION
         ):
@@ -444,11 +450,17 @@ class RealtimeVoicePipeline:
                     return None
                 if event.is_final:
                     if self._transcript_gate.accept(event):
-                        completion = self._conversation_coordinator.observe_transcript(
-                            event,
-                            turn_id=request_turn_id,
-                            acoustic_endpoint=acoustic_endpoint,
-                        )
+                        try:
+                            completion = self._conversation_coordinator.observe_transcript(
+                                event,
+                                turn_id=request_turn_id,
+                                acoustic_endpoint=acoustic_endpoint,
+                            )
+                        except Exception as exc:
+                            self._recover_after_component_failure(
+                                "conversation_coordinator", exc
+                            )
+                            return None
                         if not completion.eligible_for_dispatch:
                             self._stats["coordinator_nonfinals"] = int(
                                 self._stats.get("coordinator_nonfinals", 0)
@@ -476,6 +488,7 @@ class RealtimeVoicePipeline:
                 self._stats["stt_errors"] = int(self._stats.get("stt_errors", 0)) + 1
                 self._stats["last_stt_error"] = str(exc)[:240]
                 log.warning("STT provider failed safely: %s", exc)
+                self._recover_after_component_failure("stt", exc)
             return
 
         if self._on_transcription is not None:
@@ -483,6 +496,31 @@ class RealtimeVoicePipeline:
                 self._on_transcription(audio_bytes.hex())
             except Exception:
                 log.exception("on_transcription raised")
+
+    def _recover_after_component_failure(self, component: str, error: Any) -> None:
+        """Reset one failed utterance without recreating the pipeline owner."""
+        self._stats["recovery_attempts"] = int(
+            self._stats.get("recovery_attempts", 0)
+        ) + 1
+        self._stats["last_recovery"] = {
+            "component": str(component),
+            "error": str(error)[:240],
+        }
+        self._recovery_requested = True
+        self._stt_cancellation.cancel(f"{component}_failure")
+        self._transcript_gate.begin(self._session_id)
+        self._stt_cancellation = VoiceCancellation()
+        self._conversation_coordinator.replace_turn(
+            turn_id=self._turn_id,
+            epoch=self._transcript_gate.epoch,
+        )
+        self._utterance.clear()
+        self._vad.reset()
+        self._hybrid.reset()
+        if self._sm.state is not ConversationalState.STOPPED:
+            self._sm.force_idle()
+            self._sm.transition(ConversationalState.LISTENING)
+            self._emit_state(ConversationalState.LISTENING)
 
     def get_vad_rms_fallback(self, frame: bytes) -> Optional[VADEvent]:
         """RMS-based fallback when Silero is unavailable.

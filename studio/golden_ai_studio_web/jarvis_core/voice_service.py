@@ -157,6 +157,23 @@ class VoiceService:
         self._push_to_talk_requested = threading.Event()
         self._desktop_session_id: str = ""
         self._conversation_id: str = uuid.uuid4().hex  # persists across cancelled turns
+        # Adapter 4 lifecycle guard.  This protects only start/stop bookkeeping;
+        # it does not replace the canonical VoiceStateMachine or TurnManager.
+        self._lifecycle_lock = threading.RLock()
+        self._realtime_stop_task = None
+        self._recovery_in_progress = False
+        self._last_recovery = {}
+
+    _REALTIME_STATE_MAP = {
+        "idle": "WAITING_WAKE",
+        "listening": "LISTENING",
+        "transcribing": "TRANSCRIBING",
+        "thinking": "PROCESSING",
+        "speaking": "SPEAKING",
+        "interrupted": "INTERRUPTED",
+        "error": "ERROR",
+        "stopped": "OFF",
+    }
 
     _STATE_MAP = {
         "OFF": ConversationalState.STOPPED,
@@ -210,62 +227,164 @@ class VoiceService:
 
     def start(self, service) -> dict:
         """Inicia a escuta local. `service` = JarvisService (obrigatorio)."""
-        if self.is_running():
-            return {"ok": True, "message": "VoiceService ja esta rodando."}
-        if self._audio_input_provider is not None and self._audio_input_provider.is_running:
-            return {
-                "ok": False,
-                "error": "AudioInputProvider ja esta capturando; recuse o loop legado.",
-            }
-        if service is None:
-            return {"ok": False, "error": "JarvisService nao fornecido."}
-        self.service = service
-        self._voice_session = VoiceSession(metadata={"owner": "VoiceService"})
-        self._session_id = self._voice_session.session_id
-        self._wake_lifecycle.reset_session(self._session_id)
-        self._wake_lifecycle.arm()
-        self._operation_cancellation = VoiceCancellation()
-        self._tts_epoch = 0
-        self.stop_event.clear()
-        self._voice = get_voice()
-        self._voice.warmup_async()
-        self.thread = threading.Thread(target=self._loop, name="jarvis-voice", daemon=True)
-        self.thread.start()
-        self.state = "OUVINDO"
-        return {"ok": True, "message": 'VoiceService iniciado. Diga "Jarvis" + comando.'}
+        with self._lifecycle_lock:
+            if self.is_running():
+                return {"ok": True, "message": "VoiceService ja esta rodando."}
+            if self._audio_input_provider is not None and self._audio_input_provider.is_running:
+                return {
+                    "ok": False,
+                    "error": "AudioInputProvider ja esta capturando; recuse o loop legado.",
+                }
+            if service is None:
+                return {"ok": False, "error": "JarvisService nao fornecido."}
+
+            # A restart is an explicit new session.  The old operation token,
+            # output generation, and turn are never reused by session B.
+            if self._streaming_tts is not None:
+                self._streaming_tts.cancel("session_restart")
+            if self._tts_pipeline is not None:
+                self._tts_pipeline.cancel("session_restart")
+            self._voice_session = VoiceSession(metadata={"owner": "VoiceService"})
+            self._session_id = self._voice_session.session_id
+            self._wake_lifecycle.reset_session(self._session_id)
+            self._wake_lifecycle.arm()
+            self._operation_cancellation = VoiceCancellation()
+            self._current_turn_id = self._turn_manager.new_turn()
+            self._tts_epoch = 0
+            self._recovery_in_progress = False
+            self._last_recovery = {}
+            self.stop_event.clear()
+            self.service = service
+            self._voice = get_voice()
+            self._voice.warmup_async()
+            self.thread = threading.Thread(target=self._loop, name="jarvis-voice", daemon=True)
+            self.thread.start()
+            self.state = "OUVINDO"
+            return {"ok": True, "message": 'VoiceService iniciado. Diga "Jarvis" + comando.'}
 
     def stop(self) -> dict:
-        if self._streaming_tts is not None:
-            self._streaming_tts.cancel("runtime_shutdown")
-        if self._tts_pipeline is not None:
-            self._tts_pipeline.cancel("runtime_shutdown")
-        if self._audio_input_provider is not None:
-            self._audio_input_provider.stop()
+        with self._lifecycle_lock:
+            was_running = self.is_running()
+            self.stop_event.set()
+            if self._streaming_tts is not None:
+                self._streaming_tts.cancel("runtime_shutdown")
+            if self._tts_pipeline is not None:
+                self._tts_pipeline.cancel("runtime_shutdown")
+            if self._audio_input_provider is not None:
+                self._audio_input_provider.stop()
             if self._realtime_pipeline is not None:
+                self._realtime_pipeline.cancel_transcription("runtime_shutdown")
                 self._realtime_pipeline.queue.cancel()
-        self._wake_lifecycle.shutdown()
-        self._voice_session.cancel("runtime_shutdown")
-        self._operation_cancellation.cancel("runtime_shutdown")
-        self._turn_manager.cancel_current()
-        self._stop_barge_in_monitor()
-        self._turn_manager.cleanup_all()
-        self._barge_in_cancel.clear()
-        self._conversation_messages.clear()
-        self._barge_in_pre_roll.clear()
-        self._barge_in_user_audio.clear()
-        self._barge_in_followup_active = False
-        self._utterance_source = ""
-        self._push_to_talk_requested.clear()
-        self._desktop_session_id = ""
-        self._conversation_id = uuid.uuid4().hex
-        if not self.is_running():
+                self._schedule_realtime_stop()
+            self._wake_lifecycle.shutdown()
+            self._voice_session.cancel("runtime_shutdown")
+            self._operation_cancellation.cancel("runtime_shutdown")
+            self._turn_manager.cancel_current()
+            self._stop_barge_in_monitor()
+            self._turn_manager.cleanup_all()
+            self._barge_in_cancel.clear()
+            self._conversation_messages.clear()
+            self._barge_in_pre_roll.clear()
+            self._barge_in_user_audio.clear()
+            self._barge_in_followup_active = False
+            self._utterance_source = ""
+            self._push_to_talk_requested.clear()
+            self._desktop_session_id = ""
+            self._conversation_id = uuid.uuid4().hex
+            if self.thread and self.thread is not threading.current_thread():
+                self.thread.join(timeout=2.0)
             self.state = "OFF"
-            return {"ok": True, "message": "VoiceService nao estava rodando."}
-        self.stop_event.set()
-        if self.thread and self.thread is not threading.current_thread():
-            self.thread.join(timeout=2.0)
-        self.state = "OFF"
-        return {"ok": True, "message": "VoiceService parado."}
+            return {
+                "ok": True,
+                "message": "VoiceService parado." if was_running else "VoiceService nao estava rodando.",
+                "already_stopped": not was_running,
+            }
+
+    def _schedule_realtime_stop(self) -> None:
+        """Ask the existing async pipeline to finish without blocking its loop."""
+        pipeline = self._realtime_pipeline
+        if pipeline is None:
+            return
+        loop = getattr(pipeline, "_loop", None)
+        if loop is None or not loop.is_running():
+            return
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if current_loop is loop:
+            self._realtime_stop_task = loop.create_task(pipeline.stop())
+            return
+        try:
+            future = asyncio.run_coroutine_threadsafe(pipeline.stop(), loop)
+            future.result(timeout=2.0)
+        except Exception as exc:
+            # Cancellation and the queue sentinel already make the path safe;
+            # keep the failure observable without blocking shutdown forever.
+            self.last_error = f"realtime_stop: {str(exc)[:240]}"
+
+    def _on_realtime_state_change(
+        self, value: str, external: Optional[Callable[[str], None]] = None
+    ) -> None:
+        """Mirror pipeline state into the existing VoiceService state owner."""
+        legacy = self._REALTIME_STATE_MAP.get(str(value).casefold())
+        if legacy is not None and not (
+            legacy == "OFF" and self._voice_session.cancellation.is_cancelled
+        ):
+            self.state = legacy
+        if external is not None:
+            try:
+                external(value)
+            except Exception:
+                log.exception("external realtime state callback raised")
+
+    def _recover_after_failure(self, component: str, error: Any) -> bool:
+        """Perform one bounded, identity-invalidating recovery transition."""
+        with self._lifecycle_lock:
+            if self._recovery_in_progress:
+                return False
+            self._recovery_in_progress = True
+            try:
+                message = str(error or "unknown failure")[:240]
+                self._last_recovery = {
+                    "component": str(component),
+                    "error": message,
+                    "session_id": self._session_id,
+                    "previous_turn_id": self._current_turn_id,
+                    "at": time.time(),
+                }
+                self.stats["recovery_attempts"] = self.stats.get("recovery_attempts", 0) + 1
+                self.stats["component_failures"] = self.stats.get("component_failures", 0) + 1
+                self.last_error = f"{component}: {message}"
+
+                # Invalidate before cancellation so late Core/TTS callbacks can
+                # never become current again.
+                self._tts_epoch += 1
+                self._operation_cancellation.cancel(f"{component}_failure")
+                if self._streaming_tts is not None:
+                    self._streaming_tts.cancel(f"{component}_failure")
+                if self._tts_pipeline is not None:
+                    self._tts_pipeline.cancel(f"{component}_failure")
+                self._turn_manager.cancel_current()
+                self._current_turn_id = self._turn_manager.new_turn()
+                if (
+                    self._realtime_pipeline is not None
+                    and self._realtime_pipeline.session_id == self._session_id
+                ):
+                    self._realtime_pipeline.replace_turn(self._current_turn_id)
+                self._operation_cancellation = VoiceCancellation()
+                self._barge_in_cancel.clear()
+                self._speaking_event.clear()
+
+                if self.stop_event.is_set() or self._voice_session.cancellation.is_cancelled:
+                    self._last_recovery["result"] = "shutdown"
+                    return False
+                if self._state_machine.state is not ConversationalState.STOPPED:
+                    self.state = "WAITING_WAKE"
+                self._last_recovery["result"] = "recovered"
+                return True
+            finally:
+                self._recovery_in_progress = False
 
     def cancel_current_operation(self, reason: str = "operation_cancelled") -> dict:
         """Cooperatively cancel the active turn/TTS boundary without killing a thread."""
@@ -469,6 +588,10 @@ class VoiceService:
                 "ok": False,
                 "error": "VoiceService legacy loop ja esta capturando; pare-o antes do provider.",
             }
+        pending_stop = self._realtime_stop_task
+        if pending_stop is not None and not pending_stop.done():
+            await pending_stop
+        self._realtime_stop_task = None
         pipeline = self.get_realtime_voice_pipeline()
         active_stt_provider = stt_provider
         active_transcription_callback = on_transcription
@@ -510,10 +633,13 @@ class VoiceService:
         frame_task = getattr(pipeline, "_frame_task", None)
         if frame_task is None or frame_task.done():
             self._realtime_cancellation = VoiceCancellation()
+            state_callback = lambda value: self._on_realtime_state_change(
+                value, on_state_change
+            )
             await pipeline.start(
                 loop=active_loop,
                 on_transcription=active_transcription_callback,
-                on_state_change=on_state_change,
+                on_state_change=state_callback,
                 stt_provider=active_stt_provider,
                 session_id=self._voice_session.session_id,
                 cancellation=self._realtime_cancellation,
@@ -700,6 +826,19 @@ class VoiceService:
     def _handle_transcript_event(self, event: TranscriptEvent) -> None:
         """Route only accepted final events through the existing Core boundary."""
         if not isinstance(event, TranscriptEvent) or not event.is_final:
+            return
+        if (
+            event.session_id != self._session_id
+            or self._voice_session.cancellation.is_cancelled
+        ):
+            self.last_rejection = {
+                "classification": "STALE_EVENT",
+                "rejected_reason": "session_invalidated",
+                "event_session_id": event.session_id,
+                "session_id": self._session_id,
+                "at": time.time(),
+            }
+            self.stats["stale_events"] = self.stats.get("stale_events", 0) + 1
             return
         text = event.text.strip()
         if not text:
@@ -1508,6 +1647,7 @@ class VoiceService:
         tool = tool_provider = ""
         llm_latency = 0
         error = ""
+        core_failed = False
         ack = {"emitted": False, "message": "", "reason": "instant"}
         try:
             from .response_policy import ack_for_decision
@@ -1550,6 +1690,7 @@ class VoiceService:
             t_exec = time.time()
             if not result.get("ok"):
                 response = str(result.get("error") or "Nao consegui processar.")
+                core_failed = True
             else:
                 plan = result.get("plan", {})
                 if set(plan) == {"response"}:
@@ -1576,7 +1717,22 @@ class VoiceService:
             self.last_error = response
             self.stats["errors"] += 1
             error = str(exc)[:300]
+            core_failed = True
             exec_ms = 0
+        if core_failed:
+            # Keep the existing user-facing, non-sensitive error fallback. It
+            # is a valid status response, never an invented Core answer.
+            self._recover_after_failure("core", error or response)
+            output = output or get_output_mode_manager().parse(
+                str(command or ""), source="voice"
+            )
+            self.last_response = response
+            if output.get("speak", True):
+                self.state = "SPEAKING"
+                self._speak(to_spoken_text(response))
+            else:
+                self.state = "WAITING_WAKE"
+            return
         timings.setdefault("routing_ms", int((t_exec - t_route) * 1000))
         timings["execution_ms"] = exec_ms
         timings["llm_ms"] = llm_latency
@@ -1659,22 +1815,35 @@ class VoiceService:
                         self._tts_first_audio_at = time.time()
                     if getattr(result, "cancelled", False):
                         self.state = "INTERRUPTED"
-                    return bool(getattr(result, "ok", False))
+                    spoken = bool(getattr(result, "ok", False))
+                    if not spoken and not getattr(result, "cancelled", False):
+                        self._recover_after_failure(
+                            "tts", getattr(result, "error", "provider failure")
+                        )
+                    return spoken
                 except Exception as exc:
                     log.warning("Provider-neutral TTS failed: %s", exc)
                     self.last_error = str(exc)
+                    self._recover_after_failure("tts", exc)
                     return False
             if self.tts_mode in ("auto", "edge"):
                 if self._speak_edge(text):
                     return True
                 if self.tts_mode == "edge":
+                    self._recover_after_failure("tts", "edge provider failure")
                     return False
-            return self._speak_sapi(text)
+            spoken = self._speak_sapi(text)
+            if not spoken:
+                self._recover_after_failure("tts", "legacy provider failure")
+            return spoken
         finally:
             self._ignore_input_until = time.time() + max(.2, float(
                 os.getenv("JARVIS_TTS_INPUT_GUARD_SECONDS", ".6")))
             self._speaking_event.clear()
-            if self._barge_in_cancel.is_set() or operation_cancellation.is_cancelled:
+            if (
+                (self._barge_in_cancel.is_set() or operation_cancellation.is_cancelled)
+                and self.state in {"SPEAKING", "TRANSCRIBING", "PROCESSING"}
+            ):
                 self.state = "INTERRUPTED"
 
     def _speak_edge(self, text: str) -> bool:
@@ -1806,6 +1975,15 @@ class VoiceService:
                 "current_turn_id": self._turn_manager.current_turn_id,
                 "barge_in_enabled": is_barge_in_enabled(),
                 "barge_in_cancel_set": self._barge_in_cancel.is_set(),
+            },
+            "lifecycle": {
+                "owner": "VoiceService",
+                "recovery_in_progress": self._recovery_in_progress,
+                "last_recovery": dict(self._last_recovery),
+                "realtime_stop_pending": bool(
+                    self._realtime_stop_task is not None
+                    and not self._realtime_stop_task.done()
+                ),
             },
             "conversation_turns": len(self._conversation_messages),
         }
