@@ -277,6 +277,8 @@ class RealWebProviderM151Case(unittest.TestCase):
             self.assertEqual("web_research", result["plan"]["tool"])
             self.assertEqual("WEB", result["orchestrator"])
         finally:
+            brain.close()
+            service.close()
             temp.cleanup()
 
     def test_fast_paths_and_voice_fast_do_not_research(self):
@@ -296,6 +298,8 @@ class RealWebProviderM151Case(unittest.TestCase):
                 calc = brain.interpret("abra calculadora", source="voice")
             self.assertEqual("open_program", calc["plan"]["tool"])
         finally:
+            brain.close()
+            service.close()
             temp.cleanup()
 
     def test_real_smoke_optional(self):
