@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import math
 import threading
 import time
@@ -96,6 +97,7 @@ class VADDiagnosticObservation:
     frame_records: list[dict[str, float | str]] = field(default_factory=list)
     probabilities: list[float] = field(default_factory=list)
     probability_records: list[dict[str, float | str]] = field(default_factory=list)
+    frame_hashes: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
     mic_frames_before_window: int = 0
     mic_frames_received: int = 0
@@ -110,6 +112,7 @@ class VADDiagnosticObservation:
         self.frame_records.clear()
         self.probabilities.clear()
         self.probability_records.clear()
+        self.frame_hashes.clear()
         self.events.clear()
         self.mic_frames_before_window = int(mic_frames_before_window)
 
@@ -120,10 +123,17 @@ class VADDiagnosticObservation:
         if samples.size == 0:
             return
         normalized = samples.astype(np.float32) / 32768.0
+        self.frame_hashes.append(hashlib.sha256(frame).hexdigest())
         self.frame_records.append({
             "timestamp": float(timestamp),
+            "raw_min": float(np.min(samples)),
+            "raw_max": float(np.max(samples)),
             "raw_rms": float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))),
             "raw_peak": float(np.max(np.abs(samples))),
+            "sample_count": int(samples.size),
+            "nonzero_samples": int(np.count_nonzero(samples)),
+            "unique_sample_values": int(np.unique(samples).size),
+            "clipped_samples": int(np.count_nonzero(np.abs(samples) >= 32767)),
             "normalized_rms": float(np.sqrt(np.mean(normalized.astype(np.float64) ** 2))),
             "normalized_peak": float(np.max(np.abs(normalized))),
             "normalized_min": float(np.min(normalized)),
@@ -156,7 +166,13 @@ class VADDiagnosticObservation:
 
     def report(self) -> dict[str, Any]:
         raw_rms = self._values(self.frame_records, "raw_rms")
+        raw_min = self._values(self.frame_records, "raw_min")
+        raw_max = self._values(self.frame_records, "raw_max")
         raw_peak = self._values(self.frame_records, "raw_peak")
+        sample_counts = self._values(self.frame_records, "sample_count")
+        nonzero_samples = self._values(self.frame_records, "nonzero_samples")
+        unique_sample_values = self._values(self.frame_records, "unique_sample_values")
+        clipped_samples = self._values(self.frame_records, "clipped_samples")
         normalized_rms = self._values(self.frame_records, "normalized_rms")
         normalized_peak = self._values(self.frame_records, "normalized_peak")
         normalized_min = self._values(self.frame_records, "normalized_min")
@@ -169,6 +185,12 @@ class VADDiagnosticObservation:
         ]
         expected = round(self.duration_seconds * 1000.0 / FRAME_DURATION_MS)
         queue = self.provider_diagnostics
+        total_samples = sum(sample_counts)
+        total_nonzero = sum(nonzero_samples)
+        total_clipped = sum(clipped_samples)
+        frame_hash_chain = hashlib.sha256(
+            "".join(self.frame_hashes).encode("ascii")
+        ).hexdigest() if self.frame_hashes else None
         return {
             "MODE": self.mode,
             "VAD_IMPLEMENTATION": "SileroVADAdapter",
@@ -199,7 +221,25 @@ class VADDiagnosticObservation:
             "QUEUE_DROPS": int(queue.get("dropped_oldest", 0)),
             "RAW_PCM16_RMS_MEAN": sum(raw_rms) / len(raw_rms) if raw_rms else None,
             "RAW_PCM16_RMS_MAX": max(raw_rms) if raw_rms else None,
+            "RAW_PCM16_MIN": min(raw_min) if raw_min else None,
+            "RAW_PCM16_MAX": max(raw_max) if raw_max else None,
             "RAW_PCM16_PEAK_MAX": max(raw_peak) if raw_peak else None,
+            "RAW_PCM16_NONZERO_PERCENT": (
+                total_nonzero / total_samples * 100.0 if total_samples else None
+            ),
+            "RAW_PCM16_UNIQUE_VALUES_PER_FRAME_MEAN": (
+                sum(unique_sample_values) / len(unique_sample_values)
+                if unique_sample_values else None
+            ),
+            "RAW_PCM16_UNIQUE_VALUES_PER_FRAME_MAX": (
+                max(unique_sample_values) if unique_sample_values else None
+            ),
+            "RAW_PCM16_CLIPPED_PERCENT": (
+                total_clipped / total_samples * 100.0 if total_samples else None
+            ),
+            "FRAME_HASH_UNIQUE_COUNT": len(set(self.frame_hashes)),
+            "FRAME_BYTE_CHANGE_DETECTED": len(set(self.frame_hashes)) > 1,
+            "FRAME_HASH_CHAIN_SHA256": frame_hash_chain,
             "NORMALIZED_RMS_MEAN": sum(normalized_rms) / len(normalized_rms) if normalized_rms else None,
             "NORMALIZED_RMS_MAX": max(normalized_rms) if normalized_rms else None,
             "NORMALIZED_PEAK_MAX": max(normalized_peak) if normalized_peak else None,
@@ -324,7 +364,7 @@ async def run_vad_diagnostic(
             announce("==================================================")
             announce("FALE AGORA")
             announce("")
-            announce('Diga em voz normal: "Jarvis, teste de voz."')
+            announce('Diga em voz normal: "Jarvis, teste de microfone."')
             announce("==================================================")
         observation.window_opened_at = time.monotonic()
         await asyncio.sleep(duration_seconds)

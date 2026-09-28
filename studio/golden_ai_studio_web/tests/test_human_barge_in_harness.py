@@ -73,6 +73,26 @@ def test_vad_diagnostic_reports_pcm_contract_without_retaining_pcm():
     assert report["FRAME_SAMPLES"] == 480
     assert report["NORMALIZATION_FUNCTION"] == "int16.astype(float32) / 32768.0"
     assert report["RAW_PCM16_PEAK_MAX"] == 1000
+    assert report["RAW_PCM16_MIN"] == 1000
+    assert report["RAW_PCM16_MAX"] == 1000
+    assert report["RAW_PCM16_NONZERO_PERCENT"] == 100.0
+    assert report["RAW_PCM16_UNIQUE_VALUES_PER_FRAME_MAX"] == 1
+    assert report["RAW_PCM16_CLIPPED_PERCENT"] == 0.0
+    assert report["FRAME_HASH_UNIQUE_COUNT"] == 1
+    assert report["FRAME_BYTE_CHANGE_DETECTED"] is False
+    assert report["FRAME_HASH_CHAIN_SHA256"]
+    assert not hasattr(observation, "raw_pcm")
+
+
+def test_vad_diagnostic_detects_transient_pcm_changes_without_retaining_audio():
+    observation = VADDiagnosticObservation(mode="silence", duration_seconds=0.06)
+    observation.record_frame((0).to_bytes(2, "little", signed=True) * 480, 1.0, "silence")
+    observation.record_frame((1).to_bytes(2, "little", signed=True) * 480, 1.1, "silence")
+    report = observation.report()
+    assert report["RAW_PCM16_NONZERO_PERCENT"] == 50.0
+    assert report["RAW_PCM16_UNIQUE_VALUES_PER_FRAME_MEAN"] == 1.0
+    assert report["FRAME_HASH_UNIQUE_COUNT"] == 2
+    assert report["FRAME_BYTE_CHANGE_DETECTED"] is True
     assert not hasattr(observation, "raw_pcm")
 
 
