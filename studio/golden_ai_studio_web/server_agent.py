@@ -5511,6 +5511,7 @@ void OnTick()
             "/api/jarvis/voice/command": lambda d: self._api_jarvis_voice_command(d),
             "/api/jarvis/voice/status": lambda d: self._api_jarvis_voice_status(d),
             "/api/jarvis/chat": lambda d: self._api_jarvis_chat(d),
+            "/api/jarvis/golden/overview": lambda d: self._api_jarvis_golden_overview(d),
             "/api/jarvis/brain/status": lambda d: self._api_jarvis_brain_status(d),
             "/api/jarvis/brain/execute": lambda d: self._api_jarvis_brain_execute(d),
             "/api/jarvis/vision/analyze": lambda d: self._api_jarvis_vision_analyze(d),
@@ -6145,6 +6146,23 @@ void OnTick()
             return get_voice_service().stop()
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def _api_jarvis_golden_overview(self, data):
+        """Expose the B1 Golden read projection through the canonical service."""
+        try:
+            from desktop_center import DESKTOP_CENTER
+            payload = data or {}
+            # Use the canonical tool path so AuditLog, security and provenance
+            # metadata remain attached to the same read receipt as other UI reads.
+            return DESKTOP_CENTER.service.execute_tool(
+                "golden_control_center_snapshot",
+                {"symbol": str(payload.get("symbol") or "").strip(),
+                 "include_live": payload.get("include_live") is True},
+                command="control_center_golden_read", task_id="control_center",
+            )
+        except Exception as exc:
+            return {"ok": False, "status": "UNAVAILABLE",
+                    "error": type(exc).__name__}
 
     def _api_jarvis_voice_service_listen(self, data):
         try:

@@ -1320,6 +1320,33 @@ async function runBoot() {
   setTimeout(() => bootOverlay.remove(), 800);
 }
 
+async function refreshGoldenBridge() {
+  const state = $("#gGoldenBridgeState");
+  const output = $("#gGoldenBridgeSummary");
+  if (!state || !output) return;
+  state.textContent = "CONSULTANDO";
+  output.textContent = "Consultando read model...";
+  try {
+    const data = await window.Gateway?.httpPost?.("/api/jarvis/golden/overview", {
+      include_live: false,
+    });
+    if (!data || data.ok === false) {
+      throw new Error(data?.error || "Read bridge indisponível");
+    }
+    const capabilities = data.capabilities?.count ?? 0;
+    const robots = data.robot_catalog?.data?.robots?.length ?? 0;
+    const runs = data.tester_evidence?.data?.count ?? 0;
+    const matching = data.strategy?.data?.matching_coverage
+      ?.EXISTING_ROBOT_MARKET_MATCHING_COVERAGE || [];
+    state.textContent = "READ-ONLY";
+    output.textContent = `Capabilities: ${capabilities} · Robôs catalogados: ${robots} · `
+      + `Evidências: ${runs} · Matching existente: ${matching.join(", ") || "UNKNOWN"}`;
+  } catch (error) {
+    state.textContent = "UNAVAILABLE";
+    output.textContent = error?.message || "Read bridge indisponível";
+  }
+}
+
 // ------------------------------------------------------------------ INIT ----
 function wireUI() {
   $("#sysName").textContent = CFG.systemName;
@@ -1360,6 +1387,7 @@ function wireUI() {
     else { bridge.connect(); toast("GATEWAY", "Conectando ao Gateway...", ""); }
   };
   $("#bootSkipBtn").onclick = () => { bootOverlay.classList.add("done"); };
+  $("#gGoldenBridgeRefresh")?.addEventListener("click", refreshGoldenBridge);
 
   document.addEventListener("keydown", (e) => {
     const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);

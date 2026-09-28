@@ -13,10 +13,11 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 
 from .audit import AuditLog
-from .models import AgentState, BROWSER_READ, ResponsePolicy, Risk, Tool
+from .models import AgentState, BROWSER_READ, ResponsePolicy, Risk, SideEffectClass, Tool
 from .registry import ToolRegistry
 from .security import READ_ONLY_PUBLIC_BROWSER_OBSERVATION, SecurityManager
 from .cancellation import CancellationToken
+from .golden_bridge import GoldenReadBridge
 from .memory import GoldenMemoryManager
 from .memory.boundary import CanonicalMemoryBoundary
 from .memory.models import MemoryCategory, MemorySource
@@ -188,6 +189,7 @@ class JarvisService:
                          if Path(base_dir).resolve() == service_root
                          else Path(base_dir) / "robot_catalog.db")
         self.robot_catalog = RobotCatalogReadModel(storage_path=catalog_store)
+        self.golden_bridge = GoldenReadBridge(self.robot_catalog)
         self.mcp_clients = McpClientManager()
         self._register_tools()
         self.task_manager = TaskManager(
@@ -521,6 +523,92 @@ class JarvisService:
                  }, category="market"),
             Tool("golden_risk_status", "Consulta o estado de risco Golden sem enviar ordens.",
                  golden_risk_status, Risk.LOW, timeout=25, category="market"),
+            # --- GOLDEN -> JARVIS B1 READ BRIDGE (SEM EFEITOS COLATERAIS) ---
+            Tool("golden_capability_registry", "Lista capabilities Golden disponíveis em modo leitura.",
+                 self.golden_capability_registry, Risk.LOW, timeout=10,
+                 category="golden_b1", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.capability_registry"),
+            Tool("golden_control_center_snapshot", "Projeta o estado Golden para o Control Center sem executar engines.",
+                 self.golden_control_center_snapshot, Risk.LOW, timeout=20,
+                 parameters={"symbol": str, "include_live": bool},
+                 category="golden_b1", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.control_center"),
+            Tool("golden_scanner_snapshot", "Lê o resultado normalizado do scanner Golden.",
+                 self.golden_scanner_snapshot, Risk.LOW, timeout=35,
+                 parameters={"symbol": str, "limit": int}, category="golden_b1",
+                 llm_enabled=False, side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.scanner"),
+            Tool("golden_radar_snapshot", "Lê a projeção do Radar Macro Golden.",
+                 self.golden_radar_snapshot, Risk.LOW, timeout=35,
+                 parameters={"symbol": str, "limit": int}, category="golden_b1",
+                 llm_enabled=False, side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.radar"),
+            Tool("golden_market_context", "Lê o contexto de mercado Golden sem mutação.",
+                 self.golden_market_context, Risk.LOW, timeout=35,
+                 parameters={"symbol": str, "timeframe": str}, category="golden_b1",
+                 llm_enabled=False, side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.market_data"),
+            Tool("golden_market_regime", "Lê o regime de mercado calculado pelo Golden.",
+                 self.golden_market_regime, Risk.LOW, timeout=35,
+                 parameters={"symbol": str}, category="golden_b1",
+                 llm_enabled=False, side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.market_regime"),
+            Tool("golden_meta_strategy", "Lê ranking e confluência da meta-strategy Golden.",
+                 self.golden_meta_strategy, Risk.LOW, timeout=40,
+                 parameters={"symbol": str, "limit": int}, category="golden_b1",
+                 llm_enabled=False, side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.meta_strategy"),
+            Tool("golden_strategy_summary", "Lê catálogo e cobertura de estratégias Golden.",
+                 self.golden_strategy_summary, Risk.LOW, timeout=35,
+                 category="golden_b1", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.strategies"),
+            Tool("golden_validation_summary", "Lê evidências históricas de validação já registradas.",
+                 self.golden_validation_summary, Risk.LOW, timeout=20,
+                 parameters={"limit": int}, category="golden_b1", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.validation"),
+            Tool("golden_deep_analysis_context", "Lê o contexto consolidado de análise profunda.",
+                 self.golden_deep_analysis_context, Risk.LOW, timeout=35,
+                 parameters={"symbol": str}, category="golden_b1", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.deep_analysis"),
+            Tool("golden_tester_history", "Lê evidências históricas do Strategy Tester sem iniciar execução.",
+                 self.golden_tester_history, Risk.LOW, timeout=15,
+                 category="golden_b1", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.tester_evidence"),
+            Tool("golden_mt5_read_snapshot", "Lê o estado MT5 sem enviar ordens ou alterar conta.",
+                 self.golden_mt5_read_snapshot, Risk.LOW, timeout=35,
+                 category="golden_b1", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.mt5_read"),
             # --- ROBOT INTELLIGENCE (SOMENTE LEITURA) ---
             Tool("robot_catalog_discover", "Descobre robos e evidencias locais sem executar MT5.",
                  self.discover_robot_catalog, Risk.LOW, timeout=90, category="robot_catalog",
@@ -645,6 +733,46 @@ class JarvisService:
     def robot_catalog_snapshot(self):
         """Return the bounded robot read model without starting discovery."""
         return self.robot_catalog.snapshot()
+
+    # B1 keeps Golden ownership in the existing engines and exposes only
+    # normalized, read-only projections through the canonical Jarvis service.
+    def golden_capability_registry(self):
+        return self.golden_bridge.capability_registry()
+
+    def golden_control_center_snapshot(self, symbol="", include_live=False):
+        return self.golden_bridge.control_center_snapshot(
+            symbol=str(symbol or ""), include_live=bool(include_live))
+
+    def golden_scanner_snapshot(self, symbol="", limit=3):
+        return self.golden_bridge.scanner_snapshot(str(symbol or ""), int(limit or 3))
+
+    def golden_radar_snapshot(self, symbol="", limit=8):
+        return self.golden_bridge.radar_snapshot(str(symbol or ""), int(limit or 8))
+
+    def golden_market_context(self, symbol="XAUUSD", timeframe="M15"):
+        return self.golden_bridge.market_context(str(symbol or "XAUUSD"),
+                                                 str(timeframe or "M15"))
+
+    def golden_market_regime(self, symbol="XAUUSD"):
+        return self.golden_bridge.market_regime(str(symbol or "XAUUSD"))
+
+    def golden_meta_strategy(self, symbol="XAUUSD", limit=8):
+        return self.golden_bridge.meta_strategy(str(symbol or "XAUUSD"), int(limit or 8))
+
+    def golden_strategy_summary(self):
+        return self.golden_bridge.strategy_summary()
+
+    def golden_validation_summary(self, limit=20):
+        return self.golden_bridge.validation_summary(int(limit or 20))
+
+    def golden_deep_analysis_context(self, symbol="XAUUSD"):
+        return self.golden_bridge.deep_analysis_context(str(symbol or "XAUUSD"))
+
+    def golden_tester_history(self):
+        return self.golden_bridge.tester_history()
+
+    def golden_mt5_read_snapshot(self):
+        return self.golden_bridge.mt5_read_snapshot()
 
     def discover_robot_catalog(self):
         """Run controlled local discovery through the canonical Jarvis owner."""
