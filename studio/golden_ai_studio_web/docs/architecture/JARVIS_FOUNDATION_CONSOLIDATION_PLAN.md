@@ -579,6 +579,25 @@ RESEARCH_REUSE_READY: YES_BOUNDED
 FAILURE_ISOLATION: PASS
 ```
 
+### D2 - Cumulative knowledge learning
+
+The existing candidate detector, project memory and research learning
+pipeline remain the only learning path. A candidate is now promotable only
+with an explicit `promote` verdict; neutral or rejected observations are not
+persisted. V2 consolidation preserves user-explicit overrides, records
+contradictions/disputes instead of silently overwriting, keeps versions and
+supports research/project/decision/lesson knowledge through the existing
+canonical store.
+
+```yaml
+D2_STATUS: PASS
+CANDIDATE_LIFECYCLE: EXPLICIT_VERDICT_REQUIRED
+USER_OVERRIDE_PROTECTION: PASS
+CONFLICT_HISTORY: PRESERVED
+SECRET_PERSISTENCE: BLOCKED
+DUPLICATE_PERSISTENCE: PREVENTED
+```
+
 
 ### F7.3 - Canonical memory boundary checkpoint
 

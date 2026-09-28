@@ -846,7 +846,7 @@ class ProjectMemoryManager:
         return self._detector.detect(content, project, title, tags)
 
     def promote_candidate(self, candidate: MemoryCandidate) -> Optional[Any]:
-        if candidate.verdict == "reject":
+        if candidate.verdict != "promote":
             return None
         return self.remember(
             content=candidate.content,
