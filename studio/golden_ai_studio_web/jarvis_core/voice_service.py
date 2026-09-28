@@ -139,6 +139,7 @@ class VoiceService:
         # Optional provider-neutral TTS/output seam.  The legacy Edge/SAPI
         # path remains the default until a provider is explicitly configured.
         self._tts_pipeline = None
+        self._streaming_tts = None
         # P1.4C: TurnManager + barge-in + conversation context
         self._turn_manager = TurnManager()
         self._current_turn_id = 0
@@ -234,6 +235,8 @@ class VoiceService:
         return {"ok": True, "message": 'VoiceService iniciado. Diga "Jarvis" + comando.'}
 
     def stop(self) -> dict:
+        if self._streaming_tts is not None:
+            self._streaming_tts.cancel("runtime_shutdown")
         if self._tts_pipeline is not None:
             self._tts_pipeline.cancel("runtime_shutdown")
         if self._audio_input_provider is not None:
@@ -269,6 +272,8 @@ class VoiceService:
         changed = self._operation_cancellation.cancel(reason)
         if self._tts_pipeline is not None:
             self._tts_pipeline.cancel(reason)
+        if self._streaming_tts is not None:
+            self._streaming_tts.cancel(reason)
         self._barge_in_cancel.set()
         self._turn_manager.cancel_current()
         if self._realtime_pipeline is not None:
@@ -329,6 +334,8 @@ class VoiceService:
         self._turn_manager.cancel_current()
         if self._tts_pipeline is not None:
             self._tts_pipeline.cancel("barge_in")
+        if self._streaming_tts is not None:
+            self._streaming_tts.cancel("barge_in")
 
         new_turn_id = self._turn_manager.new_turn()
         self._current_turn_id = new_turn_id
@@ -566,6 +573,9 @@ class VoiceService:
         """
         from .voice_tts import VoiceAudioPipeline
 
+        if self._streaming_tts is not None:
+            self._streaming_tts.close()
+            self._streaming_tts = None
         if self._tts_pipeline is not None:
             self._tts_pipeline.release()
         pipeline = VoiceAudioPipeline(provider, output)
@@ -575,17 +585,24 @@ class VoiceService:
             pipeline.release()
             raise
         self._tts_pipeline = pipeline
+        from .voice_tts import StreamingTTSOrchestrator
+        self._streaming_tts = StreamingTTSOrchestrator(pipeline)
         return {
             "ok": True,
             "owner": "VoiceService",
             "provider": type(provider).__name__,
             "output": type(output).__name__,
+            "streaming": True,
         }
 
     def release_tts_pipeline(self) -> dict[str, Any]:
         """Release the optional TTS/output adapters owned by this service."""
         pipeline = self._tts_pipeline
         self._tts_pipeline = None
+        streaming = self._streaming_tts
+        self._streaming_tts = None
+        if streaming is not None:
+            streaming.close()
         if pipeline is not None:
             pipeline.release()
             return {"ok": True, "released": True}
@@ -594,6 +611,80 @@ class VoiceService:
     def get_tts_pipeline(self) -> Any:
         """Return the optional provider-neutral pipeline for diagnostics/tests."""
         return self._tts_pipeline
+
+    def get_streaming_tts(self) -> Any:
+        """Return the VoiceService-owned bounded streaming TTS coordinator."""
+        return self._streaming_tts
+
+    def start_tts_stream(
+        self,
+        *,
+        turn_id: int | None = None,
+        generation: int | None = None,
+    ) -> dict[str, Any]:
+        """Start provider-neutral streaming TTS for the current Core turn."""
+        if self._streaming_tts is None:
+            return {"ok": False, "error": "tts_pipeline_not_configured"}
+        resolved_turn = self._current_turn_id if turn_id is None else int(turn_id)
+        if resolved_turn != self._current_turn_id:
+            return {"ok": False, "error": "stale_turn"}
+        if generation is None:
+            self._tts_epoch += 1
+            resolved_generation = self._tts_epoch
+        else:
+            resolved_generation = int(generation)
+            if resolved_generation < self._tts_epoch:
+                return {"ok": False, "error": "stale_generation"}
+            self._tts_epoch = resolved_generation
+        self._barge_in_cancel.clear()
+        identity = self._streaming_tts.start_stream(
+            session_id=self._voice_session.session_id,
+            turn_id=resolved_turn,
+            generation=resolved_generation,
+        )
+        return {"ok": True, "identity": identity}
+
+    def feed_tts_stream(
+        self,
+        text_chunk: str | None,
+        *,
+        session_id: str | None = None,
+        turn_id: int | None = None,
+        generation: int | None = None,
+        chunk_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Feed one Core text chunk through the bounded TTS coordinator."""
+        if self._streaming_tts is None:
+            return {"ok": False, "error": "tts_pipeline_not_configured"}
+        submitted = self._streaming_tts.feed_text(
+            text_chunk,
+            session_id=session_id,
+            turn_id=turn_id,
+            generation=generation,
+            chunk_id=chunk_id,
+        )
+        return {
+            "ok": True,
+            "submitted_segments": submitted,
+            "diagnostics": self._streaming_tts.diagnostics(),
+        }
+
+    def finish_tts_stream(
+        self,
+        *,
+        session_id: str | None = None,
+        turn_id: int | None = None,
+        generation: int | None = None,
+    ) -> dict[str, Any]:
+        """Flush and complete the current bounded TTS stream exactly once."""
+        if self._streaming_tts is None:
+            return {"ok": False, "error": "tts_pipeline_not_configured"}
+        result = self._streaming_tts.finish_stream(
+            session_id=session_id,
+            turn_id=turn_id,
+            generation=generation,
+        )
+        return {"ok": result.ok, **result.__dict__}
 
     def request_utterance(self, session_id: str = "") -> dict:
         """Arm one capture while preserving wake-word checks otherwise."""
@@ -1554,6 +1645,8 @@ class VoiceService:
         self._barge_in_cancel.clear()
         self._speaking_event.set()
         try:
+            if self._streaming_tts is not None:
+                self._streaming_tts.cancel("single_speak_boundary")
             if self._tts_pipeline is not None:
                 try:
                     result = self._tts_pipeline.speak(
@@ -1700,6 +1793,10 @@ class VoiceService:
                 "identity": (
                     self._tts_pipeline.identity
                     if self._tts_pipeline is not None else None
+                ),
+                "streaming": (
+                    self._streaming_tts.diagnostics()
+                    if self._streaming_tts is not None else None
                 ),
             },
             "barge_in": dict(self._last_barge_in),

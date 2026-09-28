@@ -1,16 +1,16 @@
 # JARVIS Voice Conversation Adapter Design
 
-Status: `ADAPTER_2_IMPLEMENTED`
+Status: `ADAPTER_3_IMPLEMENTED`
 Review result: `PASS_WITH_RESTRICTIONS`
-Baseline: `904f6ed`
+Baseline: `ec11f3d`
 Source audit: `docs/architecture/JARVIS_VOICE_CONVERSATION_STACK_AUDIT.md`
 Recommendation: `HYBRID`
 
 This document defines the smallest adapter layer for useful conversation
-patterns from Pipecat, LiveKit Agents, and Wyoming. Adapter 1 and the bounded
-Adapter 2 coordinator are implemented without adding dependencies, running
-the real-speech VAD gate, or replacing any Golden owner. Adapter 3 and Adapter
-4 remain deferred.
+patterns from Pipecat, LiveKit Agents, and Wyoming. Adapter 1, Adapter 2, and
+the bounded Adapter 3 TTS orchestration are implemented without adding
+dependencies, running the real-speech VAD gate, or replacing any Golden
+owner. Adapter 4 remains deferred.
 
 ## Adapter 1 implementation status
 
@@ -71,6 +71,36 @@ single-final dispatch, partial isolation, stale identity, cancellation,
 timeout, acoustic fallback, detector failure, memory bounds, pipeline
 integration, and turn replacement. Real speech, real VAD, real STT, and real
 audio were not run in this implementation gate.
+
+## Adapter 3 implementation status
+
+`VOICE_ADAPTER_3` extends the existing provider-neutral TTS boundary in
+`jarvis_core/voice_tts.py` with `StreamingTextSegmenter` and
+`StreamingTTSOrchestrator`. The implementation form is
+`EXTEND_EXISTING`: `VoiceAudioPipeline` remains the only identity/output
+gate, `AudioOutputProvider` remains the only output sink, and `VoiceService`
+remains the lifecycle owner.
+
+`StreamingTextSegmenter` accepts arbitrary text chunks and keeps at most
+`max_pending_chars=1200` pending characters. It prefers sentence punctuation,
+paragraph boundaries, and conservative long-clause boundaries. When the
+bound is reached it flushes at whitespace before a forced cut. It handles
+PT-BR Unicode, common abbreviations, decimals/currency, URLs, and basic
+Markdown markers without treating transport chunks as speech units. Final
+flush is idempotent and emits meaningful trailing text once.
+
+`StreamingTTSOrchestrator` uses a serial `max_pending_segments=4` work queue.
+The producer waits when the queue is full, so current-generation text is not
+silently discarded. Serial synthesis makes playback order deterministic and
+avoids a second playback scheduler. Repeated source callbacks may provide a
+bounded `chunk_id` for deduplication. Jobs retain the active
+`session_id`/`turn_id`/`generation`; `VoiceAudioPipeline` rejects late chunks
+after a new generation, session restart, cancellation, or output flush.
+
+Normal completion, cancellation, provider failure, and session stop all drain
+the bounded queue and join the worker. Provider errors are returned as bounded
+results without corrupting `VoiceService`. No real TTS provider, model,
+microphone, speaker, network, or persistence path is used by this gate.
 
 ## Non-negotiable architecture
 
@@ -969,6 +999,85 @@ FILES_CREATED:
   - tests/test_voice_conversation_coordinator.py
 FILES_MODIFIED:
   - jarvis_core/realtime_voice/integration.py
+  - jarvis_core/voice_service.py
+  - docs/architecture/JARVIS_VOICE_CONVERSATION_ADAPTER_DESIGN.md
+```
+
+## Adapter 3 verification record
+
+```yaml
+JARVIS_VOICE_PHASE: PARTIAL
+VOICE_ADAPTER_3: PASS_WITH_RESTRICTIONS
+BASELINE: ec11f3d
+IMPLEMENTATION_FORM: EXTEND_EXISTING
+STREAMING_TTS_COMPONENT: StreamingTextSegmenter + StreamingTTSOrchestrator
+
+VOICE_SERVICE_REMAINS_OWNER: YES
+TURN_MANAGER_REMAINS_OWNER: YES
+SECOND_STATE_MACHINE_CREATED: NO
+EXISTING_TTS_ABSTRACTION_PRESERVED: YES
+EXISTING_AUDIO_OUTPUT_PRESERVED: YES
+NEW_DEPENDENCY: NO
+
+DETERMINISTIC_SEGMENTATION: YES
+TOKEN_BY_TOKEN_TTS: NO
+PT_BR_SUPPORTED: YES
+UNICODE_SAFE: YES
+ARBITRARY_CHUNK_BOUNDARIES: PASS
+FINAL_FLUSH_EXACTLY_ONCE: YES
+PENDING_TEXT_BOUNDED: YES
+FORCED_FLUSH_DEFINED: YES
+
+TTS_QUEUE_BOUNDED: YES
+BACKPRESSURE_DEFINED: YES
+ORDERING_PRESERVED: YES
+OUT_OF_ORDER_SYNTHESIS_SAFE: NOT_APPLICABLE_SERIAL_SYNTHESIS
+MEMORY_BOUNDED: YES
+
+SESSION_ID_GUARDED: YES
+TURN_ID_GUARDED: YES
+GENERATION_EPOCH_GUARDED: YES
+STALE_TEXT_REJECTED: YES
+STALE_TTS_RESULT_REJECTED: YES
+DUPLICATE_SEGMENT_DEDUPLICATED: YES_WITH_BOUNDED_CHUNK_ID
+OUTPUT_INVALIDATION: PASS
+CORE_GENERATION_CANCEL: PARTIAL
+
+NORMAL_COMPLETION_CLEAN: YES
+CANCELLATION_CLEAN: YES
+SESSION_STOP_CLEAN: YES
+SESSION_RESTART_ISOLATED: YES
+PROVIDER_ERROR_BOUNDED: YES
+ZOMBIE_TASKS: NO
+
+ADAPTER_1_TESTS: PASS
+ADAPTER_2_TESTS: PASS
+NEW_ADAPTER_3_TESTS: 11 passed
+FOCUSED_TESTS: 34 passed
+BROADER_REGRESSION: 341 passed
+FAILED_NEW: NONE
+FAILED_PRE_EXISTING: NONE
+BLOCKED_ENVIRONMENT: test_barge_in_runtime_wiring.py (18 passed, 7 failed; sounddevice unavailable)
+PY_COMPILE: PASS
+SECRET_SCAN: PASS
+GIT_DIFF_CHECK: PASS
+
+REAL_LOCAL_TTS_PROVIDER_USED: NO
+LOCAL_TTS: PARTIAL
+MODEL_DOWNLOADED: NO
+REAL_AUDIO_PLAYED: NO
+MICROPHONE_OPENED: NO
+REMOTE_TEXT_SENT: NO
+REMOTE_AUDIO_SENT: NO
+DEVICE_REGISTRY_TOUCHED: NO
+TASK_DB_SCHEMA_MIGRATION: NONE
+UNRELATED_WORKTREE_CHANGES_PRESERVED: YES
+PUSH: NO
+
+FILES_CREATED:
+  - tests/test_voice_tts_streaming.py
+FILES_MODIFIED:
+  - jarvis_core/voice_tts.py
   - jarvis_core/voice_service.py
   - docs/architecture/JARVIS_VOICE_CONVERSATION_ADAPTER_DESIGN.md
 ```
