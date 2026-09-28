@@ -1259,3 +1259,66 @@ DEVICE_REGISTRY_TOUCHED: NO
 NEXT_GATE: repeat controlled human speech attempt after explicit readiness
 KNOWN_RESTRICTIONS: no valid human sample; do not lower VAD threshold or retune from this attempt
 ```
+
+### Gate 3A final controlled attempt
+
+After the invalid attempts caused by terminal timing, a final timed window was
+run with the same production input path and the operator confirmed `SIM` after
+the window. This is therefore the one valid human-confirmed attempt for this
+gate. It did not produce usable speech energy: the measured RMS stayed near
+the ambient baseline (31.32), peak was 182, and Silero's maximum probability
+was 0.078. No speech-start, speech-end, or HybridEndpoint event occurred
+before the 15-second bounded timeout.
+
+The result is classified as `MIC_SIGNAL_TOO_LOW` for this controlled sample,
+not as evidence to lower the production VAD threshold. The prior unconfirmed
+run that reached probability 0.989 and an endpoint is explicitly excluded from
+acceptance because the operator did not confirm speaking during that window.
+No raw audio was saved. The input stream stopped cleanly, with no device or
+callback errors, while the existing bounded queues reported 13 raw conversion
+drops and 21 canonical queue drops over the longer window.
+
+```yaml
+GATE_3A_FINAL_STATUS: FAILED
+VALID_HUMAN_ATTEMPTS: 1
+ATTEMPT_1_HUMAN_CONFIRMED: YES
+MIC_SIGNAL_CLASSIFICATION: MIC_SIGNAL_TOO_LOW
+BASELINE_RMS: 31.32
+SPEECH_RMS: NOT_OBSERVABLE
+PEAK: 182
+NONZERO_PERCENT: 98.99
+VAD_MAX_PROBABILITY: 0.078
+VAD_SPEECH_FRAME_COUNT: 0
+VAD_ACTIVATED: NO
+VAD_DEACTIVATED: NO
+SPEECH_START_DETECTED: NO
+SPEECH_END_DETECTED: NO
+ENDPOINT_FIRED: NO
+ENDPOINT_REASON: bounded_timeout_without_vad_activation
+ENDPOINT_LATENCY_MS: NOT_AVAILABLE
+RAW_FRAMES: 567
+CANONICAL_FRAMES: 554
+RAW_DROPS: 13
+CANONICAL_DROPS: 21
+MAX_CALLBACK_GAP_MS: 30.93
+REAL_MIC_CAPTURE: PASS
+CONTINUOUS_CONSUMPTION: PASS
+SILERO_REAL_SPEECH: FAIL
+HYBRID_ENDPOINT_REAL_SPEECH: FAIL
+QUEUE_HEALTH: RESTRICTED
+STREAM_SHUTDOWN: PASS
+ZOMBIE_WORKERS: NO
+PROCESS_EXIT_CODE: 0
+STT_PROVIDER_STARTED: NO
+CORE_CALLED: NO
+TTS_STARTED: NO
+SPEAKER_OPENED: NO
+AUDIO_PLAYED: NO
+RAW_AUDIO_PERSISTED: NO
+TEMP_AUDIO_LEFT_ON_DISK: NO
+REMOTE_AUDIO_SENT: NO
+REMOTE_TEXT_SENT: NO
+PRODUCTION_CODE_CHANGED: NO
+DEVICE_REGISTRY_TOUCHED: NO
+NEXT_STEP: investigate microphone signal path against the previously validated speech-energy baseline before any VAD retuning
+```
