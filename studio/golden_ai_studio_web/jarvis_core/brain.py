@@ -265,8 +265,10 @@ class JarvisBrain:
         profile = getattr(self.orchestrator.last_decision, "preferred_model_profile", None)
         classification = getattr(self.orchestrator.last_decision, "data_classification", None)
         from .orchestrator.models import DataClassification, ModelProfile
+        from .orchestrator.providers import register_local_ollama_adapter
         profile = profile or ModelProfile.GENERAL
         classification = classification or DataClassification.INTERNAL
+        register_local_ollama_adapter(self.orchestrator.models)
         if self.orchestrator.models.providers:
             result = self.orchestrator.models.execute(
                 messages, profile=profile, classification=classification)
@@ -282,24 +284,19 @@ class JarvisBrain:
                         "provider": result.provider}
             return {"ok": True, "response": text, "provider": result.provider}
 
-        def invoke():
-            from ollama import chat
-            return chat(model=self.model, messages=messages, stream=False)
-        pool = ThreadPoolExecutor(max_workers=1)
-        future = pool.submit(invoke)
-        try:
-            response = future.result(timeout=self.timeout)
-            text = str(response.get("message", {}).get("content", "")).strip()
-            if not text or self._looks_like_executable_plan(text):
-                return {"ok": False, "error": "Síntese inválida.", "provider": "ollama"}
-            self.last_llm = {"provider": "ollama", "model": self.model,
-                             "profile": "OFFLINE", "fallback": True, "latency_ms": 0}
-            return {"ok": True, "response": text, "provider": "ollama"}
-        except Exception as exc:
-            future.cancel()
-            return {"ok": False, "error": str(exc), "provider": "ollama"}
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
+        result = self.orchestrator.models.execute(
+            messages, profile=profile, classification=classification)
+        if not result.ok or not str(result.output or "").strip():
+            return {"ok": False, "error": result.error or "Síntese vazia.",
+                    "provider": result.provider or "ollama"}
+        text = str(result.output).strip()
+        if self._looks_like_executable_plan(text):
+            return {"ok": False, "error": "Síntese inválida.",
+                    "provider": result.provider or "ollama"}
+        self.last_llm = {"provider": result.provider, "model": result.model,
+                         "profile": profile.value, "fallback": result.fallback_used,
+                         "latency_ms": result.latency_ms}
+        return {"ok": True, "response": text, "provider": result.provider}
 
     @staticmethod
     def _looks_like_executable_plan(text):
@@ -531,64 +528,45 @@ class JarvisBrain:
             "last_tool_error_included": any(
                 "TOOL_ERROR:" in str(m.get("content", "")) for m in history),
         })
-        # Cloud-first via ModelRouter sempre que houver adapters registrados
-        # (qualquer modo): GENERAL/DEEP no cloud, Ollama como fallback local.
-        # SECRET nunca sai para cloud (select filtra); sem adapters, Ollama
-        # direto como antes.
-        if self.orchestrator.models.providers:
-            classification = (self.orchestrator.last_decision.data_classification
-                              if self.orchestrator.last_decision else None)
-            from .orchestrator.models import DataClassification as _DC
-            from .orchestrator.models import ModelProfile as _MP
-            result = self.orchestrator.models.execute(
-                messages, profile=profile or _MP.GENERAL,
-                classification=classification or _DC.INTERNAL)
-            self.last_llm = {"provider_requested": "groq" if (profile or _MP.GENERAL) == _MP.VOICE_FAST else "",
-                             "model_requested": "qwen/qwen3.8-27b" if (profile or _MP.GENERAL) == _MP.VOICE_FAST else "",
-                             "provider": result.provider, "model": result.model,
-                             "profile": (profile or _MP.GENERAL).value,
-                             "fallback": result.fallback_used,
-                             "latency_ms": result.latency_ms,
-                             "provider_wait_ms": result.ttft_ms,
-                             "time_to_first_token_ms": result.ttft_ms,
-                             "generation_ms": result.generation_ms,
-                             "metadata": dict(result.metadata or {}),
-                             "attempts": list(result.attempts)}
-            self.last_metrics.update({"profile": (profile or _MP.GENERAL).value,
-                "provider_requested": self.last_llm["provider_requested"],
-                "provider_actual": result.provider, "model_requested": self.last_llm["model_requested"],
-                "model_actual": result.model, "provider_wait_ms": result.ttft_ms,
-                "time_to_first_token_ms": result.ttft_ms, "generation_ms": result.generation_ms,
-                "provider_attempts": list(result.attempts)})
-            if result.ok:
-                return {"ok": True, "response": result.output, "provider": result.provider,
-                        "model": result.model, "profile": (profile or _MP.GENERAL).value,
-                        "fallback": result.fallback_used, "latency_ms": result.latency_ms,
-                        "metadata": dict(result.metadata or {})}
-            return {"ok": False, "error": "Nenhum provider respondeu: " + result.error,
-                    "fallback": result.fallback_used, "latency_ms": result.latency_ms}
-        def invoke():
-            from ollama import chat
-            return chat(model=self.model, messages=messages, stream=False)
-        pool = ThreadPoolExecutor(max_workers=1)
-        future = pool.submit(invoke)
-        try:
-            response = future.result(timeout=self.timeout)
-            content = response.get("message", {}).get("content", "")
-            if not isinstance(content, str) or not content.strip():
-                return {"ok": False, "error": "O modelo retornou uma resposta vazia."}
-            self.last_llm = {"provider": "ollama", "model": self.model,
-                             "profile": "OFFLINE", "fallback": True, "latency_ms": 0}
-            return {"ok": True, "response": content}
-        except TimeoutError:
-            future.cancel()
-            return {"ok": False, "error": f"Ollama excedeu o limite de {self.timeout:g} segundos."}
-        except ImportError:
-            return {"ok": False, "error": "Ollama não disponível."}
-        except Exception as exc:
-            return {"ok": False, "error": f"Erro LLM: {exc}"}
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
+        # Cloud-first via the canonical ModelRouter; an empty router receives
+        # the lazy local adapter without probing or invoking a provider here.
+        from .orchestrator.models import DataClassification as _DC
+        from .orchestrator.models import ModelProfile as _MP
+        from .orchestrator.providers import register_local_ollama_adapter
+        register_local_ollama_adapter(self.orchestrator.models)
+        classification = (self.orchestrator.last_decision.data_classification
+                          if self.orchestrator.last_decision else None)
+        result = self.orchestrator.models.execute(
+            messages, profile=profile or _MP.GENERAL,
+            classification=classification or _DC.INTERNAL,
+            timeout=self.timeout)
+        self.last_llm = {"provider_requested": "groq" if (profile or _MP.GENERAL) == _MP.VOICE_FAST else "",
+                         "model_requested": "qwen/qwen3.8-27b" if (profile or _MP.GENERAL) == _MP.VOICE_FAST else "",
+                         "provider": result.provider, "model": result.model,
+                         "profile": (profile or _MP.GENERAL).value,
+                         "fallback": result.fallback_used,
+                         "latency_ms": result.latency_ms,
+                         "provider_wait_ms": result.ttft_ms,
+                         "time_to_first_token_ms": result.ttft_ms,
+                         "generation_ms": result.generation_ms,
+                         "metadata": dict(result.metadata or {}),
+                         "attempts": list(result.attempts)}
+        self.last_metrics.update({"profile": (profile or _MP.GENERAL).value,
+            "provider_requested": self.last_llm["provider_requested"],
+            "provider_actual": result.provider, "model_requested": self.last_llm["model_requested"],
+            "model_actual": result.model, "provider_wait_ms": result.ttft_ms,
+            "time_to_first_token_ms": result.ttft_ms, "generation_ms": result.generation_ms,
+            "provider_attempts": list(result.attempts)})
+        if result.ok:
+            return {"ok": True, "response": result.output, "provider": result.provider,
+                    "model": result.model, "profile": (profile or _MP.GENERAL).value,
+                    "fallback": result.fallback_used, "latency_ms": result.latency_ms,
+                    "metadata": dict(result.metadata or {})}
+        error = result.error
+        if "excedeu" in str(error or "").lower():
+            error = f"Ollama excedeu o limite de {self.timeout:g} segundos."
+        return {"ok": False, "error": "Nenhum provider respondeu: " + str(error),
+                "fallback": result.fallback_used, "latency_ms": result.latency_ms}
 
     def _parse_llm_response(self, response):
         cleaned = str(response or "").strip()

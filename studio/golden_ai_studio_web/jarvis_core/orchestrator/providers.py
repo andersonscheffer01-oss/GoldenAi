@@ -252,6 +252,26 @@ def build_real_adapters(groq_call=None, gemini_call=None):
     return adapters
 
 
+def build_local_ollama_adapter():
+    """Create the local adapter without probing or calling Ollama."""
+    def ollama(payload, model, timeout):
+        from ollama import chat
+        response = chat(model=model, messages=payload, stream=False)
+        if isinstance(response, dict):
+            return response.get("message", {}).get("content", "")
+        message = getattr(response, "message", None)
+        return getattr(message, "content", "") if message is not None else ""
+
+    return ProviderAdapter("ollama", ollama, cloud=False)
+
+
+def register_local_ollama_adapter(model_router):
+    """Ensure the local fallback is owned by the canonical ModelRouter."""
+    if "ollama" not in model_router.providers:
+        model_router.register_provider(build_local_ollama_adapter())
+    return model_router
+
+
 def register_real_adapters(model_router, groq_call=None, gemini_call=None,
                            omniroute_provider=None):
     for adapter in build_real_adapters(groq_call, gemini_call):

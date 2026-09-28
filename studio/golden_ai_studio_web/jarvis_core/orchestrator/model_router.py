@@ -97,7 +97,7 @@ class ModelRouter:
         return candidates
 
     def execute(self, payload, profile=ModelProfile.GENERAL,
-                classification=DataClassification.INTERNAL) -> ProviderResult:
+                classification=DataClassification.INTERNAL, timeout=None) -> ProviderResult:
         candidates = self.select(profile, classification)
         last_error = "nenhum provider disponível"
         attempt_log = []
@@ -105,13 +105,18 @@ class ModelRouter:
             attempts = 1 if profile == ModelProfile.VOICE_FAST else self.retries + 1
             for attempt in range(attempts):
                 started = time.perf_counter()
+                effective_timeout = (self.timeout if timeout is None else
+                                     max(0.001, float(timeout)))
                 if profile == ModelProfile.VOICE_FAST:
                     attempt_timeout = (VOICE_FAST_TIMEOUT_SECONDS if adapter.cloud
                                        else 6.0)
+                    if timeout is not None:
+                        attempt_timeout = effective_timeout
                 elif not adapter.cloud:
-                    attempt_timeout = max(self.timeout, _local_timeout_seconds())
+                    attempt_timeout = (effective_timeout if timeout is not None else
+                                       max(self.timeout, _local_timeout_seconds()))
                 else:
-                    attempt_timeout = self.timeout
+                    attempt_timeout = effective_timeout
                 try:
                     # Timeout por tentativa: provider lento nao bloqueia o
                     # fallback (cada chamada roda em thread propria).
