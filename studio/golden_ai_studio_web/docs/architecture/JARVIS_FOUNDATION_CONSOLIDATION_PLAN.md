@@ -553,6 +553,33 @@ DESTRUCTIVE_MIGRATION_REQUIRED: NO
 LEGACY_DATABASES_UNTOUCHED: YES
 ```
 
+## Batch D checkpoints
+
+### D1 - Memory-first retrieval
+
+`CanonicalMemoryBoundary.retrieve()` now reuses the existing V2 Hybrid
+Retrieval path before normal reasoning. Results remain context/evidence rather
+than authority and carry source type/reference/timestamp, trust, privacy,
+status and explicit freshness. Current/project-relevant records are ranked
+ahead of explicit stale or superseded history; failure returns bounded empty
+context and Brain falls back to the legacy context path without blocking Core.
+Normal research checks promoted canonical research first. Time-sensitive
+queries require explicit `CURRENT` freshness before reuse; otherwise the
+existing provider path runs.
+
+```yaml
+D1_STATUS: PASS
+RETRIEVAL_OWNER: CanonicalMemoryBoundary -> GoldenMemoryEngine.hybrid_search
+HYBRID_RETRIEVAL_REUSED: YES
+PROJECT_AWARE: YES
+PROVENANCE_AWARE: YES
+FRESHNESS_AWARE: YES
+SUPERSESSION_AWARE: YES
+RESEARCH_REUSE_READY: YES_BOUNDED
+FAILURE_ISOLATION: PASS
+```
+
+
 ### F7.3 - Canonical memory boundary checkpoint
 
 `jarvis_core.memory.boundary.CanonicalMemoryBoundary` is now the boundary for
