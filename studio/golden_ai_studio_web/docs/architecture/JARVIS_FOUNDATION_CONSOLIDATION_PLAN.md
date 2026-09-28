@@ -426,7 +426,32 @@ hardware or voice test was run.
 
 ### F4 - Audit convergence
 
-Emit canonical action receipts from the adapter while retaining operational logs. Verify secrets/payloads remain sanitized. Do not rewrite historical logs.
+F4 completed the audit checkpoint for the migrated F3 paths without adding a
+second audit framework. `JarvisService.execute_tool()` already emits the
+canonical `jarvis_core.audit.AuditLog` receipt after the SecurityManager
+decision; the compatibility bridge therefore reuses that receipt path. Root
+`core.audit.AuditLogger`, app category files and operational logs remain
+compatibility/legacy sources for later migration and were not rewritten.
+
+Focused tests verified one canonical receipt for a migrated read action,
+single-use approval plus one execution receipt for a migrated mutation, and
+redaction of API keys, tokens and authorization values. Request and execution
+receipts remain distinct semantic events; duplicate approval does not execute
+again or create a second execution receipt.
+
+```yaml
+F4_STATUS: PASS_WITH_RESTRICTIONS
+CANONICAL_AUDIT: jarvis_core.audit.AuditLog
+LEGACY_AUDIT_PATHS_START: 3_CLASSES
+LEGACY_AUDIT_PATHS_MIGRATED: 0_GLOBAL_REWRITE; F3_MIGRATED_PATHS_USE_CANONICAL
+LEGACY_AUDIT_PATHS_DEFERRED: root_core, app_category_audit, operational_logs
+DUPLICATE_AUDIT_EVENTS: NO
+TASK_RECEIPTS_PRESERVED: YES
+MISSION_RECEIPTS_PRESERVED: YES
+SECRET_SAFE: YES
+```
+
+No historical audit data was migrated, deleted or rewritten.
 
 ### F5 - Task DB enforcement
 
