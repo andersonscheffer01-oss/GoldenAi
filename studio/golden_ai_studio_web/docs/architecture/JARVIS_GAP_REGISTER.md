@@ -64,6 +64,10 @@ Natureza: registro de gaps descobertos em auditoria read-only.
 
 ## Priority ordering
 
+F1 refinou os gaps com dois achados de alta prioridade: `TaskManager(base_dir)` permite criacao relativa a roots arbitrarios em tooling/testes, e o legado `server_agent._execute_tool` autoriza acoes por `core.execution.ExecutionService` sem passar pelo `jarvis_core.SecurityManager`. Ambos devem ser tratados por diagnostico e adapter antes de qualquer migracao.
+
+Validacao F1: regressao protegida sem hardware passou com `89 passed` e `3 subtests passed`. O caso `test_jarvis_memory_v2_runtime` teve uma falha de cleanup (`WinError 32`) ao remover DB temporario apos wiring de `JarvisService`; nenhum codigo foi alterado para mascarar esse achado.
+
 ### P0
 
 - G-003/G-032: consolidar o ownership de orchestration/provider e reduzir handlers diretos.

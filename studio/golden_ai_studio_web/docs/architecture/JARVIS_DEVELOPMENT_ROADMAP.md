@@ -2,6 +2,8 @@
 
 Roadmap derivado do Master Gap Audit de 2026-09-28. Ele e uma ordem de trabalho, nao autorizacao para executar mudancas. Baseline: `4195731`.
 
+O Gate F1 (`dd152a1`) confirmou `JARVIS_CORE` como alvo canonico por evidencia de runtime, sem executar ownership switch. O primeiro gate de implementacao recomendado e um diagnostico read-only de ownership e resolucao do Task DB, antes de Security/Audit/ModelRouter convergence.
+
 ## Gate 0 - Consolidacao arquitetural
 
 Objetivo: tornar explicito o owner de cada caminho sem alterar comportamento.
