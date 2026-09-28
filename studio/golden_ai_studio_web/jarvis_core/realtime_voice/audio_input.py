@@ -52,8 +52,10 @@ def _sounddevice_device_snapshot() -> dict[str, Any]:
     except ImportError as exc:
         raise AudioInputUnavailable("sounddevice is not installed") from exc
     default_device = getattr(sd.default, "device", (None, None))
-    if isinstance(default_device, (tuple, list)):
-        default_device = default_device[0] if default_device else None
+    try:
+        default_device = default_device[0]
+    except (IndexError, KeyError, TypeError):
+        default_device = None
     return {
         "devices": list(sd.query_devices()),
         "hostapis": list(sd.query_hostapis()),
