@@ -8,6 +8,7 @@ from datetime import date
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from enum import Enum
 from .orchestrator import CentralOrchestrator
+from .memory.boundary import CanonicalMemoryBoundary
 
 class BrainState(str, Enum):
     IDLE = "IDLE"
@@ -23,6 +24,7 @@ class JarvisBrain:
         self.memory = memory  # compatibilidade para integrações existentes
         self.memory_v2 = memory_v2
         self.project_memory = project_memory
+        self.memory_boundary = CanonicalMemoryBoundary(memory_v2, memory)
         self.orchestrator = orchestrator or CentralOrchestrator(registry)
         self._allowed_tools = None
         self.state = BrainState.IDLE
@@ -316,6 +318,23 @@ class JarvisBrain:
         mode = hybrid_mode()
         if mode == "off" or self.memory_v2 is None:
             general = self._legacy_context(query, mode, fallback=self.memory_v2 is None)
+        elif hasattr(self.memory_v2, "store"):
+            project = self._resolve_project_from_query(query)
+            started = time.perf_counter()
+            retrieval = self.memory_boundary.retrieve(
+                query, project=None if project in (None, "AMBIGUOUS") else project,
+                limit=8, clearance="INTERNAL")
+            self.last_memory_retrieval = {
+                "mode": "memory-first", "hybrid_count": len(retrieval.get("results", [])),
+                "provenance_count": len(retrieval.get("provenance", [])),
+                "sufficient": retrieval.get("sufficient", False),
+                "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                "fallback": not retrieval.get("ok", False),
+                "error": retrieval.get("error", "")}
+            general = retrieval.get("context", "")
+            if not general and not retrieval.get("ok", False):
+                general = self._legacy_context(query, mode, fallback=True,
+                                               error=retrieval.get("error", "retrieval"))
         elif mode == "on":
             started = time.perf_counter()
             try:

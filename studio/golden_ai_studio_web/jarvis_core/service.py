@@ -751,6 +751,24 @@ class JarvisService:
         if not sanitized:
             return {"ok": False, "error": "Consulta vazia após sanitização de egress.",
                     "telemetry": {"failed": 1}}
+        if not learn:
+            reused = self.memory_boundary.research_reuse(
+                sanitized, limit=min(int(limit), 6), project="jarvis")
+            if reused.get("reusable"):
+                return {
+                    "ok": True,
+                    "message": "Reutilizei pesquisa validada da memória canônica.",
+                    "query": sanitized, "learn": False,
+                    "sources": reused.get("research_evidence", []),
+                    "evidence_records": reused.get("research_evidence", []),
+                    "telemetry": {
+                        "provider": "canonical_memory",
+                        "provider_selected": "canonical_memory",
+                        "reused": True,
+                        "results_count": len(reused.get("results", [])),
+                        "failed": 0,
+                    },
+                }
         try:
             limit = max(1, min(int(limit), 10))
             if learn:
