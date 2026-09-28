@@ -327,3 +327,333 @@ SECRET_SCAN: PASS_NOT_APPLICABLE_NO_SECRET_FILES_TOUCHED
 COMMIT_CREATED: YES
 PUSH: NO
 ```
+
+## Gate 2B addendum: Kokoro artifact and license pinning
+
+This addendum supersedes the earlier conditional candidate assessment for
+artifact approval. It is still research/verification only: no package, model,
+voice, or `espeak-ng` artifact was installed or downloaded.
+
+### Runtime pin
+
+The cleanest reproducible runtime target is the published PyPI artifact, not an
+unreleased repository checkout:
+
+- `KOKORO_RUNTIME_SOURCE`: PyPI release
+- `KOKORO_RUNTIME_PACKAGE`: `kokoro==0.9.4`
+- `KOKORO_RUNTIME_VERSION`: `0.9.4`
+- `KOKORO_RUNTIME_REVISION`: wheel SHA-256
+  `a129dc6364a286bd6a92c396e9862459d3d3e45f2c15596ed5a94dcee5789efd`
+- `KOKORO_RUNTIME_SDIST_SHA256`:
+  `fbf633262797f8cf46fdac3315cf9cade67dc8b762c0feccf334892772fb9ac4`
+- `KOKORO_RUNTIME_LICENSE`: Apache-2.0
+- `KOKORO_RUNTIME_LICENSE_SOURCE`: package metadata and the upstream
+  `LICENSE` file
+
+The PyPI wheel is 32.6 kB and the source distribution is 26.2 MB. The package
+has no upstream `v0.9.4` Git tag/release to use as a substitute for the PyPI
+artifact. The current repository `main` also reports version `0.9.4`, but it is
+not mixed into this runtime pin; repository source is used only to audit the
+implementation and dependency behavior.
+
+### Python and dependency compatibility
+
+The evidence is internally inconsistent:
+
+- current repository `pyproject.toml`: `>=3.10, <3.14`;
+- current official repository `uv.lock`: `>=3.10, <3.13`;
+- published PyPI `kokoro==0.9.4`: `>=3.10, <3.13`;
+- published `misaki==0.9.4`: `>=3.8, <3.13`.
+
+The official lock resolves Kokoro's core graph through `misaki[en]`,
+`espeakng-loader`, `phonemizer-fork`, spaCy, spaCy curated transformers,
+PyTorch, Transformers, NumPy, Hugging Face Hub, and Loguru. It also records
+native/binary packages such as `blis`, `cymem`, `murmurhash`, `preshed`,
+`srsly`, and `tokenizers`. The lock's captured PyTorch is 2.6.0 and is not the
+current Golden `torch 2.13.0+cpu`; it must not be silently transplanted into
+the Golden environment.
+
+The `espeakng-loader==0.2.4` package publishes a Windows x86-64 wheel with
+size 9,437,292 bytes and SHA-256
+`41f1e08ac9deda2efd1ea9de0b81dab9f5ae3c4b24284f76533d0a7b1dd7abd7`.
+This is evidence of a possible Windows distribution, not an installation or
+license approval.
+
+Result: Python 3.13.15 is **not supported by the published package/official
+lock metadata**. The repository declaration alone is insufficient. Windows
+11 AMD64 is technically plausible but unvalidated in the canonical runtime.
+
+### espeak-ng role and Windows form
+
+For PT-BR, Kokoro maps `lang_code='p'` to `pt-br` and constructs
+`misaki.espeak.EspeakG2P(language='pt-br')`. Misaki's official implementation
+uses `phonemizer.backend.EspeakBackend` and configures its library and data
+paths through `espeakng_loader`. Thus `espeak-ng` is required for the proposed
+PT-BR phonemization path; it is a G2P dependency, not the neural TTS voice or
+the output audio owner.
+
+The official Kokoro Windows instructions point to an x64 `*.msi` from the
+official [eSpeak NG releases](https://github.com/espeak-ng/espeak-ng/releases).
+The official eSpeak NG guide documents the same Windows MSI flow. The upstream
+eSpeak NG source/API is GPL-3.0-or-later. The alternative Python
+`espeakng-loader` wheel bundles/locates the native library and data, but its
+packager, binary provenance, notices, and distribution terms must be reviewed
+separately. No exact MSI or loader artifact is approved yet.
+
+### Model pin
+
+The exact model snapshot is:
+
+- `MODEL_REPOSITORY`: `hexgrad/Kokoro-82M`
+- `MODEL_REVISION`: `f3ff3571791e39611d31c381e3a41a3af07b4987`
+- `MODEL_VERSION`: `v1.0`, published 2025-01-27
+- `MODEL_FORMAT`: PyTorch state-dict file loaded with `torch.load(...,
+  weights_only=True)`
+- `MODEL_REQUIRED_FILES`: `config.json`, `kokoro-v1_0.pth`, selected files in
+  `voices/`, and `VOICES.md`/license notices
+- `MODEL_LICENSE`: Apache-2.0 for the model weights
+- `MODEL_LICENSE_SOURCE`: official Hugging Face model metadata and model card
+- `MODEL_LICENSE_VERIFIED`: YES, with required attribution/training-data notices
+- `MODEL_FILE`: `kokoro-v1_0.pth`
+- `MODEL_FILE_SIZE`: 327,212,226 bytes
+- `MODEL_FILE_SHA256`: `496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4`
+- `CONFIG_FILE_SIZE`: 2,351 bytes
+
+The model repository's card explicitly states Apache-licensed weights and
+lists CC BY 3.0/4.0 training-data notices. Those notices must be carried into
+the later artifact bundle; they do not grant a separate license to voice files.
+
+### PT-BR voice artifact pins
+
+All three selected files are in the same immutable model snapshot. The source
+repository and exact file hashes are verified, but no separate voice license
+grant is declared by the official voice table or model card.
+
+| Voice | Artifact | Snapshot | Size | SHA-256 | License | Provenance |
+|---|---|---|---:|---|---|---|
+| `pf_dora` | `voices/pf_dora.pt` | `f3ff3571791e39611d31c381e3a41a3af07b4987` | 523,425 bytes | `07e4ff987c5d5a8c3995efd15cc4f0db7c4c15e881b198d8ab7f67ecf51f5eb7` | No separate term declared; NOT VERIFIED | YES |
+| `pm_alex` | `voices/pm_alex.pt` | `f3ff3571791e39611d31c381e3a41a3af07b4987` | 523,425 bytes | `cf0ba8c573c2480fc54123683a35cf1e2ae130428e441eb91f9149bdb188a526` | No separate term declared; NOT VERIFIED | YES |
+| `pm_santa` | `voices/pm_santa.pt` | `f3ff3571791e39611d31c381e3a41a3af07b4987` | 523,430 bytes | `d42103169c5c872abbafb9129133af7e942bb9d272c3cc3b95c203e7d7198c29` | No separate term declared; NOT VERIFIED | YES |
+
+The official `VOICES.md` identifies the files as Brazilian Portuguese voices
+and publishes short SHA prefixes; the file pages provide the full SHA-256 and
+size. This proves identity/provenance, not a separate legal grant. The model
+repository's Apache metadata must not be extended to the voices by assumption.
+
+### Audio and streaming behavior
+
+- `NATIVE_SAMPLE_RATE`: 24,000 Hz, as shown by the official generator examples
+  and model output path.
+- `CHANNELS`: one logical channel; the model returns a squeezed 1-D waveform
+  tensor.
+- `OUTPUT_FORMAT`: in-memory PyTorch `FloatTensor`, no container and no direct
+  PCM bytes.
+- `RAW_PCM_DIRECT`: NO.
+- `CONVERSION_REQUIRED`: YES; convert bounded float audio to validated mono
+  `s16le` PCM before creating `PcmAudioChunk`.
+- `SEGMENT_SYNTHESIS_SUPPORTED`: YES. `KPipeline` accepts text segments and
+  yields per-segment results; this matches Adapter 3's bounded text segments.
+- `TRUE_AUDIO_STREAMING_REQUIRED`: NO.
+
+The existing Golden output provider remains the sole speaker owner.
+
+### Download, cancellation, and integration boundary
+
+The standard Kokoro path implicitly calls `hf_hub_download` for `config.json`,
+the model file, and voice files when local paths are not supplied. This is not
+acceptable for Golden runtime. The adapter must pass explicitly pinned local
+paths, fail closed on a missing artifact, and run with network access disabled
+or otherwise proven unreachable. No runtime cache miss may become a download.
+
+The selected PT-BR path performs synchronous G2P and model inference and does
+not expose a Golden cancellation token. In-process cancellation can therefore
+invalidate stale output but cannot reliably interrupt an active model call.
+The recommended form is a **local isolated provider process**:
+
+```text
+Golden VoiceService
+  -> existing TextToSpeechProvider adapter
+  -> bounded local request
+  -> isolated Kokoro process
+  -> float waveform / PCM result
+  -> Golden AudioOutputProvider
+```
+
+The child process must own neither `VoiceService`, `TurnManager`, conversation
+coordination, security authority, nor speaker output. Each request must carry
+`request_id`, `session_id`, `turn_id`, `generation`, text, voice ID, and an
+explicit artifact root. The response must carry the same identity, sample
+rate, channels, sample format, PCM bytes or a bounded error. Cancellation must
+terminate the current bounded child operation, flush the Golden output queue,
+and rely on Golden generation guards to reject any late result.
+
+### Canonical storage and integrity plan
+
+Proposed storage:
+
+```text
+C:\GoldenAI\models\tts\kokoro\Kokoro-82M\f3ff3571791e39611d31c381e3a41a3af07b4987\
+  runtime\
+  model\config.json
+  model\kokoro-v1_0.pth
+  voices\pf_dora.pt
+  voices\pm_alex.pt
+  voices\pm_santa.pt
+  licenses\
+```
+
+The later installation gate must verify:
+
+- runtime wheel SHA-256 and, if used, source distribution SHA-256;
+- immutable model snapshot revision;
+- model LFS SHA-256 and exact byte size;
+- each voice LFS SHA-256 and exact byte size;
+- `config.json` and notice/license files;
+- exact `espeakng-loader` Windows wheel or official MSI version/hash;
+- an offline startup test proving no network fetch occurs.
+
+Known selected-artifact size floor, excluding runtime/dependency artifacts:
+
+- model + three voices: 328,782,506 bytes;
+- plus `config.json` and `VOICES.md`: 328,792,482 bytes;
+- runtime package and phonemizer dependencies are additional and must be
+  measured from the final lock.
+
+### License matrix
+
+| Component | License | Verified | Source / restriction |
+|---|---|---|---|
+| Kokoro runtime/source | Apache-2.0 | YES | Official repository `LICENSE` and PyPI metadata |
+| Kokoro model weights | Apache-2.0 | YES | Official Hugging Face metadata/model card; preserve notices |
+| `pf_dora.pt` | Separate voice term not declared | NO | Voice file identity verified; license grant absent |
+| `pm_alex.pt` | Separate voice term not declared | NO | Voice file identity verified; license grant absent |
+| `pm_santa.pt` | Separate voice term not declared | NO | Voice file identity verified; license grant absent |
+| eSpeak NG engine | GPL-3.0-or-later | YES | Official source/COPYING; distribution implications unresolved |
+| `espeakng-loader` wheel | Package-specific terms require review | NO | PyPI artifact is third-party packaging of native engine/data |
+
+### Installation plan for a future gate
+
+No installation is authorized by this document. If legal/artifact approval is
+later obtained, the next gate should:
+
+1. create a separate local TTS runtime using Python 3.12 or another version
+   explicitly supported by the pinned dependency closure; do not downgrade
+   `C:\GoldenAI\.venv`;
+2. install only the hash-pinned `kokoro==0.9.4` distribution and a newly
+   verified compatible dependency lock;
+3. select either a fully audited `espeakng-loader` Windows wheel or an official
+   x64 MSI, with its exact notices and hash;
+4. place the model and all three candidate voices under the immutable storage
+   root above;
+5. verify every hash and size before loading;
+6. run the isolated child with explicit local paths and network denied;
+7. test one bounded PT-BR segment to PCM without opening a speaker, then test
+   cancellation, stale-generation rejection, and queue flush;
+8. only after those checks request a separate human listening gate for voice
+   selection.
+
+### Gate 2B result
+
+```yaml
+JARVIS_VOICE_PHASE: PARTIAL
+KOKORO_ARTIFACT_AND_LICENSE_PINNING_GATE: PASS_WITH_RESTRICTIONS
+BASELINE: 1f48b1b22af5310cbe08b9933d1e7e511de37c0c
+
+KOKORO_RUNTIME_SOURCE: PyPI
+KOKORO_RUNTIME_PACKAGE: kokoro==0.9.4
+KOKORO_RUNTIME_VERSION: 0.9.4
+KOKORO_RUNTIME_REVISION: wheel sha256:a129dc6364a286bd6a92c396e9862459d3d3e45f2c15596ed5a94dcee5789efd
+KOKORO_RUNTIME_LICENSE: Apache-2.0
+RUNTIME_LICENSE_VERIFIED: YES
+
+REPOSITORY_PYTHON_REQUIREMENT: ">=3.10, <3.14"
+PYPI_PYTHON_REQUIREMENT: ">=3.10, <3.13"
+PYTHON_3_13_15_SUPPORTED_BY_METADATA: CONDITIONAL
+PYTHON_3_13_15_SUPPORTED_BY_DEPENDENCIES: NO
+WINDOWS_11_AMD64_SUPPORTED: CONDITIONAL
+DEPENDENCY_BLOCKER_FOUND: YES
+DEPENDENCY_BLOCKERS:
+  - published Kokoro and Misaki metadata exclude Python 3.13
+  - official uv.lock also excludes Python 3.13 and resolves an older graph
+  - native/binary closure is not validated in Golden's Python 3.13 environment
+  - espeak-ng and loader licensing/provenance are not fully reconciled
+
+ESPEAK_NG_REQUIRED: YES
+ESPEAK_NG_ROLE: PT-BR G2P/phonemization via Misaki EspeakG2P(language=pt-br)
+ESPEAK_NG_LICENSE: GPL-3.0-or-later
+ESPEAK_NG_WINDOWS_SUPPORT: Official x64 MSI documented; exact release/hash pending
+ESPEAK_NG_INTEGRATION_FORM: Misaki uses espeakng-loader library/data paths; loader or MSI requires separate approval
+
+MODEL_REPOSITORY: hexgrad/Kokoro-82M
+MODEL_REVISION: f3ff3571791e39611d31c381e3a41a3af07b4987
+MODEL_VERSION: v1.0
+MODEL_FORMAT: PyTorch .pth state dict
+MODEL_REQUIRED_FILES: config.json, kokoro-v1_0.pth, selected voices/*.pt, notices
+MODEL_LICENSE: Apache-2.0 weights
+MODEL_LICENSE_VERIFIED: YES
+MODEL_EXPECTED_SIZE: 327212226 bytes model; 328792482 bytes with config, VOICES.md and three candidate voices
+
+PF_DORA_ARTIFACT: voices/pf_dora.pt @ f3ff3571791e39611d31c381e3a41a3af07b4987; sha256:07e4ff987c5d5a8c3995efd15cc4f0db7c4c15e881b198d8ab7f67ecf51f5eb7; 523425 bytes
+PF_DORA_LICENSE: separate voice license not declared
+PF_DORA_LICENSE_VERIFIED: NO
+PF_DORA_PROVENANCE_VERIFIED: YES
+
+PM_ALEX_ARTIFACT: voices/pm_alex.pt @ f3ff3571791e39611d31c381e3a41a3af07b4987; sha256:cf0ba8c573c2480fc54123683a35cf1e2ae130428e441eb91f9149bdb188a526; 523425 bytes
+PM_ALEX_LICENSE: separate voice license not declared
+PM_ALEX_LICENSE_VERIFIED: NO
+PM_ALEX_PROVENANCE_VERIFIED: YES
+
+PM_SANTA_ARTIFACT: voices/pm_santa.pt @ f3ff3571791e39611d31c381e3a41a3af07b4987; sha256:d42103169c5c872abbafb9129133af7e942bb9d272c3cc3b95c203e7d7198c29; 523430 bytes
+PM_SANTA_LICENSE: separate voice license not declared
+PM_SANTA_LICENSE_VERIFIED: NO
+PM_SANTA_PROVENANCE_VERIFIED: YES
+
+NATIVE_SAMPLE_RATE: 24000 Hz
+CHANNELS: 1 logical mono channel
+OUTPUT_FORMAT: PyTorch FloatTensor waveform; convert to mono s16le PCM
+SEGMENT_SYNTHESIS_SUPPORTED: YES
+TRUE_AUDIO_STREAMING_REQUIRED: NO
+
+RECOMMENDED_IMPLEMENTATION_FORM: LOCAL_ISOLATED_PROVIDER_PROCESS
+GOLDEN_VOICE_SERVICE_REMAINS_OWNER: YES
+GOLDEN_AUDIO_OUTPUT_REMAINS_OWNER: YES
+IMPLICIT_RUNTIME_DOWNLOAD_ALLOWED: NO
+CANCELLATION_STRATEGY: bounded isolated child termination plus Golden generation guards and output flush
+
+PROPOSED_STORAGE: C:\GoldenAI\models\tts\kokoro\Kokoro-82M\f3ff3571791e39611d31c381e3a41a3af07b4987\
+MODEL_INTEGRITY_IDENTIFIER: model SHA256 496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4; size 327212226
+VOICE_INTEGRITY_IDENTIFIER: pf_dora 07e4ff987c5d5a8c3995efd15cc4f0db7c4c15e881b198d8ab7f67ecf51f5eb7; pm_alex cf0ba8c573c2480fc54123683a35cf1e2ae130428e441eb91f9149bdb188a526; pm_santa d42103169c5c872abbafb9129133af7e942bb9d272c3cc3b95c203e7d7198c29
+EXPECTED_TOTAL_SIZE: 328792482 bytes for model, config, VOICES.md and three candidate voices; dependencies extra
+
+KOKORO_RUNTIME: Apache-2.0 / VERIFIED
+KOKORO_MODEL: Apache-2.0 weights / VERIFIED_WITH_NOTICES
+PF_DORA: separate voice license absent / NOT_VERIFIED
+PM_ALEX: separate voice license absent / NOT_VERIFIED
+PM_SANTA: separate voice license absent / NOT_VERIFIED
+ESPEAK_NG: GPL-3.0-or-later / source verified, distribution path pending
+
+KOKORO_DECISION: BLOCKED_LICENSE
+ARTIFACT_APPROVAL_READY: NO
+RUNTIME_INSTALLATION_READY: NO
+
+PRODUCTION_CODE_CHANGED: NO
+DEPENDENCIES_INSTALLED: NO
+MODEL_DOWNLOADED: NO
+VOICE_ARTIFACTS_DOWNLOADED: NO
+ESPEAK_INSTALLED: NO
+MICROPHONE_OPENED: NO
+SPEAKER_OPENED: NO
+AUDIO_PLAYED: NO
+DEVICE_REGISTRY_TOUCHED: NO
+TASK_DB_SCHEMA_MIGRATION: NONE
+PUSH: NO
+
+FILES_CREATED: NONE
+FILES_MODIFIED: docs/architecture/JARVIS_LOCAL_TTS_PROVIDER_AUDIT.md
+COMMIT: DOCUMENTATION_ONLY_PENDING
+
+READY_FOR_TTS_RUNTIME_ARTIFACT_INSTALLATION_GATE: NO
+NEXT_GATE: KOKORO_LICENSE_RESOLUTION_AND_ISOLATED_RUNTIME_INSTALLATION_GATE
+NEXT_STEP: obtain separate voice grants, reconcile espeak-ng/loader licensing, then pin a Python-3.12-compatible isolated dependency lock
+KNOWN_RESTRICTIONS: no install, download, synthesis, audio playback, hardware access, production code, device registry, DB migration, or push
+```
