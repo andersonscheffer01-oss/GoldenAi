@@ -142,3 +142,47 @@ LEGACY_COMPATIBILITY: PRESERVED
 DUPLICATE_EXECUTION: NOT_OBSERVED
 TESTS: 26_PASSED_22_SUBTESTS
 ```
+
+## E3 checkpoint
+
+The first MCP foundation is intentionally local and narrow. `McpClientManager`
+accepts only explicit `McpServerConfig` entries and does not scan the machine,
+network or plugin folders. The implementation supports one `stdio` transport,
+the pinned legacy lifecycle required by the controlled fixture
+(`initialize`/`notifications/initialized`), `tools/list` and `tools/call`.
+The protocol revision is configuration data so a future stateless MCP adapter
+can be added without silently mixing lifecycle models.
+
+Each owned subprocess has bounded startup/request/stop behavior, sanitized
+environment inheritance, stderr draining, timeout cleanup and cancellation
+cleanup. Imported tool names are namespaced as `mcp:<server_id>:<tool>`.
+Schemas and arguments are validated before dispatch; malformed providers are
+marked degraded and their tools quarantined. Provider metadata is untrusted.
+
+`McpClientManager.register_tools()` is an explicit bridge into the existing
+`ToolRegistry`. It marks only host-approved read-only names as read-only; every
+other imported tool is confirmation-gated. The bridge handler is reached only
+through `JarvisService.execute_tool`, so the canonical `SecurityManager`,
+postcondition path and `AuditLog` remain in charge. MCP results carry provider,
+server and provenance fields and are not automatically written to memory.
+
+```yaml
+E3_STATUS: PASS_WITH_RESTRICTIONS
+IMPLEMENTATION: jarvis_core.mcp_client.McpClientManager
+TRANSPORT: EXPLICIT_STDIO_ONLY
+SERVER_CONFIGURATION: EXPLICIT_AND_APPROVED_ONLY
+SERVER_IDENTITY: PASS
+TOOL_DISCOVERY: tools/list
+SCHEMA_VALIDATION: PASS
+SECURITY_WRAPPER: JarvisService.execute_tool -> SecurityManager
+TIMEOUT: BOUNDED
+CANCELLATION: BOUNDED_PROCESS_STOP
+PROCESS_CLEANUP: PASS
+FAILURE_ISOLATION: PASS
+EXTERNAL_SERVERS_CONTACTED: NO
+TESTS: 5_PASSED
+```
+
+The restriction is deliberate: no Streamable HTTP, resources, prompts, tasks,
+automatic server discovery or dependency installation is included until the
+stdio provider path has interoperability coverage.
