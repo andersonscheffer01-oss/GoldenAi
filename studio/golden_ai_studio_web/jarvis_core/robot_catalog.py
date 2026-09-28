@@ -1,8 +1,8 @@
-"""Read-only Golden robot catalog and evidence model.
+"""Golden robot catalog, provenance model, and subordinate operational store.
 
 The catalog deliberately stays in Jarvis Core and keeps discovery separate
-from trading, MT5, Strategy Tester, and durable memory writes.  Persistence
-is intentionally deferred until a canonical schema migration is authorized.
+from trading, MT5, Strategy Tester, and durable memory writes. Its subordinate
+SQLite store owns only catalog state, evidence, and association history.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Optional
+import sqlite3
 
 
 LIFECYCLE_STATES = (
@@ -31,6 +32,10 @@ FACT_SOURCES = (
     "FACT_FROM_SOURCE", "FACT_FROM_DOCUMENTATION", "USER_ASSERTION",
     "JARVIS_INFERENCE", "TEST_RESULT", "UNKNOWN"
 )
+ASSOCIATION_STATUSES = (
+    "VERIFIED", "HIGH_CONFIDENCE", "AMBIGUOUS", "UNRESOLVED", "CONFLICTING"
+)
+CATALOG_SCHEMA_VERSION = 1
 
 SOURCE_EXTENSIONS = {".mq5", ".mq4"}
 COMPILED_EXTENSIONS = {".ex5", ".ex4"}
@@ -94,6 +99,20 @@ def _bounded(value: Any, depth: int = 0) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)[:200]
+
+
+def _parameter_fingerprint(parameters: dict[str, Any]) -> str:
+    normalized = json.dumps(sorted((str(key).casefold(), _bounded(value))
+                                   for key, value in parameters.items()),
+                            separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+
+
+def _logical_robot_id(name: str, version: str, role: str) -> str:
+    """Keep executable identity independent from path and content revisions."""
+    material = ":".join((_normal_key(name), str(version or "UNKNOWN"),
+                          str(role or "UNKNOWN").upper()))
+    return "robot_" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
 
 
 def default_approved_roots(workspace_root: Optional[Path | str] = None) -> tuple[Path, ...]:
@@ -170,7 +189,13 @@ class BacktestEvidence:
     metrics: dict[str, Any] = field(default_factory=dict)
     parser_confidence: str = "LOW"
     association_confidence: str = "NONE"
+    association_status: str = "UNRESOLVED"
     robot_id: str = ""
+    candidate_robot_ids: list[str] = field(default_factory=list)
+    association_signals: list[str] = field(default_factory=list)
+    association_reason: str = ""
+    identity_hints: list[str] = field(default_factory=list)
+    parameter_fingerprint: str = ""
     provenance: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -178,12 +203,17 @@ class BacktestEvidence:
             "artifact_id": self.artifact_id,
             "relative_path": self.relative_path,
             "robot_id": self.robot_id or None,
+            "candidate_robot_ids": list(self.candidate_robot_ids),
+            "association_status": self.association_status,
+            "association_signals": list(self.association_signals),
+            "association_reason": self.association_reason,
             "strategy": self.strategy,
             "symbol": self.symbol,
             "timeframe": self.timeframe,
             "model": self.model,
             "date_range": _bounded(self.date_range),
             "parameters": _bounded(self.parameters),
+            "parameter_fingerprint": self.parameter_fingerprint,
             "metrics": _bounded(self.metrics),
             "parser_confidence": self.parser_confidence,
             "association_confidence": self.association_confidence,
@@ -200,6 +230,7 @@ class RobotRecord:
     source_artifacts: list[dict[str, Any]] = field(default_factory=list)
     compiled_artifacts: list[dict[str, Any]] = field(default_factory=list)
     parameter_presets: list[dict[str, Any]] = field(default_factory=list)
+    aliases: list[dict[str, Any]] = field(default_factory=list)
     documentation_artifacts: list[dict[str, Any]] = field(default_factory=list)
     backtest_artifacts: list[dict[str, Any]] = field(default_factory=list)
     optimization_artifacts: list[dict[str, Any]] = field(default_factory=list)
@@ -248,6 +279,7 @@ class RobotRecord:
             "source_artifacts": list(self.source_artifacts),
             "compiled_artifacts": list(self.compiled_artifacts),
             "parameter_presets": list(self.parameter_presets),
+            "aliases": list(self.aliases),
             "documentation_artifacts": list(self.documentation_artifacts),
             "backtest_count": len(self.backtest_artifacts),
             "optimization_evidence": bool(self.optimization_artifacts),
@@ -265,6 +297,7 @@ class RobotRecord:
                 "optimization_artifacts": list(self.optimization_artifacts),
                 "supported_symbols": list(self.supported_symbols),
                 "supported_timeframes": list(self.supported_timeframes),
+                "aliases": list(self.aliases),
                 "entry_logic_summary": self.entry_logic_summary,
                 "exit_logic_summary": self.exit_logic_summary,
                 "risk_model": self.risk_model,
@@ -331,6 +364,12 @@ class DiscoveryReport:
     optimization_artifacts_found: int = 0
     backtests_associated: int = 0
     backtests_unassociated: int = 0
+    backtests_verified: int = 0
+    backtests_high_confidence: int = 0
+    backtests_ambiguous: int = 0
+    backtests_unresolved: int = 0
+    backtests_conflicting: int = 0
+    association_examples: list[dict[str, Any]] = field(default_factory=list)
     conflicts: int = 0
     unknowns: int = 0
     unassociated_artifacts: list[dict[str, Any]] = field(default_factory=list)
@@ -352,11 +391,199 @@ class DiscoveryReport:
             "optimization_artifacts_found": self.optimization_artifacts_found,
             "backtests_associated": self.backtests_associated,
             "backtests_unassociated": self.backtests_unassociated,
+            "association_counts": {
+                "VERIFIED": self.backtests_verified,
+                "HIGH_CONFIDENCE": self.backtests_high_confidence,
+                "AMBIGUOUS": self.backtests_ambiguous,
+                "UNRESOLVED": self.backtests_unresolved,
+                "CONFLICTING": self.backtests_conflicting,
+            },
+            "association_examples": list(self.association_examples),
             "conflicts": self.conflicts,
             "unknowns": self.unknowns,
             "unassociated_artifacts": list(self.unassociated_artifacts),
             "errors": list(self.errors),
         }
+
+
+def default_catalog_store_path(workspace_root: Optional[Path | str] = None) -> Path:
+    root = Path(workspace_root or Path(__file__).resolve().parents[3]).resolve()
+    return root / "studio" / "golden_ai_studio_web" / "jarvis" / "robot_catalog.db"
+
+
+class RobotCatalogStore:
+    """Persistence owner for catalog state; independent from memory/tasks/audit DBs."""
+
+    def __init__(self, path: Path | str):
+        self.path = Path(path).resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(str(self.path), check_same_thread=False)
+        self._connection.row_factory = sqlite3.Row
+        self._initialize()
+
+    def _initialize(self) -> None:
+        connection = self._connection
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS catalog_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS robot_records (
+                robot_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                first_seen_at REAL NOT NULL,
+                last_seen_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS robot_overrides (
+                robot_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS robot_artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                robot_id TEXT,
+                kind TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                current_path TEXT NOT NULL,
+                path_history_json TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                first_seen_at REAL NOT NULL,
+                last_seen_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS robot_associations (
+                artifact_id TEXT PRIMARY KEY,
+                robot_id TEXT,
+                status TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS catalog_scan_runs (
+                scan_id TEXT PRIMARY KEY,
+                started_at REAL NOT NULL,
+                completed_at REAL NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+            """
+        )
+        row = connection.execute(
+            "SELECT value FROM catalog_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        if row is None:
+            connection.execute(
+                "INSERT INTO catalog_meta(key, value) VALUES('schema_version', ?)",
+                (str(CATALOG_SCHEMA_VERSION),),
+            )
+        elif int(row["value"]) != CATALOG_SCHEMA_VERSION:
+            raise RuntimeError("ROBOT_CATALOG_SCHEMA_VERSION_UNSUPPORTED")
+        connection.commit()
+
+    def load(self) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], Optional[dict[str, Any]]]:
+        records = {
+            row["robot_id"]: json.loads(row["payload_json"])
+            for row in self._connection.execute("SELECT robot_id, payload_json FROM robot_records")
+        }
+        overrides = {
+            row["robot_id"]: json.loads(row["payload_json"])
+            for row in self._connection.execute("SELECT robot_id, payload_json FROM robot_overrides")
+        }
+        row = self._connection.execute(
+            "SELECT payload_json FROM catalog_scan_runs ORDER BY completed_at DESC LIMIT 1"
+        ).fetchone()
+        return records, overrides, (json.loads(row["payload_json"]) if row else None)
+
+    def save_override(self, robot_id: str, override: dict[str, Any]) -> None:
+        self._connection.execute(
+            "INSERT INTO robot_overrides(robot_id, payload_json, updated_at) VALUES(?, ?, ?) "
+            "ON CONFLICT(robot_id) DO UPDATE SET payload_json=excluded.payload_json, updated_at=excluded.updated_at",
+            (robot_id, json.dumps(override, ensure_ascii=True), float(override.get("updated_at", time.time()))),
+        )
+        self._connection.commit()
+
+    def save_scan(self, records: dict[str, "RobotRecord"], report: "DiscoveryReport") -> None:
+        now = time.time()
+        with self._connection:
+            for record in records.values():
+                payload = record.to_dict(detail=True)
+                self._connection.execute(
+                    "INSERT INTO robot_records(robot_id, payload_json, first_seen_at, last_seen_at, updated_at) "
+                    "VALUES(?, ?, ?, ?, ?) ON CONFLICT(robot_id) DO UPDATE SET payload_json=excluded.payload_json, "
+                    "last_seen_at=excluded.last_seen_at, updated_at=excluded.updated_at",
+                    (record.robot_id, json.dumps(payload, ensure_ascii=True), record.discovered_at,
+                     record.last_seen_at, now),
+                )
+                for artifact in (record.source_artifacts + record.compiled_artifacts +
+                                 record.parameter_presets + record.documentation_artifacts +
+                                 record.backtest_artifacts + record.optimization_artifacts):
+                    self._save_artifact(record.robot_id, artifact, now)
+                for backtest in record.backtest_artifacts + record.optimization_artifacts:
+                    self._connection.execute(
+                        "INSERT INTO robot_associations(artifact_id, robot_id, status, payload_json, updated_at) "
+                        "VALUES(?, ?, ?, ?, ?) ON CONFLICT(artifact_id) DO UPDATE SET robot_id=excluded.robot_id, "
+                        "status=excluded.status, payload_json=excluded.payload_json, updated_at=excluded.updated_at",
+                        (backtest["artifact_id"], record.robot_id,
+                         backtest.get("association_status", "UNRESOLVED"),
+                         json.dumps(backtest, ensure_ascii=True), now),
+                    )
+            for item in report.unassociated_artifacts:
+                artifact_id = item.get("artifact_id")
+                if not artifact_id:
+                    continue
+                payload = dict(item)
+                payload.setdefault("kind", "BACKTEST")
+                payload.setdefault("sha256", "")
+                payload.setdefault("relative_path", "")
+                self._save_artifact("", payload, now)
+                self._connection.execute(
+                    "INSERT INTO robot_associations(artifact_id, robot_id, status, payload_json, updated_at) "
+                    "VALUES(?, NULL, ?, ?, ?) ON CONFLICT(artifact_id) DO UPDATE SET robot_id=NULL, "
+                    "status=excluded.status, payload_json=excluded.payload_json, updated_at=excluded.updated_at",
+                    (artifact_id, item.get("association_status", "UNRESOLVED"),
+                     json.dumps(item, ensure_ascii=True), now),
+                )
+            report_payload = report.to_dict()
+            scan_id = hashlib.sha256((str(report.scanned_at) + json.dumps(report_payload, sort_keys=True)).encode()).hexdigest()[:32]
+            self._connection.execute(
+                "INSERT OR REPLACE INTO catalog_scan_runs(scan_id, started_at, completed_at, payload_json) VALUES(?, ?, ?, ?)",
+                (scan_id, report.scanned_at, now, json.dumps(report_payload, ensure_ascii=True)),
+            )
+
+    def _save_artifact(self, robot_id: str, artifact: dict[str, Any], now: float) -> None:
+        row = self._connection.execute(
+            "SELECT path_history_json, first_seen_at FROM robot_artifacts WHERE artifact_id = ?",
+            (artifact["artifact_id"],),
+        ).fetchone()
+        history = json.loads(row["path_history_json"]) if row else []
+        current_path = str(artifact.get("relative_path", ""))
+        if current_path and current_path not in history:
+            history.append(current_path)
+        self._connection.execute(
+            "INSERT INTO robot_artifacts(artifact_id, robot_id, kind, sha256, current_path, path_history_json, payload_json, first_seen_at, last_seen_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(artifact_id) DO UPDATE SET robot_id=excluded.robot_id, "
+            "current_path=excluded.current_path, path_history_json=excluded.path_history_json, payload_json=excluded.payload_json, "
+            "last_seen_at=excluded.last_seen_at",
+            (artifact["artifact_id"], robot_id, artifact.get("kind", "UNKNOWN"), artifact.get("sha256", ""),
+             current_path, json.dumps(history, ensure_ascii=True), json.dumps(artifact, ensure_ascii=True),
+             row["first_seen_at"] if row else now, now),
+        )
+
+    def history_counts(self) -> dict[str, int]:
+        return {
+            "robots": int(self._connection.execute("SELECT COUNT(*) FROM robot_records").fetchone()[0]),
+            "artifacts": int(self._connection.execute("SELECT COUNT(*) FROM robot_artifacts").fetchone()[0]),
+            "scan_runs": int(self._connection.execute("SELECT COUNT(*) FROM catalog_scan_runs").fetchone()[0]),
+        }
+
+    def artifact_history(self, artifact_id: str) -> list[str]:
+        row = self._connection.execute(
+            "SELECT path_history_json FROM robot_artifacts WHERE artifact_id = ?",
+            (artifact_id,),
+        ).fetchone()
+        return json.loads(row["path_history_json"]) if row else []
+
+    def close(self) -> None:
+        self._connection.close()
 
 
 def _artifact(path: Path, root: Path, kind: str, confidence: str = "NONE") -> RobotArtifact:
@@ -441,14 +668,30 @@ class RobotCatalogReadModel:
     CATALOG_VERSION = 1
 
     def __init__(self, workspace_root: Optional[Path | str] = None,
-                 approved_roots: Optional[Iterable[Path | str]] = None):
+                 approved_roots: Optional[Iterable[Path | str]] = None,
+                 storage_path: Optional[Path | str] = None):
         self._lock = threading.RLock()
         self.workspace_root = Path(workspace_root or Path(__file__).resolve().parents[3]).resolve()
         self.approved_roots = tuple(Path(root).resolve() for root in (
             approved_roots or default_approved_roots(self.workspace_root)))
+        self._store = RobotCatalogStore(storage_path) if storage_path else None
         self._robots: dict[str, RobotRecord] = {}
         self._user_overrides: dict[str, dict[str, Any]] = {}
         self._last_report: Optional[DiscoveryReport] = None
+        if self._store:
+            stored_records, stored_overrides, _ = self._store.load()
+            self._user_overrides = stored_overrides
+            self._robots = {
+                robot_id: self._record_from_payload(payload)
+                for robot_id, payload in stored_records.items()
+            }
+
+    @staticmethod
+    def _record_from_payload(payload: dict[str, Any]) -> RobotRecord:
+        known = {item.name for item in __import__("dataclasses").fields(RobotRecord)}
+        values = {key: payload[key] for key in known if key in payload}
+        values["provenance"] = [EvidenceClaim(**claim) for claim in payload.get("provenance", [])]
+        return RobotRecord(**values)
 
     def discover(self, roots: Optional[Iterable[Path | str]] = None) -> dict[str, Any]:
         """Perform one bounded, read-only scan and replace only discovered facts."""
@@ -508,12 +751,12 @@ class RobotCatalogReadModel:
                 try:
                     content = _text(path)
                     role = _source_role(content)
-                    robot_id = "robot_" + hashlib.sha256(
-                        ("source:" + artifact.sha256).encode("ascii")).hexdigest()[:24]
+                    version = _match(r"#property\s+version\s+['\"]([^'\"]+)", content) or "UNKNOWN"
+                    robot_id = _logical_robot_id(path.stem, version, role)
                     record = add_robot(robot_id, _human_name(path.stem), role)
                     item = artifact.to_dict()
                     record.source_artifacts.append(item)
-                    record.version = _match(r"#property\s+version\s+['\"]([^'\"]+)", content) or record.version
+                    record.version = version
                     record.strategy_family = record.strategy_family if record.strategy_family != "UNKNOWN" else _family_for(path.stem, content)
                     self._claim(record, "source_available", True, "ARTIFACT_OBSERVED",
                                 "FACT_FROM_SOURCE", artifact, reason="MQL source inspected")
@@ -539,8 +782,7 @@ class RobotCatalogReadModel:
                     self._claim(record, "compiled_available", True, "ARTIFACT_OBSERVED",
                                 "FACT_FROM_SOURCE", artifact, reason="exact source/compiled stem match")
                 else:
-                    robot_id = "robot_" + hashlib.sha256(
-                        ("compiled:" + artifact.sha256).encode("ascii")).hexdigest()[:24]
+                    robot_id = _logical_robot_id(path.stem, "UNKNOWN", "COMPILED_ONLY")
                     record = add_robot(robot_id, _human_name(path.stem), "COMPILED_ONLY")
                     record.compiled_artifacts.append(artifact.to_dict())
                     record.known_limitations.append("compiled artifact has no inspected source")
@@ -557,6 +799,8 @@ class RobotCatalogReadModel:
                     record = matches[0]
                     item = RobotArtifact(**{**artifact.__dict__, "association_confidence": "HIGH"}).to_dict()
                     if artifact.kind == "PRESET":
+                        preset = self._parse_preset(path)
+                        item.update(preset)
                         record.parameter_presets.append(item)
                         report.presets_found += 1
                         self._claim(record, "parameter_preset", artifact.relative_path,
@@ -579,27 +823,50 @@ class RobotCatalogReadModel:
                 if parsed is None:
                     report.errors.append({"path": str(path), "error": "BACKTEST_PARSE_ERROR"})
                     continue
-                strategy_key = _normal_key(parsed.strategy)
-                matches = source_by_stem.get(strategy_key, []) or compiled_by_stem.get(strategy_key, [])
-                if len(matches) == 1:
-                    record = matches[0]
+                status, record, candidates, signals, reason = self._associate_backtest(
+                    parsed, robots, source_by_stem, compiled_by_stem)
+                parsed.association_status = status
+                parsed.association_confidence = status
+                parsed.candidate_robot_ids = candidates
+                parsed.association_signals = signals
+                parsed.association_reason = reason
+                if record is not None:
                     parsed.robot_id = record.robot_id
-                    parsed.association_confidence = "HIGH"
                     record.backtest_artifacts.append(parsed.to_dict())
                     if artifact.kind == "OPTIMIZATION":
                         record.optimization_artifacts.append(parsed.to_dict())
-                    report.backtests_associated += 1
                     self._claim(record, "backtest_evidence", artifact.relative_path,
                                 "OPTIMIZATION_EVIDENCE" if artifact.kind == "OPTIMIZATION" else "BACKTEST_EVIDENCE",
-                                "FACT_FROM_SOURCE", artifact,
-                                reason="exact strategy stem match")
+                                "FACT_FROM_SOURCE", artifact, reason=reason)
                 else:
                     parsed.provenance.append({
                         "evidence_type": "UNKNOWN", "fact_source": "UNKNOWN",
-                        "reason": "no deterministic robot association",
+                        "reason": reason,
                     })
-                    report.backtests_unassociated += 1
                     report.unassociated_artifacts.append(parsed.to_dict())
+                if status == "VERIFIED":
+                    report.backtests_verified += 1
+                elif status == "HIGH_CONFIDENCE":
+                    report.backtests_high_confidence += 1
+                elif status == "AMBIGUOUS":
+                    report.backtests_ambiguous += 1
+                elif status == "CONFLICTING":
+                    report.backtests_conflicting += 1
+                else:
+                    report.backtests_unresolved += 1
+                if status in {"VERIFIED", "HIGH_CONFIDENCE"}:
+                    report.backtests_associated += 1
+                else:
+                    report.backtests_unassociated += 1
+                if len(report.association_examples) < 12:
+                    report.association_examples.append({
+                        "artifact": artifact.relative_path,
+                        "status": status,
+                        "robot_id": parsed.robot_id or None,
+                        "candidates": candidates,
+                        "signals": signals,
+                        "reason": reason,
+                    })
 
             for record in robots.values():
                 record.source_artifacts = _unique_dicts(record.source_artifacts, "artifact_id")
@@ -628,6 +895,8 @@ class RobotCatalogReadModel:
             report.source_only = sum(bool(item.source_artifacts) and not item.compiled_artifacts
                                      for item in robots.values())
             self._last_report = report
+            if self._store:
+                self._store.save_scan(robots, report)
             return {"ok": not report.errors, "report": report.to_dict(),
                     "robots": [item.to_dict() for item in self._sorted_robots()]}
 
@@ -664,6 +933,8 @@ class RobotCatalogReadModel:
             self._user_overrides[str(robot_id)] = override
             record.status = normalized
             record.user_overrides = [override]
+            if self._store:
+                self._store.save_override(str(robot_id), override)
             return {"ok": True, "robot": record.to_dict(detail=True)}
 
     def snapshot(self) -> dict[str, Any]:
@@ -672,13 +943,19 @@ class RobotCatalogReadModel:
                 "ok": True,
                 "read_only": True,
                 "catalog_version": self.CATALOG_VERSION,
-                "persistence": "IN_MEMORY_READ_MODEL",
-                "schema_migration": "NOT_REQUIRED",
+                "persistence": "SUBORDINATE_SQLITE" if self._store else "IN_MEMORY_READ_MODEL",
+                "storage_path": str(self._store.path) if self._store else None,
+                "schema_migration": "CATALOG_SCHEMA_V1" if self._store else "NOT_REQUIRED",
                 "trade_authority": "NONE",
                 "scanned": self._last_report is not None,
                 "report": self._last_report.to_dict() if self._last_report else None,
                 "robots": [item.to_dict() for item in self._sorted_robots()],
             }
+
+    def close(self) -> None:
+        with self._lock:
+            if self._store:
+                self._store.close()
 
     def _sorted_robots(self) -> list[RobotRecord]:
         return sorted(self._robots.values(), key=lambda item: (item.name.casefold(), item.robot_id))
@@ -719,6 +996,113 @@ class RobotCatalogReadModel:
         if any(marker in _normal_key(record.name) for marker in ARCHIVED_NAME_MARKERS):
             return "ARCHIVED"
         return "CANDIDATE" if record.artifact_role == "EA" else "DISCOVERED"
+
+    @staticmethod
+    def _parse_preset(path: Path) -> dict[str, Any]:
+        parameters: dict[str, Any] = {}
+        try:
+            content = _text(path, limit=2_000_000)
+        except OSError:
+            return {"parameter_fingerprint": "", "parameter_count": 0, "parameters": {}}
+        for line in content.splitlines():
+            value = line.strip()
+            if not value or value.startswith((";", "#")) or "=" not in value:
+                continue
+            key, raw = value.split("=", 1)
+            raw = raw.split("||", 1)[0].strip()
+            key = key.strip()
+            if not key:
+                continue
+            lowered = raw.casefold()
+            if lowered in {"true", "false"}:
+                parsed: Any = lowered == "true"
+            else:
+                try:
+                    parsed = float(raw) if any(char in raw for char in ".eE") else int(raw)
+                except ValueError:
+                    parsed = raw
+            parameters[key] = parsed
+        return {
+            "parameter_fingerprint": _parameter_fingerprint(parameters) if parameters else "",
+            "parameter_count": len(parameters),
+            "parameters": _bounded(parameters),
+        }
+
+    @staticmethod
+    def _compatible(record: RobotRecord, parsed: BacktestEvidence) -> list[str]:
+        signals = []
+        symbol = _normal_key(parsed.symbol)
+        if symbol != "unknown" and any(symbol == _normal_key(item) for item in record.supported_symbols):
+            signals.append("symbol_match")
+        timeframe = _normal_key(parsed.timeframe)
+        if timeframe != "unknown" and any(timeframe in _normal_key(item) for item in record.supported_timeframes):
+            signals.append("timeframe_match")
+        return signals
+
+    @classmethod
+    def _associate_backtest(cls, parsed: BacktestEvidence,
+                            robots: dict[str, RobotRecord],
+                            source_by_stem: dict[str, list[RobotRecord]],
+                            compiled_by_stem: dict[str, list[RobotRecord]]) -> tuple[str, Optional[RobotRecord], list[str], list[str], str]:
+        by_id = {record.robot_id: record for record in robots.values()}
+        direct: dict[str, list[str]] = {}
+        for hint in parsed.identity_hints:
+            key = _normal_key(hint)
+            candidates = []
+            for record in robots.values():
+                if key in {_normal_key(record.name), _normal_key(record.robot_id)}:
+                    candidates.append(record.robot_id)
+                if any(key == _normal_key(alias.get("value", "")) for alias in record.aliases):
+                    candidates.append(record.robot_id)
+            direct[hint] = sorted(set(candidates))
+        direct_ids = sorted({item for items in direct.values() for item in items})
+        strategy_key = _normal_key(parsed.strategy)
+        name_matches = source_by_stem.get(strategy_key, []) or compiled_by_stem.get(strategy_key, [])
+        strategy_ids = sorted({record.robot_id for record in name_matches})
+        alias_ids = sorted({record.robot_id for record in robots.values()
+                            if any(strategy_key == _normal_key(alias.get("value", ""))
+                                   for alias in record.aliases)})
+        strong_ids = sorted(set(strategy_ids + alias_ids))
+        if direct_ids and strong_ids and set(direct_ids) != set(strong_ids):
+            return "CONFLICTING", None, sorted(set(direct_ids + strong_ids)), ["identifier_conflict"], \
+                "explicit EA identifier conflicts with strategy/alias evidence"
+        if len(direct_ids) > 1:
+            return "CONFLICTING", None, direct_ids, ["multiple_explicit_identifiers"], \
+                "more than one explicit robot identity was present"
+        if len(direct_ids) == 1:
+            record = by_id[direct_ids[0]]
+            signals = ["exact_ea_identifier"] + cls._compatible(record, parsed)
+            return "VERIFIED", record, direct_ids, signals, "explicit robot identifier matched catalog identity"
+        if len(strong_ids) > 1:
+            return "AMBIGUOUS", None, strong_ids, ["multiple_exact_strategy_candidates"], \
+                "strategy name or alias matched multiple catalog identities"
+        if len(strong_ids) == 1:
+            record = by_id[strong_ids[0]]
+            signal = "alias_exact" if strong_ids[0] in alias_ids and not strategy_ids else "exact_robot_identifier"
+            return "VERIFIED", record, strong_ids, [signal] + cls._compatible(record, parsed), \
+                "exact robot identity or documented alias matched"
+
+        fingerprint = parsed.parameter_fingerprint
+        preset_candidates = []
+        if fingerprint:
+            preset_candidates = [record for record in robots.values()
+                                 if any(item.get("parameter_fingerprint") == fingerprint
+                                        for item in record.parameter_presets)]
+        if len(preset_candidates) > 1:
+            return "AMBIGUOUS", None, sorted(item.robot_id for item in preset_candidates), \
+                ["parameter_fingerprint_match", "multiple_preset_candidates"], \
+                "parameter fingerprint matched multiple presets"
+        if len(preset_candidates) == 1:
+            record = preset_candidates[0]
+            compatibility = cls._compatible(record, parsed)
+            if len(compatibility) >= 1:
+                return "HIGH_CONFIDENCE", record, [record.robot_id], \
+                    ["parameter_fingerprint_match"] + compatibility, \
+                    "exact preset fingerprint plus source compatibility matched"
+            return "UNRESOLVED", None, [record.robot_id], ["parameter_fingerprint_match"], \
+                "preset matched but no independent symbol/timeframe compatibility"
+        return "UNRESOLVED", None, [], [], \
+            "no exact identity, documented alias, or evidence-bearing preset match"
 
     @staticmethod
     def _claim(record: RobotRecord, field: str, value: Any, evidence_type: str,
@@ -818,6 +1202,22 @@ class RobotCatalogReadModel:
                 record.strategy_family = family
             elif record.strategy_family != family:
                 record.strategy_family = "CONFLICT"
+        aliases = re.findall(
+            r"(?:alias|aliases|nome\s+(?:anterior|antigo)|legacy\s+name)\s*[:=]\s*([^\n<;]+)",
+            content, re.I,
+        )
+        for alias in aliases:
+            value = alias.strip().strip("\"'")
+            if not value or _normal_key(value) == _normal_key(record.name):
+                continue
+            item = {"value": value, "source_artifact_id": artifact.artifact_id,
+                    "source_ref": artifact.relative_path,
+                    "authority": "DOCUMENTATION_ALIAS"}
+            if item not in record.aliases:
+                record.aliases.append(item)
+                cls._claim(record, "alias", value, "DOCUMENTATION_VERIFIED",
+                           "FACT_FROM_DOCUMENTATION", artifact,
+                           reason="explicit alias claim in documentation")
 
     @staticmethod
     def _parse_backtest(path: Path, artifact: RobotArtifact) -> Optional[BacktestEvidence]:
@@ -829,6 +1229,13 @@ class RobotCatalogReadModel:
             return None
         stats = data.get("stats") if isinstance(data.get("stats"), dict) else data
         strategy = str(stats.get("strategy") or data.get("strategy") or "UNKNOWN")
+        identity_hints = []
+        for key in ("ea", "ea_name", "expert", "expert_name", "robot", "robot_name", "robot_id"):
+            value = stats.get(key, data.get(key))
+            if value not in (None, ""):
+                identity_hints.append(str(value))
+        raw_parameters = data.get("parameters") if isinstance(data.get("parameters"), dict) else {}
+        parameter_fingerprint = _parameter_fingerprint(raw_parameters) if raw_parameters else ""
         metrics = {}
         for target, keys in {
             "initial_deposit": ("initial_deposit", "initial_balance"),
@@ -853,6 +1260,8 @@ class RobotCatalogReadModel:
             model=str(stats.get("model") or "UNKNOWN"),
             date_range=date_range,
             parameters=_bounded(data.get("parameters") if isinstance(data.get("parameters"), dict) else {}),
+            identity_hints=identity_hints,
+            parameter_fingerprint=parameter_fingerprint,
             metrics=metrics,
             parser_confidence="HIGH" if "stats" in data else "MEDIUM",
             provenance=[{
@@ -880,7 +1289,8 @@ def _unique_dicts(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]
 
 
 __all__ = [
-    "EVIDENCE_TYPES", "FACT_SOURCES", "LIFECYCLE_STATES", "BacktestEvidence",
+    "ASSOCIATION_STATUSES", "EVIDENCE_TYPES", "FACT_SOURCES", "LIFECYCLE_STATES",
+    "BacktestEvidence", "RobotCatalogStore", "default_catalog_store_path",
     "DiscoveryReport", "EvidenceClaim", "RobotArtifact", "RobotCatalogReadModel",
     "RobotRecord", "default_approved_roots",
 ]

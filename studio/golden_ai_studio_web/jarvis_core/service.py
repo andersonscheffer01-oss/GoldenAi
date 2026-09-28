@@ -22,7 +22,7 @@ from .memory.boundary import CanonicalMemoryBoundary
 from .memory.models import MemoryCategory, MemorySource
 from .mcp_client import McpClientManager
 from .orchestrator import CentralOrchestrator, JarvisRuntimeCoordinator
-from .robot_catalog import RobotCatalogReadModel
+from .robot_catalog import RobotCatalogReadModel, default_catalog_store_path
 from .task_manager import TaskManager
 
 
@@ -183,7 +183,11 @@ class JarvisService:
             self.memory_v2, self.legacy_memory)
         # Robot intelligence remains a bounded Jarvis read model. Discovery
         # is explicit and never opens MT5, starts a tester, or writes memory.
-        self.robot_catalog = RobotCatalogReadModel()
+        service_root = Path(__file__).resolve().parents[1]
+        catalog_store = (default_catalog_store_path()
+                         if Path(base_dir).resolve() == service_root
+                         else Path(base_dir) / "robot_catalog.db")
+        self.robot_catalog = RobotCatalogReadModel(storage_path=catalog_store)
         self.mcp_clients = McpClientManager()
         self._register_tools()
         self.task_manager = TaskManager(
@@ -329,6 +333,10 @@ class JarvisService:
             pass
         try:
             self.mcp_clients.close()
+        except Exception:
+            pass
+        try:
+            self.robot_catalog.close()
         except Exception:
             pass
 
