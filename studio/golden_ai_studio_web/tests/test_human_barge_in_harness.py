@@ -1,5 +1,6 @@
 from jarvis_core.realtime_voice.human_barge_in_harness import (
     HarnessObservation,
+    VADDiagnosticObservation,
     report_dict,
 )
 
@@ -61,3 +62,26 @@ def test_interactive_report_waits_for_human_confirmation():
     report = report_dict(observation, human_confirmation=None)
     assert report["REAL_HUMAN_SPEECH_USED"] == "PENDING_HUMAN_CONFIRMATION"
     assert report["VALID_ACOUSTIC_ATTEMPT"] == "PENDING_HUMAN_CONFIRMATION"
+
+
+def test_vad_diagnostic_reports_pcm_contract_without_retaining_pcm():
+    observation = VADDiagnosticObservation(mode="silence", duration_seconds=0.03)
+    observation.record_frame((1000).to_bytes(2, "little", signed=True) * 480, 1.0, "silence")
+    observation.record_probability(0.2, 1.0, "silence")
+    report = observation.report()
+    assert report["FRAME_BYTES"] == 960
+    assert report["FRAME_SAMPLES"] == 480
+    assert report["NORMALIZATION_FUNCTION"] == "int16.astype(float32) / 32768.0"
+    assert report["RAW_PCM16_PEAK_MAX"] == 1000
+    assert not hasattr(observation, "raw_pcm")
+
+
+def test_vad_diagnostic_probability_aggregates_are_numeric():
+    observation = VADDiagnosticObservation(mode="speech-only", duration_seconds=0.1)
+    observation.record_probability(0.05, 1.0, "silence")
+    observation.record_probability(0.55, 1.1, "silence")
+    observation.record_probability(0.80, 1.2, "speech")
+    report = observation.report()
+    assert report["VAD_PROB_MIN"] == 0.05
+    assert report["VAD_PROB_MAX"] == 0.8
+    assert report["FRAMES_ABOVE_CURRENT_THRESHOLD"] == 2
