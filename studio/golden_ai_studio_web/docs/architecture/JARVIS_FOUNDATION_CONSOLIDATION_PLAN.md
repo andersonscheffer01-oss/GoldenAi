@@ -517,6 +517,74 @@ idempotent shutdown, and lets `TemporaryDirectory` perform the actual cleanup.
 F7.2 provenance/parity and F7.3 canonical-boundary decisions remain separate
 gates.
 
+### F7.2 - Provenance and parity checkpoint
+
+The memory systems were audited read-only before any boundary change:
+
+| System | Active role | Provenance/lifecycle | Decision |
+|---|---|---|---|
+| `GoldenMemoryManager` / V1 tables | Existing service compatibility tools, sessions, episodic and semantic records | `MemorySource`, `source_id`, `session_id`, namespace, confidence, active flag, importance/access count | Preserve; adapt at the boundary |
+| `GoldenMemoryEngine` / V2 tables | Additive canonical candidate on the active Jarvis DB | `source_type`, `source_ref`, `source_timestamp`, confidence/basis, privacy, project, metadata, content hash, version and status | Canonical store for selected callers |
+| `LegacyMemoryAdapter` | Read-only view of legacy records as V2 records | Explicit lossy mapping; no physical write or migration | Compatibility only |
+| `ResearchEngine` / learning | Research evidence and promoted knowledge | provider/source URL, retrieval/fetched timestamps, trust, candidate state and evidence-backed promotion | Ready behind V2 promotion path |
+
+Parity is therefore `BOUNDED`, not claimed as lossless. V2 supports durable
+provenance, privacy, confidence, source references, temporal source timestamps,
+content identity, versioning, supersession, dispute and archival. Legacy
+`importance`, `access_count`, session lifecycle details and namespace semantics
+do not have a one-to-one V2 field; they remain compatibility metadata or
+deferred adapters. Conversation buffers are volatile context, not canonical
+memory.
+
+The current knowledge lifecycle is explicit: active records may be updated,
+deduplicated, disputed, superseded, archived or logically deleted while
+historical versions and consolidation evidence remain inspectable. Research
+records retain source/trust/freshness evidence before promotion. SECRET is
+rejected by the V2 memory contract and is not projected to the local vault.
+
+```yaml
+F7_2_STATUS: PASS_WITH_RESTRICTIONS
+MEMORY_SYSTEMS_AUDITED: LEGACY_V1,V2,LEGACY_ADAPTER,RESEARCH
+CANONICAL_PARITY: BOUNDED
+PROVENANCE_CONTRACT: PASS
+KNOWLEDGE_LIFECYCLE: PASS
+RESEARCH_MEMORY_READY: YES
+DESTRUCTIVE_MIGRATION_REQUIRED: NO
+LEGACY_DATABASES_UNTOUCHED: YES
+```
+
+### F7.3 - Canonical memory boundary checkpoint
+
+`jarvis_core.memory.boundary.CanonicalMemoryBoundary` is now the boundary for
+the selected Jarvis service memory tools. When V2 is initialized, these calls
+use `GoldenMemoryEngine` exclusively and translate its records to the stable
+service response contract. There is no V1/V2 dual-write. If V2 cannot be
+initialized, the same boundary reports `legacy_compatibility` and delegates to
+the existing manager; this is an explicit compatibility fallback, not a
+second active writer.
+
+Migrated callers are `memory_search`, `memory_remember` and `memory_recent` on
+`JarvisService`. Brain's legacy context reader, root Golden/App memory paths,
+and unverified external callers remain deferred because their session,
+importance and namespace semantics need a separately tested adapter. The
+active Jarvis writers are known; no unknown writer was assumed safe. Project
+memory and research learning already write through V2 and remain unchanged.
+
+```yaml
+F7_3_STATUS: PASS_WITH_RESTRICTIONS
+CANONICAL_BOUNDARY: CanonicalMemoryBoundary
+CANONICAL_STORE: GoldenMemoryEngine_V2
+ACTIVE_WRITERS_MIGRATED: JarvisService.memory_search,memory_remember,memory_recent
+ACTIVE_WRITERS_DEFERRED: Brain_legacy_context,root_Golden_App,external_legacy_callers
+UNKNOWN_WRITERS: NONE_ON_ACTIVE_JARVIS_PATH
+DUPLICATE_WRITES: NO
+LEGACY_COMPATIBILITY: EXPLICIT_FALLBACK
+PROJECT_MEMORY: V2
+RESEARCH_MEMORY: V2
+SECURITY_CLASSIFICATION: V2_DataClassification
+LEGACY_DATABASES_UNTOUCHED: YES
+```
+
 ### F8 - Optional downstream capabilities
 
 MCP, Agents, Finance, Mobile, personal integrations and real trading remain downstream. They attach to canonical Core only after the foundational waves pass.
