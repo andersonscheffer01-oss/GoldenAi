@@ -989,3 +989,131 @@ DECISION:
   NEXT_STEP: Validate Maria token selection, actual PCM stream format, bounded segment conversion, cancellation, stale-generation rejection, and AudioOutputProvider handoff without synthesizing during this gate.
   KNOWN_RESTRICTIONS: no install, download, model acquisition, voice installation, synthesis, playback, microphone, production runtime change, device registry change, DB migration, or push
 ```
+
+## Gate 2E: Windows SAPI adapter and PCM validation
+
+The Windows SAPI adapter was implemented behind the existing
+`TextToSpeechProvider` contract. It does not create a second VoiceService,
+TurnManager, text segmenter, output path, or state machine. SAPI renders into
+`SpMemoryStream`; Golden's `AudioOutputProvider` remains the only playback
+owner. No speaker or microphone was opened.
+
+### Adapter and COM boundary
+
+`WindowsSapiTTSProvider` selects the exact token description
+`Microsoft Maria Desktop - Portuguese(Brazil)` and validates SAPI language
+metadata `416` when exposed. It initializes and uninitializes COM on the same
+thread as each provider operation. The existing `StreamingTTSOrchestrator`
+provides the bounded worker boundary, so the blocking SAPI call does not run
+on the application event loop. COM proxies and the memory stream are released
+before `CoUninitialize` to avoid native teardown faults.
+
+The provider checks cancellation before synthesis and before yielding PCM. A
+currently executing synchronous SAPI call cannot be forcibly interrupted by
+this small adapter, so active cancellation is `PARTIAL`; the existing Golden
+generation and output gates remain authoritative and reject any late result.
+
+### Empirical PCM result
+
+The real installed Maria voice synthesized the Portuguese/Unicode validation
+text entirely in memory. The returned SAPI format was PCM, 22050 Hz, mono,
+16-bit, block alignment 2. `SpMemoryStream.GetData()` returned raw PCM rather
+than a persisted WAV file, so no container stripping or file cleanup was
+needed. The validated sample contained 465764 bytes, was nonzero and variable,
+and represented approximately 10561.542 ms of audio. No audio was routed to
+the default speaker.
+
+The adapter preserves segment identity and emits one final PCM chunk per
+bounded segment. Empty text, missing Maria, metadata mismatch, unsupported
+format, COM failure, release, and cancellation are bounded errors. Stale
+session/turn/generation data is rejected by `VoiceAudioPipeline` before output
+eligibility, and a new turn flushes the previous output queue.
+
+### Gate 2E final report
+
+```yaml
+JARVIS_VOICE_PHASE: PARTIAL
+WINDOWS_SAPI_ADAPTER_AND_PCM_VALIDATION_GATE: PASS_WITH_RESTRICTIONS
+BASELINE: b69ca349dc6d41feb8ccd48c4b81392ea3cee3cf
+
+PROVIDER: Windows SAPI
+IMPLEMENTATION: WindowsSapiTTSProvider in jarvis_core.voice_tts
+VOICE: Microsoft Maria Desktop - Portuguese(Brazil)
+VOICE_RESOLUTION: PASS
+VOICE_ARTIFACT_BUNDLED: NO
+NEW_DEPENDENCY: NO
+DEPENDENCY: pywin32 already present in canonical Golden runtime
+
+REAL_SAPI_SYNTHESIS: PASS
+PT_BR_UNICODE: PASS
+AUDIO_NONEMPTY: YES
+AUDIO_VARIABLE: YES
+DURATION_MS: 10561.542
+SAMPLE_RATE: 22050
+CHANNELS: 1
+SAMPLE_WIDTH: 2
+ENCODING: s16le
+CONTAINER: raw_pcm_from_SpMemoryStream
+
+TTS_PROVIDER_CONTRACT: PASS
+STREAMING_TTS_ORCHESTRATOR_PRESERVED: YES
+AUDIO_OUTPUT_PROVIDER_PRESERVED: YES
+VOICE_SERVICE_REMAINS_OWNER: YES
+TURN_MANAGER_REMAINS_OWNER: YES
+SECOND_STATE_MACHINE_CREATED: NO
+
+EVENT_LOOP_BLOCKED: NO
+COM_THREADING_HANDLED: YES
+SHUTDOWN: PASS
+DOUBLE_SHUTDOWN: PASS
+RESTART: PASS
+ZOMBIE_THREADS: NO
+
+ACTIVE_SYNTHESIS_CANCEL: PARTIAL
+STALE_RESULT_INVALIDATION: PASS
+STALE_SYNTHESIS_RETURNED_TO_PLAYBACK: NO
+STALE_AUDIO_CAN_PLAY: NO
+DUPLICATE_AUDIO_ELIGIBILITY: NO
+
+LOCAL_SYNTHESIS: YES
+REMOTE_TEXT_SENT: NO
+REMOTE_AUDIO_SENT: NO
+SYNTHESIZED_AUDIO_PERSISTED: NO
+TEMP_AUDIO_LEFT_ON_DISK: NO
+
+NEW_SAPI_TESTS: 8 passed
+TTS_TESTS: PASS
+ADAPTER_3_TESTS: PASS
+ADAPTER_4_TESTS: PASS
+BARGE_IN_RUNTIME_TESTS: PASS
+BROADER_VOICE_REGRESSION: 223 passed
+FAILED_NEW: NONE
+PY_COMPILE: PASS
+SECRET_SCAN: PASS_NOT_APPLICABLE_NO_SECRET_FILES_TOUCHED
+GIT_DIFF_CHECK: PASS
+
+MICROPHONE_OPENED: NO
+HUMAN_SPEECH_REQUESTED: NO
+AUDIO_SYNTHESIZED: YES
+AUDIO_PLAYED: NO
+WINDOWS_VOICE_INSTALLED: NO
+MODELS_DOWNLOADED: NO
+DEVICE_REGISTRY_TOUCHED: NO
+TASK_DB_SCHEMA_MIGRATION: NONE
+PUSH: NO
+
+FILES_CREATED: NONE
+FILES_MODIFIED:
+  - studio/golden_ai_studio_web/jarvis_core/voice_tts.py
+  - studio/golden_ai_studio_web/tests/test_windows_sapi_tts_provider.py
+  - docs/architecture/JARVIS_LOCAL_TTS_PROVIDER_AUDIT.md
+COMMIT: IMPLEMENTATION_AND_DOCUMENTATION_PENDING
+
+SAPI_PROVIDER_IMPLEMENTED: YES
+REAL_LOCAL_TTS_SYNTHESIS_VALIDATED: YES
+READY_FOR_SAPI_HUMAN_LISTENING_GATE: YES
+READY_FOR_REAL_SPEECH_VAD_GATE: NO
+NEXT_GATE: SAPI_HUMAN_LISTENING_AND_PLAYBACK_GATE
+NEXT_STEP: Controlled speaker playback using Golden AudioOutputProvider, followed by human voice-quality confirmation.
+KNOWN_RESTRICTIONS: no microphone, no automatic startup synthesis, no voice installation, no model download, no voice artifact bundling, no device registry change, no DB migration, no push
+```

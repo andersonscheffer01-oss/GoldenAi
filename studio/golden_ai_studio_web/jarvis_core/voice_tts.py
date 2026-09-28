@@ -248,6 +248,244 @@ class FakeTextToSpeechProvider:
             self._warmed = False
 
 
+def _normalize_sapi_pcm(raw: bytes, wave_format: Any) -> tuple[bytes, dict[str, int]]:
+    """Normalize a SAPI PCM stream to the provider-neutral ``s16le`` form."""
+    import struct
+
+    format_tag = int(getattr(wave_format, "FormatTag", 0))
+    channels = int(getattr(wave_format, "Channels", 0))
+    sample_rate = int(getattr(wave_format, "SamplesPerSec", 0))
+    bits = int(getattr(wave_format, "BitsPerSample", 0))
+    block_align = int(getattr(wave_format, "BlockAlign", 0))
+    if format_tag != 1:
+        raise RuntimeError("sapi_unsupported_output_format")
+    if channels <= 0 or sample_rate <= 0 or bits not in {8, 16, 24, 32}:
+        raise RuntimeError("sapi_invalid_pcm_format")
+    expected_align = channels * (bits // 8)
+    if block_align != expected_align or len(raw) == 0 or len(raw) % block_align:
+        raise RuntimeError("sapi_invalid_pcm_boundaries")
+
+    if bits == 16:
+        pcm = bytes(raw)
+    else:
+        output = bytearray()
+        view = memoryview(raw).cast("B")
+        for offset in range(0, len(view), bits // 8):
+            if bits == 8:
+                sample = (int(view[offset]) - 128) << 8
+            elif bits == 24:
+                sample = (
+                    int(view[offset])
+                    | (int(view[offset + 1]) << 8)
+                    | (int(view[offset + 2]) << 16)
+                )
+                if sample & 0x800000:
+                    sample -= 1 << 24
+                sample >>= 8
+            else:
+                sample = struct.unpack_from("<i", view, offset)[0] >> 16
+            output.extend(struct.pack("<h", max(-32768, min(32767, sample))))
+        pcm = bytes(output)
+
+    return pcm, {
+        "source_sample_rate": sample_rate,
+        "source_channels": channels,
+        "source_bits_per_sample": bits,
+        "source_block_align": block_align,
+        "output_sample_rate": sample_rate,
+        "output_channels": channels,
+        "output_bits_per_sample": 16,
+    }
+
+
+class WindowsSapiTTSProvider:
+    """Small Windows SAPI adapter for the provider-neutral TTS contract.
+
+    SAPI is used only to render bounded text into an in-memory stream.  It
+    never selects or opens an audio device; ``AudioOutputProvider`` remains
+    the sole playback owner.  Each synthesis call initializes and uninitializes
+    COM on its own calling thread so the existing TTS worker remains the
+    asynchronous boundary.
+    """
+
+    DEFAULT_VOICE_DESCRIPTION = "Microsoft Maria Desktop - Portuguese(Brazil)"
+    DEFAULT_VOICE_LANGUAGE = "416"
+
+    def __init__(
+        self,
+        *,
+        voice_description: str = DEFAULT_VOICE_DESCRIPTION,
+        voice_language: str = DEFAULT_VOICE_LANGUAGE,
+        dispatch: Any = None,
+        pythoncom_module: Any = None,
+    ) -> None:
+        self.voice_description = str(voice_description)
+        self.voice_language = str(voice_language)
+        self._dispatch = dispatch
+        self._pythoncom = pythoncom_module
+        self._lock = threading.RLock()
+        self._cancel_event = threading.Event()
+        self._warmed = False
+        self._released = False
+        self._last_format: dict[str, int] = {}
+
+    @property
+    def last_format(self) -> Mapping[str, int]:
+        with self._lock:
+            return dict(self._last_format)
+
+    def _load_runtime(self) -> None:
+        if self._dispatch is not None and self._pythoncom is not None:
+            return
+        try:
+            import pythoncom
+            import win32com.client
+        except ImportError as exc:
+            raise RuntimeError("sapi_unavailable_pywin32") from exc
+        self._pythoncom = pythoncom
+        self._dispatch = win32com.client.Dispatch
+
+    def _check_ready(self) -> None:
+        with self._lock:
+            if self._released:
+                raise RuntimeError("sapi_provider_released")
+            if not self._warmed:
+                raise RuntimeError("sapi_provider_not_warm")
+        if self._cancel_event.is_set():
+            raise VoiceCancelledError("sapi_cancelled")
+
+    def _select_voice(self, voice: Any) -> Any:
+        tokens = voice.GetVoices()
+        for index in range(int(tokens.Count)):
+            token = tokens.Item(index)
+            if str(token.GetDescription()) != self.voice_description:
+                continue
+            language = ""
+            try:
+                language = str(token.GetAttribute("Language") or "")
+            except Exception:
+                pass
+            if language and language != self.voice_language:
+                raise RuntimeError("sapi_voice_metadata_mismatch")
+            voice.Voice = token
+            return token
+        raise RuntimeError("sapi_voice_not_found")
+
+    def _begin_com(self) -> None:
+        self._load_runtime()
+        self._pythoncom.CoInitialize()
+
+    def _end_com(self) -> None:
+        self._pythoncom.CoUninitialize()
+
+    def warm(self) -> None:
+        with self._lock:
+            if self._released:
+                raise RuntimeError("sapi_provider_released")
+            self._cancel_event.clear()
+        self._begin_com()
+        voice = None
+        try:
+            voice = self._dispatch("SAPI.SpVoice")
+            self._select_voice(voice)
+        finally:
+            voice = None
+            self._end_com()
+        with self._lock:
+            self._warmed = True
+
+    def stream(
+        self,
+        text: str,
+        *,
+        cancellation: VoiceCancellation,
+        session_id: str,
+        turn_id: int,
+        generation: int,
+    ) -> Iterator[PcmAudioChunk]:
+        text = str(text or "").strip()
+        if not text:
+            return
+        self._check_ready()
+        cancellation.throw_if_cancelled()
+        self._begin_com()
+        voice = None
+        memory_stream = None
+        wave_format = None
+        try:
+            voice = self._dispatch("SAPI.SpVoice")
+            self._select_voice(voice)
+            memory_stream = self._dispatch("SAPI.SpMemoryStream")
+            voice.AudioOutputStream = memory_stream
+            voice.Speak(text)
+            cancellation.throw_if_cancelled()
+            if self._cancel_event.is_set():
+                raise VoiceCancelledError("sapi_cancelled")
+            raw = bytes(memory_stream.GetData())
+            wave_format = memory_stream.Format.GetWaveFormatEx()
+            pcm, format_info = _normalize_sapi_pcm(raw, wave_format)
+        finally:
+            if voice is not None:
+                try:
+                    voice.AudioOutputStream = None
+                except Exception:
+                    pass
+            wave_format = None
+            memory_stream = None
+            voice = None
+            self._end_com()
+
+        cancellation.throw_if_cancelled()
+        if self._cancel_event.is_set():
+            raise VoiceCancelledError("sapi_cancelled")
+        with self._lock:
+            self._last_format = format_info
+        yield PcmAudioChunk(
+            pcm=pcm,
+            sample_rate=format_info["output_sample_rate"],
+            channels=format_info["output_channels"],
+            sequence=0,
+            session_id=session_id,
+            turn_id=turn_id,
+            generation=generation,
+            is_final=True,
+            metadata={
+                "provider": "windows-sapi",
+                "voice": self.voice_description,
+                "container": "raw_pcm",
+                "encoding": "s16le",
+                "source_format": dict(format_info),
+                "text_length": len(text),
+            },
+        )
+
+    def synthesize(
+        self,
+        text: str,
+        *,
+        cancellation: VoiceCancellation,
+        session_id: str,
+        turn_id: int,
+        generation: int,
+    ) -> list[PcmAudioChunk]:
+        return list(self.stream(
+            text,
+            cancellation=cancellation,
+            session_id=session_id,
+            turn_id=turn_id,
+            generation=generation,
+        ))
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+    def release(self) -> None:
+        self._cancel_event.set()
+        with self._lock:
+            self._released = True
+            self._warmed = False
+
+
 def _deterministic_pcm(text: str, *, sample_rate: int) -> bytes:
     """Create stable signed-16-bit PCM without audio hardware or libraries."""
     import math
@@ -975,4 +1213,5 @@ __all__ = [
     "TTSResult",
     "TextToSpeechProvider",
     "VoiceAudioPipeline",
+    "WindowsSapiTTSProvider",
 ]
