@@ -24,6 +24,7 @@ class OrchestratorCase(unittest.TestCase):
         self.router = CentralOrchestrator(self.service.registry, mode="shadow")
 
     def tearDown(self):
+        self.service.close()
         self.temp.cleanup()
 
     def test_required_routes(self):
