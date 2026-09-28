@@ -495,6 +495,28 @@ Move direct chat/streaming calls behind router adapters. Keep research providers
 
 Only after task/security/audit ownership is stable: freeze root memory writes, document read compatibility, and propose a separate migration only if required. No Memory/RAG implementation in F1/F2.
 
+### F7.1 - SQLite lifecycle checkpoint
+
+F7.1 found that the active service shutdown was deterministic for the
+TaskManager only after its final join, while the Brain shadow-retrieval
+executor could still hold a context-managed SQLite connection during temporary
+workspace cleanup. The bounded production fix is:
+
+- `JarvisService.close()` remains the owner of scheduler, runner and matching
+  global Brain shutdown;
+- `TaskManager.shutdown(wait=False)` remains a non-blocking stop request, while
+  `finalize_shutdown()` joins owned workers;
+- `JarvisBrain.close()` now joins the shadow retrieval executor before the
+  memory workspace can be removed;
+- no cleanup retry, `PermissionError` suppression, process termination,
+  migration or database deletion was added.
+
+The F7.1 regression holds an owned shadow worker until close is entered,
+verifies that close waits for it, asserts scheduler/worker termination, checks
+idempotent shutdown, and lets `TemporaryDirectory` perform the actual cleanup.
+F7.2 provenance/parity and F7.3 canonical-boundary decisions remain separate
+gates.
+
 ### F8 - Optional downstream capabilities
 
 MCP, Agents, Finance, Mobile, personal integrations and real trading remain downstream. They attach to canonical Core only after the foundational waves pass.
@@ -511,7 +533,11 @@ SUBTESTS: 3 passed
 MEMORY_V2_RUNTIME: 1 failed during TemporaryDirectory cleanup
 ```
 
-The failure is `WinError 32` while removing a temporary `jarvis/golden_tasks.db` after `JarvisService` wiring. The test calls `task_manager.shutdown(wait=False)`, but a SQLite handle remains open during Windows cleanup. This is recorded as a DB/service lifecycle restriction and is intentionally not patched in F1.
+The earlier `WinError 32` was caused by cleanup racing an owned shadow worker
+and by test teardown using only the non-blocking shutdown request. F7.1 fixes
+the production owner path and aligns affected tests with `JarvisService.close()`
+or an explicit final join. The old voice conversation failures remain outside
+this gate and are reproduced independently in their own suite.
 
 ```yaml
 ENTRYPOINTS_MAPPED: YES
@@ -525,7 +551,7 @@ SECURITY_BYPASSES_IDENTIFIED: YES
 COMPATIBILITY_BRIDGES_DESIGNED: YES
 MIGRATION_WAVES_ORDERED: YES
 FIRST_IMPLEMENTATION_GATE_SELECTED: YES
-PRODUCTION_CODE_CHANGED: NO
+PRODUCTION_CODE_CHANGED: YES_F7_1_ONLY
 DATABASES_MODIFIED: NO
 ```
 

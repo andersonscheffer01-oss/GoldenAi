@@ -453,7 +453,10 @@ class JarvisBrain:
         return None
 
     def close(self):
-        self._shadow_executor.shutdown(wait=False, cancel_futures=True)
+        # The shadow retrieval owns worker threads that may still hold a
+        # context-managed SQLite connection. Join them before the service's
+        # temporary workspace or memory database can be removed.
+        self._shadow_executor.shutdown(wait=True, cancel_futures=True)
 
     def build_messages(self, user_input, memory_context="", source="text",
                        voice_capture=False, conversation_history=None, profile=None):

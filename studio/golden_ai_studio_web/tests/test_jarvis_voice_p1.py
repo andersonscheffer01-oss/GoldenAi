@@ -17,7 +17,7 @@ class VoiceP1Case(unittest.TestCase):
         self.service = JarvisService(self.temp.name)
 
     def tearDown(self):
-        self.service.task_manager.shutdown(wait=False)
+        self.service.close()
         self.temp.cleanup()
 
     def test_adaptive_gate_tracks_noise_without_losing_low_voice(self):

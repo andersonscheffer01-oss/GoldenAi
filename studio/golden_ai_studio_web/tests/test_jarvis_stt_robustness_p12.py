@@ -197,7 +197,7 @@ class LowConfidenceFeedbackCase(unittest.TestCase):
         self.voice._speak = Mock(return_value=True)
 
     def tearDown(self):
-        self.service.task_manager.shutdown(wait=False)
+        self.service.close()
         self.temp.cleanup()
 
     def test_low_confidence_speech_asks_for_repeat(self):

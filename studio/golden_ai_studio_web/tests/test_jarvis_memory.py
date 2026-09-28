@@ -107,6 +107,7 @@ class MemoryIntegrationCase(unittest.TestCase):
         self.service.memory.embedding._available = False
 
     def tearDown(self):
+        self.service.close()
         self.temp.cleanup()
 
     def test_registry_exposes_only_expected_memory_tools(self):

@@ -199,7 +199,7 @@ class FastPathOutageCase(unittest.TestCase):
         self.orchestrator.models = router
 
     def tearDown(self):
-        self.service.task_manager.shutdown(wait=False)
+        self.service.close()
         self.temp.cleanup()
 
     def test_fast_paths_need_no_cloud(self):
@@ -226,7 +226,7 @@ class VoiceWarmingGateCase(unittest.TestCase):
 
     def tearDown(self):
         get_readiness().reset()
-        self.service.task_manager.shutdown(wait=False)
+        self.service.close()
         self.temp.cleanup()
 
     def test_warming_defers_with_spoken_notice(self):

@@ -21,6 +21,7 @@ class JarvisCase(unittest.TestCase):
         self.brain = JarvisBrain(self.registry)
 
     def tearDown(self):
+        self.service.close()
         self.temp.cleanup()
 
     MANDATORY_TOOLS = ("open_program", "close_program", "get_time", "delete_file",

@@ -17,7 +17,7 @@ class VoiceConversationP11Case(unittest.TestCase):
         self.orchestrator = CentralOrchestrator(self.service.registry, mode="shadow")
 
     def tearDown(self):
-        self.service.task_manager.shutdown(wait=False)
+        self.service.close()
         self.temp.cleanup()
 
     def test_simple_voice_conversation_selects_voice_fast(self):

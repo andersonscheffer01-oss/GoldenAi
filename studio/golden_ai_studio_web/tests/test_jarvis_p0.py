@@ -21,7 +21,7 @@ class P0PolicyCase(unittest.TestCase):
         self.service = JarvisService(self.temp.name)
 
     def tearDown(self):
-        self.service.task_manager.shutdown(wait=False)
+        self.service.close()
         self.temp.cleanup()
 
     def test_fast_paths_use_zero_llm_calls(self):
@@ -136,7 +136,7 @@ class P0PolicyCase(unittest.TestCase):
         self.assertLess(time_to_ack_ms, 50)
         self.assertEqual(TaskStatus.COMPLETED, task.status)
         self.assertTrue(manager.steps(task_id)[0].result["verified"])
-        manager.shutdown(wait=False)
+        manager.shutdown(wait=True)
 
 
 if __name__ == "__main__":
