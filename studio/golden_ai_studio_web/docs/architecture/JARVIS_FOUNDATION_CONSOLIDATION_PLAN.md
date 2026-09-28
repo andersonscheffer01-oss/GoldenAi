@@ -392,7 +392,37 @@ SCHEDULER_BEHAVIOR_CHANGED: NO
 
 ### F3 - Security convergence
 
-Route legacy server tool authorization through a Jarvis security adapter. Preserve root ExecutionService only as a translated compatibility API. Add regressions for read, write, command, browser, plugin and confirmation paths.
+F3 completed a bounded migration through
+`jarvis_core.security_compatibility.LegacySecurityBridge`. The legacy
+`server_agent` path now delegates the exact `open_file` and `delete_file`
+contracts to the existing `JarvisService.execute_tool()` boundary. Decision,
+single-use confirmation, execution and action audit therefore use the
+canonical `SecurityManager` and `AuditLog`. Canonical requests are marked with
+the `jarvis:` approval prefix so the existing security endpoints can route
+them without changing root approval records; task-scoped approval is rejected
+for this single-use contract rather than silently weakened.
+
+The bridge fails closed when the canonical service is unavailable or when a
+legacy call contains incompatible arguments. Unsupported legacy tools remain
+on the compatibility path and are explicitly deferred. No plugin, provider,
+root-app, document/media endpoint or ModelRouter migration was inferred from
+this bounded proof.
+
+```yaml
+F3_STATUS: PASS_WITH_RESTRICTIONS
+CANONICAL_SECURITY: jarvis_core.security.SecurityManager
+PERMISSION_MANAGER_STATUS: COMPATIBILITY_RETAINED_FOR_UNMIGRATED_PATHS
+SECURITY_BYPASSES_START: 6
+SECURITY_BYPASSES_MIGRATED: 1_BOUNDED_SB001_SUBSET
+SECURITY_BYPASSES_DEFERRED: SB001_REMAINDER, SB002, SB003
+SECURITY_BYPASSES_INACTIVE_OR_OUT_OF_SCOPE: SB004, SB005, SB006
+APPROVAL_SEMANTICS_PRESERVED: YES
+READ_ONLY_SEMANTICS_PRESERVED: YES
+DUPLICATE_SIDE_EFFECTS: NO
+```
+
+Focused security validation passed: `88 passed`. No external provider,
+hardware or voice test was run.
 
 ### F4 - Audit convergence
 

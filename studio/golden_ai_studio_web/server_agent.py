@@ -1034,8 +1034,25 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
             return True
         return False
 
+    def _execute_canonical_legacy_tool(self, tool_call, session_id='default'):
+        """Delegate only exact legacy contracts to Jarvis SecurityManager."""
+        from jarvis_core.security_compatibility import LegacySecurityBridge
+
+        def service_provider():
+            try:
+                from desktop_center import DESKTOP_CENTER
+                return DESKTOP_CENTER.service
+            except Exception:
+                return None
+
+        return LegacySecurityBridge(service_provider).execute(tool_call, session_id)
+
     def _execute_tool(self, tool_call, session_id='default'):
         tool = tool_call.get("tool", "")
+
+        canonical_result = self._execute_canonical_legacy_tool(tool_call, session_id)
+        if canonical_result is not None:
+            return canonical_result
 
         # Verificar permissão antes de executar
         if not self._check_tool_permission(tool, tool_call, session_id):
@@ -5690,12 +5707,20 @@ void OnTick()
         return {"ok": True, "mode": selected.value}
 
     def api_security_approve(self, data):
-        if not EXECUTION_SERVICE:
-            return {"ok": False, "error": "servico de permissoes indisponivel"}
         request_id = str(data.get("request_id", "")).strip()
         scope = str(data.get("scope", "ONCE")).upper()
         if not request_id:
             return {"ok": False, "error": "request_id obrigatorio"}
+        if request_id.startswith("jarvis:"):
+            if scope != "ONCE":
+                return {"ok": False, "error": "Ações canônicas usam aprovação única."}
+            try:
+                from desktop_center import DESKTOP_CENTER
+                return DESKTOP_CENTER.service.confirm(request_id.removeprefix("jarvis:"))
+            except Exception:
+                return {"ok": False, "error": "Canonical SecurityManager indisponível."}
+        if not EXECUTION_SERVICE:
+            return {"ok": False, "error": "servico de permissoes indisponivel"}
         if scope == "TASK":
             EXECUTION_SERVICE.grant_for_task(request_id)
         else:
@@ -5703,11 +5728,18 @@ void OnTick()
         return {"ok": True, "request_id": request_id, "scope": scope, "message": "Aprovacao registrada. Repita a acao no Chat para executa-la."}
 
     def api_security_deny(self, data):
-        if not EXECUTION_SERVICE:
-            return {"ok": False, "error": "servico de permissoes indisponivel"}
         request_id = str(data.get("request_id", "")).strip()
         if not request_id:
             return {"ok": False, "error": "request_id obrigatorio"}
+        if request_id.startswith("jarvis:"):
+            try:
+                from desktop_center import DESKTOP_CENTER
+                return DESKTOP_CENTER.service.deny_confirmation(
+                    request_id.removeprefix("jarvis:"))
+            except Exception:
+                return {"ok": False, "error": "Canonical SecurityManager indisponível."}
+        if not EXECUTION_SERVICE:
+            return {"ok": False, "error": "servico de permissoes indisponivel"}
         EXECUTION_SERVICE.deny(request_id)
         return {"ok": True, "request_id": request_id, "message": "Aprovacao negada."}
 
