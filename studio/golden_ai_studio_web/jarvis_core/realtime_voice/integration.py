@@ -49,6 +49,12 @@ from jarvis_core.voice_foundation import (
     VoiceCancelledError,
 )
 
+from .conversation_coordinator import (
+    ConversationCompletion,
+    ConversationResultStatus,
+    ConversationStreamCoordinator,
+)
+
 log = logging.getLogger(__name__)
 
 # RMS-based fallback (from current voice.py)
@@ -99,7 +105,9 @@ class RealtimeVoicePipeline:
         self._stt_provider: Optional[SpeechToTextProvider] = None
         self._stt_cancellation = VoiceCancellation()
         self._session_id = ""
+        self._turn_id = 0
         self._transcript_gate = TranscriptAcceptanceGate()
+        self._conversation_coordinator = ConversationStreamCoordinator()
 
         # Metrics
         self._speech_started_at: float = 0.0
@@ -129,6 +137,14 @@ class RealtimeVoicePipeline:
     def session_id(self) -> str:
         return self._session_id
 
+    @property
+    def turn_id(self) -> int:
+        return self._turn_id
+
+    @property
+    def conversation_coordinator(self) -> ConversationStreamCoordinator:
+        return self._conversation_coordinator
+
     async def load(self) -> None:
         """Load VAD model."""
         await self._vad.load()
@@ -146,6 +162,7 @@ class RealtimeVoicePipeline:
         stt_provider: Optional[SpeechToTextProvider] = None,
         session_id: str = "",
         cancellation: Optional[VoiceCancellation] = None,
+        turn_id: int = 0,
     ) -> None:
         """Start the frame processing loop."""
         self._loop = loop or asyncio.get_event_loop()
@@ -155,6 +172,12 @@ class RealtimeVoicePipeline:
         self._stt_cancellation = cancellation or VoiceCancellation()
         self._session_id = str(session_id or uuid.uuid4().hex)
         self._transcript_gate.begin(self._session_id)
+        self._turn_id = int(turn_id)
+        self._conversation_coordinator.begin_session(
+            session_id=self._session_id,
+            turn_id=self._turn_id,
+            epoch=self._transcript_gate.epoch,
+        )
 
         self._queue.uncancel()
         self._vad.reset()
@@ -179,6 +202,7 @@ class RealtimeVoicePipeline:
         self._queue.cancel()
         self._stt_cancellation.cancel("pipeline_stopped")
         self._transcript_gate.cancel()
+        self._conversation_coordinator.cancel("pipeline_stopped")
         self._vad.reset()
         self._hybrid.reset()
         self._utterance.clear()
@@ -189,6 +213,18 @@ class RealtimeVoicePipeline:
         """Invalidate current STT results; worker cancellation remains cooperative."""
         self._stt_cancellation.cancel(reason)
         self._transcript_gate.cancel()
+        self._conversation_coordinator.cancel(reason)
+
+    def replace_turn(self, turn_id: int) -> None:
+        """Invalidate the old turn and keep the same realtime pipeline owner."""
+        self._stt_cancellation.cancel("turn_replaced")
+        self._stt_cancellation = VoiceCancellation()
+        self._transcript_gate.begin(self._session_id)
+        self._turn_id = int(turn_id)
+        self._conversation_coordinator.replace_turn(
+            turn_id=self._turn_id,
+            epoch=self._transcript_gate.epoch,
+        )
 
     def feed_frame(self, frame: bytes) -> None:
         """Feed a raw audio frame from the mic thread (thread-safe)."""
@@ -249,10 +285,17 @@ class RealtimeVoicePipeline:
                     if elapsed > self._listening_timeout:
                         log.debug("listening timeout after %.1fs", elapsed)
                         self._utterance.end()
-                        await self._finish_utterance()
+                        completion = await self._finish_utterance(acoustic_endpoint=True)
                         self._hybrid.reset()
-                        self._sm.transition(ConversationalState.IDLE)
-                        self._emit_state(ConversationalState.IDLE)
+                        target = (
+                            ConversationalState.LISTENING
+                            if completion is not None
+                            and completion.status
+                            is ConversationResultStatus.WAITING_CONTINUATION
+                            else ConversationalState.IDLE
+                        )
+                        self._sm.transition(target)
+                        self._emit_state(target)
                         listening_start = 0
                         continue
 
@@ -273,18 +316,20 @@ class RealtimeVoicePipeline:
                         if hybrid_evt == HybridEvent.ENDPOINT:
                             self._utterance.end()
                             self._last_endpoint_at = time.monotonic()
-                            await self._finish_utterance()
-                            self._sm.transition(ConversationalState.THINKING)
-                            self._emit_state(ConversationalState.THINKING)
+                            completion = await self._finish_utterance(
+                                acoustic_endpoint=True
+                            )
+                            self._transition_after_utterance(completion)
                             listening_start = 0
                             continue
                         # else: hangover opened, don't finalize yet
                     else:
                         self._utterance.end()
                         self._last_endpoint_at = time.monotonic()
-                        await self._finish_utterance()
-                        self._sm.transition(ConversationalState.THINKING)
-                        self._emit_state(ConversationalState.THINKING)
+                        completion = await self._finish_utterance(
+                            acoustic_endpoint=True
+                        )
+                        self._transition_after_utterance(completion)
                         listening_start = 0
                         continue
 
@@ -299,9 +344,10 @@ class RealtimeVoicePipeline:
                     if hybrid_evt == HybridEvent.ENDPOINT:
                         self._utterance.end()
                         self._last_endpoint_at = time.monotonic()
-                        await self._finish_utterance()
-                        self._sm.transition(ConversationalState.THINKING)
-                        self._emit_state(ConversationalState.THINKING)
+                        completion = await self._finish_utterance(
+                            acoustic_endpoint=True
+                        )
+                        self._transition_after_utterance(completion)
                         listening_start = 0
                     elif hybrid_evt == HybridEvent.SPEECH_RESUMED:
                         log.debug("hybrid: speech resumed after hangover cancel")
@@ -333,7 +379,24 @@ class RealtimeVoicePipeline:
             elif state == ConversationalState.INTERRUPTED:
                 pass
 
-    async def _finish_utterance(self) -> None:
+    def _transition_after_utterance(
+        self, completion: ConversationCompletion | None
+    ) -> None:
+        """Return to listening only when the coordinator requests continuation."""
+        if (
+            completion is not None
+            and completion.status is ConversationResultStatus.WAITING_CONTINUATION
+        ):
+            target = ConversationalState.LISTENING
+        else:
+            target = ConversationalState.THINKING
+        if self._sm.state is not target:
+            self._sm.transition(target)
+        self._emit_state(target)
+
+    async def _finish_utterance(
+        self, *, acoustic_endpoint: bool = True
+    ) -> ConversationCompletion | None:
         """Process completed utterance: check minimum duration, extract text."""
         if self._utterance.sample_count == 0:
             self._utterance.clear()
@@ -353,6 +416,8 @@ class RealtimeVoicePipeline:
 
         if self._stt_provider is not None:
             utterance_id = uuid.uuid4().hex
+            request_epoch = self._transcript_gate.epoch
+            request_turn_id = self._turn_id
             self._stats["stt_calls"] = int(self._stats.get("stt_calls", 0)) + 1
             try:
                 if self._sm.state is ConversationalState.LISTENING:
@@ -365,17 +430,36 @@ class RealtimeVoicePipeline:
                     cancellation=self._stt_cancellation,
                     session_id=self._session_id,
                     utterance_id=utterance_id,
-                    epoch=self._transcript_gate.epoch,
+                    epoch=request_epoch,
                 )
                 if not isinstance(event, TranscriptEvent):
                     raise TypeError("STT provider must return TranscriptEvent")
+                if (
+                    request_epoch != self._transcript_gate.epoch
+                    or request_turn_id != self._turn_id
+                ):
+                    self._stats["discarded_transcripts"] = int(
+                        self._stats.get("discarded_transcripts", 0)
+                    ) + 1
+                    return None
                 if event.is_final:
                     if self._transcript_gate.accept(event):
+                        completion = self._conversation_coordinator.observe_transcript(
+                            event,
+                            turn_id=request_turn_id,
+                            acoustic_endpoint=acoustic_endpoint,
+                        )
+                        if not completion.eligible_for_dispatch:
+                            self._stats["coordinator_nonfinals"] = int(
+                                self._stats.get("coordinator_nonfinals", 0)
+                            ) + 1
+                            return completion
                         self._stats["accepted_finals"] = int(
                             self._stats.get("accepted_finals", 0)
                         ) + 1
                         if self._on_transcription is not None:
-                            self._on_transcription(event)
+                            self._on_transcription(completion.event)
+                        return completion
                     else:
                         self._stats["discarded_transcripts"] = int(
                             self._stats.get("discarded_transcripts", 0)
@@ -383,6 +467,7 @@ class RealtimeVoicePipeline:
                 elif self._on_transcription is not None:
                     # Partial events are observable only; VoiceService never routes them to Core.
                     self._on_transcription(event)
+                return None
             except VoiceCancelledError:
                 self._stats["cancelled_transcriptions"] = int(
                     self._stats.get("cancelled_transcriptions", 0)

@@ -332,6 +332,8 @@ class VoiceService:
 
         new_turn_id = self._turn_manager.new_turn()
         self._current_turn_id = new_turn_id
+        if self._realtime_pipeline is not None:
+            self._realtime_pipeline.replace_turn(new_turn_id)
         # A new turn gets a fresh operation token; the old token remains
         # cancelled for any work that still holds it.
         self._operation_cancellation = VoiceCancellation()
@@ -508,6 +510,7 @@ class VoiceService:
                 stt_provider=active_stt_provider,
                 session_id=self._voice_session.session_id,
                 cancellation=self._realtime_cancellation,
+                turn_id=self._current_turn_id,
             )
 
         result = provider.start()

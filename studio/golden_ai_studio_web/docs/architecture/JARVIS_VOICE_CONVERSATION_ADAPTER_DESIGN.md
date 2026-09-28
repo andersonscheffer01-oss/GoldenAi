@@ -1,15 +1,16 @@
 # JARVIS Voice Conversation Adapter Design
 
-Status: `DESIGN_ONLY`
+Status: `ADAPTER_2_IMPLEMENTED`
 Review result: `PASS_WITH_RESTRICTIONS`
-Baseline: `f36cf07`
+Baseline: `904f6ed`
 Source audit: `docs/architecture/JARVIS_VOICE_CONVERSATION_STACK_AUDIT.md`
 Recommendation: `HYBRID`
 
-This document defines the smallest future adapter layer for useful
-conversation patterns from Pipecat, LiveKit Agents, and Wyoming. It does not
-implement production code, add dependencies, run the real-speech VAD gate, or
-replace any Golden owner.
+This document defines the smallest adapter layer for useful conversation
+patterns from Pipecat, LiveKit Agents, and Wyoming. Adapter 1 and the bounded
+Adapter 2 coordinator are implemented without adding dependencies, running
+the real-speech VAD gate, or replacing any Golden owner. Adapter 3 and Adapter
+4 remain deferred.
 
 ## Adapter 1 implementation status
 
@@ -19,13 +20,13 @@ contract and returns only `CONTINUE_LISTENING`, `LIKELY_COMPLETE`, `COMPLETE`,
 or `UNCERTAIN`, with bounded reason codes and the unchanged
 `session_id`/`turn_id`/`utterance_id`/`epoch` identity.
 
-The implementation is deliberately not wired into `VoiceService` or
-`RealtimeVoicePipeline`; that integration belongs to `VOICE_ADAPTER_2`. It has
-no Core, SecurityManager, STT, TTS, audio, filesystem, network, or model
-dependency. Its first strategy is a small PT-BR-aware heuristic set that keeps
-unfinished trailing connectives and ellipses open, requires the existing
-acoustic endpoint for completion, and falls back deterministically when the
-bounded continuation window expires.
+The detector has no Core, SecurityManager, STT, TTS, audio, filesystem,
+network, or model dependency. Its first strategy is a small PT-BR-aware
+heuristic set that keeps unfinished trailing connectives and ellipses open,
+requires the existing acoustic endpoint for completion, and falls back
+deterministically when the bounded continuation window expires. Adapter 2
+integrates this pure result into the existing pipeline without giving the
+detector a dispatch capability.
 
 Offline coverage is in `tests/test_semantic_turn.py` and includes incomplete
 Portuguese phrases, continuation, complete phrases, natural pauses, ambiguity,
@@ -35,6 +36,41 @@ behavior.
 
 Known limitation: this adapter does not fix `CORE_GENERATION_CANCEL: PARTIAL`
 and does not tune Silero VAD, `HybridEndpoint`, or `TurnManager`.
+
+## Adapter 2 implementation status
+
+`VOICE_ADAPTER_2` is implemented in
+`jarvis_core/realtime_voice/conversation_coordinator.py` and integrated by
+`RealtimeVoicePipeline`. It is one bounded, lock-protected coordinator per
+existing realtime pipeline; it is not a second state machine, VoiceService,
+STT pipeline, scheduler, audio owner, or Core route.
+
+The coordinator receives existing `TranscriptEvent` values together with the
+current acoustic endpoint and `turn_id`. It preserves
+`session_id`/`turn_id`/`utterance_id`/`epoch`, rejects stale session/turn/epoch
+events, rejects cancelled or inactive events, deduplicates partial/final
+events, and emits at most one eligible final per logical utterance. Partial
+transcripts remain observable only and are never eligible for Core dispatch.
+
+An acoustic endpoint plus an incomplete semantic final opens a bounded
+continuation window. Subsequent segments are combined into one logical final
+with one callback eligibility. A timeout completes through the existing
+acoustic boundary. Semantic uncertainty without an acoustic endpoint does not
+dispatch. Detector failure uses acoustic fallback only when an acoustic
+endpoint is present; malformed input is rejected.
+
+Turn replacement cancels the current STT token, advances the transcript
+epoch, resets bounded coordinator state, and retains the same pipeline owner
+and session. The existing `VoiceService` callback remains the only Core
+handoff boundary. No SecurityManager, tool, filesystem, network, microphone,
+speaker, or persistence call was added.
+
+Offline regression coverage is in
+`tests/test_voice_conversation_coordinator.py` and covers continuation,
+single-final dispatch, partial isolation, stale identity, cancellation,
+timeout, acoustic fallback, detector failure, memory bounds, pipeline
+integration, and turn replacement. Real speech, real VAD, real STT, and real
+audio were not run in this implementation gate.
 
 ## Non-negotiable architecture
 
@@ -786,7 +822,7 @@ A spoken command remains ordinary untrusted input until it crosses the
 existing Jarvis Core and SecurityManager path. Semantic classification cannot
 approve a sensitive operation.
 
-## Review result
+## Original design review result
 
 ```yaml
 JARVIS_VOICE_PHASE: PARTIAL
@@ -873,6 +909,68 @@ RUN_REAL_SPEECH_VAD_GATE_NOW: NO
 NEXT_GATE: IMPLEMENTATION AUTHORIZATION FOR VOICE_ADAPTER_1
 NEXT_STEP: Approve the design, then implement only the deterministic semantic adapter and its offline tests.
 KNOWN_RESTRICTIONS: No production implementation, no new dependency, no model download, no microphone, no playback, no device registry change, no database migration, no push.
+```
+
+## Adapter 2 verification record
+
+```yaml
+JARVIS_VOICE_PHASE: PARTIAL
+VOICE_ADAPTER_2: PASS_WITH_RESTRICTIONS
+BASELINE: 904f6ed
+IMPLEMENTATION_FORM: NEW_MINIMAL_COORDINATOR
+
+SEMANTIC_ADAPTER_INTEGRATED: YES
+ACOUSTIC_ENDPOINT_INTEGRATED: YES
+STT_EVENTS_INTEGRATED: YES
+LIVE_VOICE_SERVICE_WIRING: YES
+
+SESSION_ID_GUARD: YES
+TURN_ID_GUARD: YES
+UTTERANCE_ID_GUARD: YES
+EPOCH_GUARD: YES
+GENERATION_CANCEL_GUARD: PARTIAL
+STALE_PARTIAL_REJECTED: YES
+STALE_FINAL_REJECTED: YES
+CANCELLED_EVENT_REJECTED: YES
+DUPLICATE_FINAL_DISPATCHED_TWICE: NO
+NEW_UTTERANCE_AFTER_COMPLETION_ALLOWED: YES
+
+PARTIAL_REACHES_CORE: NO
+UNCERTAIN_WITHOUT_ENDPOINT_DISPATCHED: NO
+ACOUSTIC_FALLBACK_BOUNDED: YES
+CONTINUATION_BOUNDED: YES
+ONE_LOGICAL_UTTERANCE: YES
+ONE_ELIGIBLE_FINAL: YES
+DIRECT_CORE_CALL: NO
+DIRECT_SECURITY_CALL: NO
+DIRECT_TOOL_CALL: NO
+
+ADAPTER_1_TESTS: PASS
+ADAPTER_2_TESTS: PASS
+BROADER_VOICE_REGRESSION: 244 passed
+ENVIRONMENT_BLOCKED_TEST: test_barge_in_runtime_wiring.py (sounddevice unavailable)
+PY_COMPILE: PASS
+SECRET_SCAN: PASS
+GIT_DIFF_CHECK: PASS
+
+REAL_MIC_RUN: NO
+REAL_AUDIO_RUN: NO
+REAL_SPEECH_VAD_GATE: DEFERRED
+LOCAL_TTS: PARTIAL
+CORE_GENERATION_CANCEL: PARTIAL
+NEW_DEPENDENCY_REQUIRED: NO
+DEPENDENCIES_INSTALLED: NO
+MODELS_DOWNLOADED: NO
+DEVICE_REGISTRY_TOUCHED: NO
+PUSH: NO
+
+FILES_CREATED:
+  - jarvis_core/realtime_voice/conversation_coordinator.py
+  - tests/test_voice_conversation_coordinator.py
+FILES_MODIFIED:
+  - jarvis_core/realtime_voice/integration.py
+  - jarvis_core/voice_service.py
+  - docs/architecture/JARVIS_VOICE_CONVERSATION_ADAPTER_DESIGN.md
 ```
 
 ## Official source references
