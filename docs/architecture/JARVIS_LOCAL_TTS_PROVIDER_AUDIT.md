@@ -1185,3 +1185,77 @@ NEXT_GATE: SAPI_HUMAN_LISTENING_AND_PLAYBACK_GATE
 NEXT_STEP: Controlled speaker playback using Golden AudioOutputProvider, followed by human voice-quality confirmation.
 KNOWN_RESTRICTIONS: no microphone, no automatic startup synthesis, no voice installation, no model download, no voice artifact bundling, no device registry change, no DB migration, no push
 ```
+
+## Gate 3A: initial controlled human speech attempt
+
+Gate 3A was started from baseline `23e870a` using the existing
+`AudioInputProvider` with identity-based resolution for
+`Microfone (3- USB Audio Device)` on MME. The native stream opened at 44100 Hz
+and the existing conversion worker delivered canonical 16000 Hz mono PCM16 to
+the continuously consumed queue. No STT, Core, LLM, TTS, speaker, or network
+path was started, and the stream shut down with process exit code 0.
+
+The operator explicitly answered `NÃO` to whether speech occurred during the
+`FALANDO AGORA` window. Therefore this attempt is invalid for human-speech
+validation and is not evidence of VAD or endpoint failure. The observed data
+was retained only as in-memory diagnostics: baseline RMS 25.46, peak 128,
+nonzero samples 96.58%, maximum Silero probability 0.178, zero VAD speech
+frames, zero activation, and zero endpoint. No raw audio was persisted.
+
+The capture path did report 14 raw conversion-queue drops during the 11-second
+window, with 366 native callbacks and 352 canonical frames delivered. Because
+the operator did not speak, this is recorded as a queue-health restriction for
+the next controlled attempt rather than a speech-quality conclusion.
+
+### Gate 3A interim report
+
+```yaml
+REAL_SPEECH_VAD_AND_ENDPOINT_GATE: NOT_VALIDATED
+BASELINE: 23e870a
+MICROPHONE: Microfone (3- USB Audio Device)
+HOST_API: MME
+NATIVE_SAMPLE_RATE: 44100
+CANONICAL_SAMPLE_RATE: 16000
+CHANNELS: 1
+FORMAT: PCM16
+ATTEMPT_1_HUMAN_CONFIRMED: NO
+VALID_HUMAN_ATTEMPTS: 0
+BASELINE_RMS: 25.46
+PEAK: 128
+NONZERO_PERCENT: 96.58
+VAD_MAX_PROBABILITY: 0.178
+VAD_SPEECH_FRAME_COUNT: 0
+VAD_ACTIVATED: NO
+VAD_DEACTIVATED: NO
+SPEECH_START_DETECTED: NO
+SPEECH_END_DETECTED: NO
+ENDPOINT_FIRED: NO
+ENDPOINT_REASON: not_applicable_no_confirmed_human_speech
+ENDPOINT_LATENCY_MS: not_available
+RAW_FRAMES: 366
+CANONICAL_FRAMES: 352
+RAW_DROPS: 14
+CANONICAL_DROPS: 0
+MAX_CALLBACK_GAP_MS: 30.17
+REAL_MIC_CAPTURE: PASS
+CONTINUOUS_CONSUMPTION: PASS
+SILERO_REAL_SPEECH: NOT_VALIDATED
+HYBRID_ENDPOINT_REAL_SPEECH: NOT_VALIDATED
+QUEUE_HEALTH: RESTRICTED_RAW_QUEUE_DROPS_WITHOUT_HUMAN_SAMPLE
+STREAM_SHUTDOWN: PASS
+ZOMBIE_WORKERS: NO
+PROCESS_EXIT_CODE: 0
+STT_PROVIDER_STARTED: NO
+CORE_CALLED: NO
+TTS_STARTED: NO
+SPEAKER_OPENED: NO
+AUDIO_PLAYED: NO
+RAW_AUDIO_PERSISTED: NO
+TEMP_AUDIO_LEFT_ON_DISK: NO
+REMOTE_AUDIO_SENT: NO
+REMOTE_TEXT_SENT: NO
+PRODUCTION_CODE_CHANGED: NO
+DEVICE_REGISTRY_TOUCHED: NO
+NEXT_GATE: repeat controlled human speech attempt after explicit readiness
+KNOWN_RESTRICTIONS: no valid human sample; do not lower VAD threshold or retune from this attempt
+```
