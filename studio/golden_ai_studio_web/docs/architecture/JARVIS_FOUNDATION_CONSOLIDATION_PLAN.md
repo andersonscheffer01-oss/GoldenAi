@@ -1,9 +1,11 @@
 # JARVIS / GOLDEN FOUNDATION CONSOLIDATION PLAN
 
 Data: 2026-09-28
-Baseline: `dd152a1`
-Modo: architecture / trace / consolidation design / reuse-first
-Escopo: desenho somente. Nenhum ownership switch, migracao ou refactor foi executado.
+Baseline F1: `5acb200`
+Baseline F2: `5acb200`
+Modo: architecture / trace / consolidation / read-only diagnostics / reuse-first
+Escopo: F1 design plus F2 read-only diagnostics. Nenhum ownership switch,
+migracao ou refactor de comportamento foi executado.
 
 ## Design verdict
 
@@ -281,7 +283,9 @@ Completed in this document. No runtime change.
 
 ### F2 - Runtime ownership guardrails
 
-Smallest first implementation gate: introduce a **read-only runtime ownership diagnostic** and a canonical path resolver contract, without changing execution behavior.
+Completed as the smallest implementation gate: a **read-only runtime
+ownership diagnostic** and canonical path comparison contract, without
+changing execution behavior.
 
 Acceptance:
 
@@ -291,6 +295,68 @@ Acceptance:
 - add no second Core and no hardware activity.
 
 Risk: LOW. This is the first gate because it reduces ambiguity and catches DB drift without moving a working capability.
+
+### F2 implementation evidence
+
+F2 was executed from baseline `5acb200` with a single bounded diagnostic
+facility: `jarvis_core.runtime_ownership.RuntimeOwnershipDiagnostic`.
+The facility is observation-only. It does not open databases, write audit
+rows, migrate schemas, switch owners, redirect paths, or repair mismatches.
+
+The active `TaskDatabase` now exposes its requested path, resolved absolute
+path, canonical comparison and owner identity. `JarvisService` exposes the
+same report through `runtime_ownership_diagnostics()`. The report covers the
+canonical Core, SecurityManager, AuditLog, TaskManager, ModelRouter and
+existing memory owner, and classifies compatibility, noncanonical and unknown
+owners without raising into the runtime.
+
+The canonical task database observed by the diagnostic is:
+
+```text
+C:\\GoldenAI\\studio\\golden_ai_studio_web\\jarvis\\golden_tasks.db
+```
+
+Absolute noncanonical paths and relative paths were tested in temporary
+directories. Relative paths are explicitly reported as dependent on the
+injected working root; no database was created by the diagnostic itself. The
+inventory of same-name databases was read-only and no existing database was
+mutated.
+
+The earlier Windows `WinError 32` was reproduced during cleanup of the Memory
+V2 runtime test. Its cause is a non-joined scheduler thread retaining a
+SQLite handle after `shutdown(wait=False)`, not a missing delay. The F2 change
+is test-only cleanup joining (`wait=True`) so the temporary directory can be
+removed deterministically. The production `JarvisService.close()` lifecycle
+still uses the existing non-joined shutdown contract and remains a separate
+task-lifecycle gate; F2 does not silently change it.
+
+```yaml
+RUNTIME_OWNERSHIP_DIAGNOSTIC: READY
+CANONICAL_TASK_DB_DETECTED: YES
+NONCANONICAL_TASK_DB_DETECTED: YES
+RELATIVE_PATH_RISK_REPRODUCED: YES
+COMPATIBILITY_OWNER_CLASSIFICATION: PASS
+UNKNOWN_OWNER_CLASSIFICATION: PASS
+DATABASES_MUTATED: NO
+SCHEMA_MIGRATION: NO
+WINERROR_32_ROOT_CAUSE_IDENTIFIED: YES
+PRODUCTION_LIFECYCLE_FIX: DEFERRED_TO_SEPARATE_GATE
+```
+
+Validation evidence for this gate:
+
+```yaml
+TARGETED_REGRESSION: 104 passed
+SUBTESTS: 3 passed
+PY_COMPILE: PASS
+GIT_DIFF_CHECK: PASS
+HARDWARE_OR_EXTERNAL_PROVIDER_TESTS: NOT_RUN
+DEVICE_REGISTRY_TOUCHED: NO
+```
+
+No ownership convergence, security bypass repair, audit consolidation,
+model-router consolidation, memory migration, device-registry change or
+hardware activity was performed in F2.
 
 ### F3 - Security convergence
 

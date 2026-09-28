@@ -10,13 +10,17 @@ from ..orchestrator.models import DataClassification, PlanStep, Route
 from .background import (BackgroundTask, BackgroundTaskStatus, MisfirePolicy,
                           RunStatus, TriggerType)
 from .models import StepRecord, StepStatus, TaskPlan, TaskRecord, TaskStatus
+from ..runtime_ownership import describe_task_database
 
 
 class TaskDatabase:
     SCHEMA_VERSION = 5
 
     def __init__(self, path):
-        self.path = Path(path)
+        self.requested_path = Path(path).expanduser()
+        self.path = self.requested_path.resolve(strict=False)
+        self.ownership_diagnostic = describe_task_database(
+            self.requested_path, self.path, f"{type(self).__module__}.{type(self).__qualname__}")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._migrate()

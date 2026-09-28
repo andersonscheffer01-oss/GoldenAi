@@ -135,7 +135,9 @@ class HybridRuntimeCase(unittest.TestCase):
                 self.assertEqual("nomic-embed-text",
                                  service.memory_v2._embedding_model)
             finally:
-                service.task_manager.shutdown(wait=False)
+                # The scheduler owns SQLite connections during its tick loop;
+                # join it before Windows removes the temporary database.
+                service.task_manager.shutdown(wait=True)
 
 
 if __name__ == "__main__":

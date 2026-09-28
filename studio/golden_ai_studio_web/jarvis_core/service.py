@@ -291,6 +291,11 @@ class JarvisService:
             "last_request": last_request or None,
         }
 
+    def runtime_ownership_diagnostics(self, entrypoint=""):
+        """Return bounded ownership/path diagnostics without changing runtime."""
+        from .runtime_ownership import RuntimeOwnershipDiagnostic
+        return RuntimeOwnershipDiagnostic.inspect_service(self, entrypoint)
+
     def close(self):
         """Release background resources owned by this JarvisService instance."""
         if self._closed:
