@@ -18,14 +18,20 @@ from .runner import BackgroundJobRunner
 from .condition_executor import ConditionAuditExecutor
 from .control_center import BackgroundControlCenter
 from ..computer_use_mission import ActionState, MissionCheckpointStore
+from .paths import resolve_task_database_path
 
 
 class TaskManager:
     DB_NAME = "golden_tasks.db"
 
-    def __init__(self, base_dir, max_workers=2, security=None):
+    def __init__(self, base_dir, max_workers=2, security=None,
+                 runtime_mode="compatibility", database_path=None):
         self.base_dir = Path(base_dir).expanduser().resolve()
-        self.database = TaskDatabase(self.base_dir / "jarvis" / self.DB_NAME)
+        self.database_resolution = resolve_task_database_path(
+            self.base_dir, database_path, runtime_mode)
+        self.database = TaskDatabase(
+            self.database_resolution.resolved_path,
+            runtime_classification=self.database_resolution.classification)
         self.runner = BackgroundJobRunner(self.database, max_workers=max_workers)
         self.audit = AuditLog(self.base_dir / "golden_runtime.db")
         # JarvisService passes its canonical manager; standalone TaskManager

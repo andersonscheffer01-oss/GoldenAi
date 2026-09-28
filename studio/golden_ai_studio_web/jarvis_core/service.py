@@ -138,7 +138,7 @@ class JarvisService:
         "golden ai": r"C:\GoldenAI",
     }
 
-    def __init__(self, base_dir):
+    def __init__(self, base_dir, task_db_mode="compatibility"):
         self.started_at = time.time()
         self.state = AgentState.IDLE
         self.dry_run = os.getenv("GOLDEN_JARVIS_DRY_RUN", "0") == "1"
@@ -177,7 +177,8 @@ class JarvisService:
             self.learning_engine = None
             self.project_memory = None
         self._register_tools()
-        self.task_manager = TaskManager(base_dir, security=self.security)
+        self.task_manager = TaskManager(
+            base_dir, security=self.security, runtime_mode=task_db_mode)
         from .computer_use_mission import ComputerMissionExecutor
         self.computer_missions = ComputerMissionExecutor(self)
         self.task_manager.start_scheduler(self._launch_background_task,

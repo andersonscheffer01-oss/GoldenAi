@@ -10,10 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-
-CANONICAL_TASK_DB = Path(
-    r"C:\GoldenAI\studio\golden_ai_studio_web\jarvis\golden_tasks.db"
-)
+from .task_manager.paths import CANONICAL_TASK_DB
 
 _CANONICAL_OWNERS = {
     "core": "jarvis_core",

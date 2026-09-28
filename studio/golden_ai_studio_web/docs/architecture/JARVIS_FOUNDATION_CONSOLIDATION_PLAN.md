@@ -455,7 +455,37 @@ No historical audit data was migrated, deleted or rewritten.
 
 ### F5 - Task DB enforcement
 
-After F2 diagnostics and F3 security tests, enforce the fixed production DB resolver. Keep temp paths only for tests. No migration in this plan; a later migration gate must be separately authorized.
+F5 completed the canonical task-database governance layer through the single
+resolver `jarvis_core.task_manager.paths.resolve_task_database_path()`.
+`DesktopCenter` is the production entrypoint and requests
+`runtime_mode="production"`, which resolves only to:
+
+```text
+C:\\GoldenAI\\studio\\golden_ai_studio_web\\jarvis\\golden_tasks.db
+```
+
+An explicitly supplied noncanonical production path is rejected before
+`TaskDatabase` opens or creates SQLite. Isolated test databases use
+`runtime_mode="test"`; legacy/standalone callers remain classified as
+compatibility and are not silently redirected. The existing runtime
+ownership diagnostic now reports the runtime classification alongside the
+resolved path.
+
+No database was migrated, opened for governance-only path tests, modified,
+deleted, renamed, copied or redirected. F5 validation passed: `78 passed`;
+`py_compile` and the protected task/scheduler, Computer Use and ownership
+tests passed.
+
+```yaml
+F5_STATUS: PASS
+CANONICAL_TASK_DB: C:\\GoldenAI\\studio\\golden_ai_studio_web\\jarvis\\golden_tasks.db
+CENTRAL_PATH_OWNER: jarvis_core.task_manager.paths.resolve_task_database_path
+CWD_INDEPENDENT: YES
+EXPLICIT_TEST_DB_SUPPORTED: YES
+ACCIDENTAL_NONCANONICAL_PRODUCTION_DB_BLOCKED: YES
+LEGACY_DATABASES_PRESERVED: YES
+DATABASE_MIGRATION: NO
+```
 
 ### F6 - ModelRouter convergence
 
