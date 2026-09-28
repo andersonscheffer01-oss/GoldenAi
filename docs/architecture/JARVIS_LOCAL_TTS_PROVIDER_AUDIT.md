@@ -657,3 +657,122 @@ NEXT_GATE: KOKORO_LICENSE_RESOLUTION_AND_ISOLATED_RUNTIME_INSTALLATION_GATE
 NEXT_STEP: obtain separate voice grants, reconcile espeak-ng/loader licensing, then pin a Python-3.12-compatible isolated dependency lock
 KNOWN_RESTRICTIONS: no install, download, synthesis, audio playback, hardware access, production code, device registry, DB migration, or push
 ```
+
+## Gate 2C addendum: final Kokoro license resolution
+
+This addendum closes the Kokoro license-resolution gate without installing
+packages, downloading artifacts, creating a runtime, or changing production
+code. The baseline for this review is `ae719f926dae4d418d78fd3799bbcca751f806cb`.
+
+### Voice provenance and license result
+
+The official Kokoro model card declares the model and weights under
+Apache-2.0. The official `VOICES.md` identifies `pf_dora`, `pm_alex`, and
+`pm_santa` as Brazilian Portuguese voices and gives their file hashes, but it
+does not provide an independent license grant or usage terms for any of the
+three voicepack files. The official file metadata likewise exposes model-level
+Apache metadata, not a per-voice grant. A maintainer post discusses permissive
+Apache-licensed contributed data and possible corresponding voicepacks, but it
+does not explicitly grant rights for these three files.
+
+Accordingly, none of the candidate voices is explicitly approved. The correct
+state is `AMBIGUOUS`, not Apache by inference. The repository license coverage
+for the voice files is therefore also `AMBIGUOUS`.
+
+### eSpeak NG and loader review
+
+The current Kokoro/Misaki path invokes eSpeak NG through an in-process shared
+library loaded by `espeakng-loader`. Upstream eSpeak NG is GPL-3.0-or-later.
+Misaki is Apache-2.0, while the PyPI metadata reviewed for
+`espeakng-loader==0.2.4` does not state a package-specific license. The
+embedded upstream engine/data terms and the in-process distribution form must
+be reconciled before any redistribution or bundling decision. This is a legal
+review item, not a claim that private local execution has the same result as
+distribution.
+
+For personal local use, the practical legal analysis may differ from
+redistribution, but that distinction is not clearance for Golden. The current
+ambiguous voice provenance and loader/engine distribution questions mean that
+the artifacts must not be bundled with Golden without legal review.
+
+### Conditional isolated-runtime design
+
+Kokoro is not approved for the Golden primary path. If a future voice receives
+an explicit grant and the dependency closure is approved, the only acceptable
+follow-up design is a separate Python 3.12.x child runtime at
+`C:\\GoldenAI\\runtimes\\tts\\kokoro\\`. Golden Python 3.13.15 and
+`C:\\GoldenAI\\.venv` remain unchanged. The child would use explicit local
+artifact paths, fail closed when artifacts are absent, and never implicitly
+download models or voices.
+
+The minimal IPC design is subprocess stdin/stdout with JSON-lines control
+messages and a bounded PCM response. Requests carry `request_id`, `session_id`,
+`turn_id`, `generation`, `text`, `voice_id`, and an explicit artifact root.
+Golden remains the owner of VoiceService, TurnManager, generation guards,
+playback cancellation, output flushing, security boundaries, and stale-result
+rejection. No HTTP listener, LAN exposure, second voice architecture, or
+independent playback owner is permitted.
+
+### Final Gate 2C report
+
+```yaml
+JARVIS_VOICE_PHASE: PARTIAL
+KOKORO_LICENSE_RESOLUTION_AND_RUNTIME_APPROVAL: PASS_WITH_RESTRICTIONS
+BASELINE: ae719f926dae4d418d78fd3799bbcca751f806cb
+
+PF_DORA: AMBIGUOUS
+PF_DORA_LICENSE: No separate license or usage grant declared
+PF_DORA_EVIDENCE: Official VOICES/file hash plus model-level Apache metadata; no per-voice grant
+PM_ALEX: AMBIGUOUS
+PM_ALEX_LICENSE: No separate license or usage grant declared
+PM_ALEX_EVIDENCE: Official VOICES/file hash plus model-level Apache metadata; no per-voice grant
+PM_SANTA: AMBIGUOUS
+PM_SANTA_LICENSE: No separate license or usage grant declared
+PM_SANTA_EVIDENCE: Official VOICES/file hash plus model-level Apache metadata; no per-voice grant
+REPOSITORY_LICENSE_EXPLICITLY_COVERS_VOICE_FILES: AMBIGUOUS
+APPROVED_VOICE_SET: NONE
+
+ESPEAK_NG_LICENSE: GPL-3.0-or-later
+MISAKI/LOADER_LICENSES: Misaki Apache-2.0; espeakng-loader package-specific license absent from reviewed PyPI metadata; embedded eSpeak terms require review
+INTEGRATION_FORM: Current path is in-process shared-library G2P through espeakng-loader; future isolated worker only, external boundary not currently implemented
+LEGAL_REVIEW_REQUIRED: YES
+PERSONAL_LOCAL_USE_FINDING: Local private execution may differ from redistribution; not a legal clearance
+REDISTRIBUTION_FINDING: Do not bundle current voices, loader, or engine without legal review
+
+ISOLATED_RUNTIME_VIABLE: CONDITIONAL
+ISOLATED_PYTHON_VERSION: Python 3.12.x
+ISOLATED_RUNTIME_LOCATION: C:\\GoldenAI\\runtimes\\tts\\kokoro\\
+GOLDEN_PYTHON_UNCHANGED: YES
+IPC_FORM: subprocess stdin/stdout JSON-lines control plus bounded PCM response
+NETWORK_EXPOSED: NO
+IMPLICIT_MODEL_DOWNLOAD_DISABLED_BY_DESIGN: YES
+
+VOICESERVICE_REMAINS_OWNER: YES
+TURNMANAGER_REMAINS_OWNER: YES
+GENERATION_GUARDS_REMAIN_OWNER: YES
+AUDIO_OUTPUT_REMAINS_OWNER: YES
+SECOND_VOICE_ARCHITECTURE: NO
+
+KOKORO_DECISION: REJECT_FOR_GOLDEN_PRIMARY
+ARTIFACT_APPROVAL_READY: NO
+RUNTIME_INSTALLATION_READY: NO
+FINAL_KOKORO_RESEARCH_GATE: YES
+
+PRODUCTION_CODE_CHANGED: NO
+DEPENDENCIES_INSTALLED: NO
+MODEL_DOWNLOADED: NO
+VOICE_ARTIFACTS_DOWNLOADED: NO
+ESPEAK_INSTALLED: NO
+MICROPHONE_OPENED: NO
+SPEAKER_OPENED: NO
+AUDIO_PLAYED: NO
+DEVICE_REGISTRY_TOUCHED: NO
+TASK_DB_SCHEMA_MIGRATION: NONE
+PUSH: NO
+
+FILES_MODIFIED: docs/architecture/JARVIS_LOCAL_TTS_PROVIDER_AUDIT.md
+COMMIT: DOCUMENTATION_ONLY
+NEXT_GATE: LOCAL_TTS_FALLBACK_SELECTION_GATE
+NEXT_STEP: Reconsider Sherpa-ONNX, a maintained Piper successor, or SAPI fallback using existing evidence; do not reopen Kokoro research
+KNOWN_RESTRICTIONS: no install, download, runtime creation, model/voice acquisition, synthesis, audio, hardware, production code, device registry, DB migration, or push
+```
