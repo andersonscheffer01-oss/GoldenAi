@@ -598,6 +598,59 @@ SECRET_PERSISTENCE: BLOCKED
 DUPLICATE_PERSISTENCE: PREVENTED
 ```
 
+### D3 - Dedicated local Obsidian vault
+
+The real local vault boundary was revalidated at
+`C:\GoldenAI\memory\vault`. It is a dedicated Golden Memory Vault with the
+expected README marker and remains a human-visible projection surface, not a
+second canonical store. The existing V2 projection keeps the direction
+`Jarvis -> approved local vault`, stable managed-note identity and generated
+content separate from human-authored notes. PUBLIC and INTERNAL records may be
+projected; SENSITIVE is blocked by default and SECRET is never projected.
+The application itself is not required or launched for this gate, and no
+unrelated personal vault was selected.
+
+```yaml
+D3_STATUS: PASS_WITH_RESTRICTIONS
+VAULT_PATH: C:\\GoldenAI\\memory\\vault
+DEDICATED_JARVIS_VAULT: YES
+CANONICAL_STORE: GoldenMemoryEngine_V2_SQLITE
+SYNC_DIRECTION: JARVIS_TO_APPROVED_LOCAL_VAULT
+INCREMENTAL_PROJECTION: YES
+GENERATED_USER_SEPARATION: PASS
+PUBLIC_ALLOWED: YES
+INTERNAL_ALLOWED: YES
+SENSITIVE_DEFAULT: BLOCKED
+SECRET_PROJECTION: BLOCKED
+FAILURE_ISOLATION: PASS
+HUMAN_ACTION_REQUIRED: NO
+OBSIDIAN_APPLICATION_REQUIRED: NO
+```
+
+### D4 - Bounded personal digital map pilot
+
+`jarvis_core.digital_map.ReadOnlyDigitalMap` is a bounded, allowlisted pilot
+for one explicitly approved project root. It never scans the whole PC, follows
+symlinks, reads secret/runtime files, or mutates source files. It emits stable
+entity IDs, metadata, bounded text previews and incremental NEW/MODIFIED/
+UNCHANGED/MISSING state. A single managed Markdown reference note may be
+projected into the dedicated vault; unrelated existing notes are protected from
+overwrite.
+
+```yaml
+D4_STATUS: PASS_WITH_RESTRICTIONS
+SCAN_MODE: READ_ONLY_BOUNDED
+FULL_PC_SCAN: NO
+SECRET_AND_RUNTIME_EXCLUSION: PASS
+SYMLINK_TRAVERSAL: BLOCKED
+INCREMENTAL_STATE: PASS
+MISSING_DETECTION: PASS
+BOUNDED_DOCUMENT_EXTRACTION: PASS
+PHOTO_ANALYSIS: NOT_IMPLEMENTED
+VAULT_PROJECTION: MANAGED_REFERENCE_ONLY
+ORIGINAL_FILES_MODIFIED: NO
+```
+
 
 ### F7.3 - Canonical memory boundary checkpoint
 
