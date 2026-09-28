@@ -22,6 +22,7 @@ from .memory.boundary import CanonicalMemoryBoundary
 from .memory.models import MemoryCategory, MemorySource
 from .mcp_client import McpClientManager
 from .orchestrator import CentralOrchestrator, JarvisRuntimeCoordinator
+from .robot_catalog import RobotCatalogReadModel
 from .task_manager import TaskManager
 
 
@@ -180,6 +181,9 @@ class JarvisService:
             self.project_memory = None
         self.memory_boundary = CanonicalMemoryBoundary(
             self.memory_v2, self.legacy_memory)
+        # Robot intelligence remains a bounded Jarvis read model. Discovery
+        # is explicit and never opens MT5, starts a tester, or writes memory.
+        self.robot_catalog = RobotCatalogReadModel()
         self.mcp_clients = McpClientManager()
         self._register_tools()
         self.task_manager = TaskManager(
@@ -509,6 +513,16 @@ class JarvisService:
                  }, category="market"),
             Tool("golden_risk_status", "Consulta o estado de risco Golden sem enviar ordens.",
                  golden_risk_status, Risk.LOW, timeout=25, category="market"),
+            # --- ROBOT INTELLIGENCE (SOMENTE LEITURA) ---
+            Tool("robot_catalog_discover", "Descobre robos e evidencias locais sem executar MT5.",
+                 self.discover_robot_catalog, Risk.LOW, timeout=90, category="robot_catalog",
+                 llm_enabled=False),
+            Tool("robot_catalog_list", "Lista o catalogo local de robos ja descobertos.",
+                 self.list_robot_catalog, Risk.LOW, timeout=10, category="robot_catalog",
+                 llm_enabled=False, parameters={"status": str, "limit": int}),
+            Tool("robot_catalog_detail", "Mostra identidade, evidencias e desconhecidos de um robo.",
+                 self.robot_catalog_detail, Risk.LOW, timeout=10, category="robot_catalog",
+                 llm_enabled=False, parameters={"robot_id": str}),
             Tool("web_research", "Pesquisa real na web e retorna fontes sem memorizar.",
                  self._web_research, Risk.LOW, timeout=45,
                  parameters={"query": str, "limit": int, "privacy": str},
@@ -605,6 +619,7 @@ class JarvisService:
             "programs": sorted(set(self.PROGRAMS)),
             "tools": self.registry.public_catalog(),
             "capabilities": self.capability_governance_snapshot(),
+            "robot_catalog": self.robot_catalog_snapshot(),
             "history": self.audit.recent(20),
             "memory": self._memory_status(),
             "orchestrator": self.orchestrator.status(),
@@ -618,6 +633,24 @@ class JarvisService:
             "capabilities": self.registry.capability_catalog(),
             "mcp_servers": self.mcp_clients.health(),
         }
+
+    def robot_catalog_snapshot(self):
+        """Return the bounded robot read model without starting discovery."""
+        return self.robot_catalog.snapshot()
+
+    def discover_robot_catalog(self):
+        """Run controlled local discovery through the canonical Jarvis owner."""
+        return self.robot_catalog.discover()
+
+    def list_robot_catalog(self, status="", limit=100):
+        return self.robot_catalog.list(status=status, limit=limit)
+
+    def robot_catalog_detail(self, robot_id):
+        return self.robot_catalog.detail(robot_id)
+
+    def set_robot_catalog_status(self, robot_id, status, reason=""):
+        """Apply an explicit repertoire decision; it never authorizes trading."""
+        return self.robot_catalog.set_user_status(robot_id, status, reason)
 
     def set_capability_enabled(self, name, enabled):
         changed = (self.registry.enable(name) if enabled
