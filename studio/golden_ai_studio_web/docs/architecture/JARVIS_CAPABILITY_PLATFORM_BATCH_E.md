@@ -115,3 +115,30 @@ EXTERNAL_MCP_CONTACTED: NO
 The restriction is intentional: legacy compatibility paths remain separate
 until a later adapter gate proves ownership and regression coverage. E2 may
 continue because the active execution authority is unambiguous.
+
+## E2 checkpoint
+
+The existing `Tool` and `ToolRegistry` were adapted instead of introducing a
+second capability registry. `Tool` now carries provider, side-effect,
+security/approval, availability, health and provenance metadata. The registry
+exposes a normalized capability descriptor and catalog while keeping the
+existing LLM schema and duplicate-name rejection behavior.
+
+The descriptor is governance metadata only. It does not grant permission,
+change confirmation policy or bypass the `SecurityManager`. Invocation still
+enters `JarvisService.execute_tool`, which performs validation, cancellation,
+security decision, bounded dispatch, postcondition verification and one
+canonical audit receipt.
+
+```yaml
+E2_STATUS: PASS
+BOUNDARY_OWNER: JarvisService.execute_tool
+REGISTRY_OWNER: jarvis_core.registry.ToolRegistry
+SECURITY_OWNER: jarvis_core.security.SecurityManager
+AUDIT_OWNER: jarvis_core.audit.AuditLog
+SIDE_EFFECT_CLASSIFICATION: NORMALIZED_METADATA_ONLY
+EXISTING_SKILLS_PRESERVED: YES
+LEGACY_COMPATIBILITY: PRESERVED
+DUPLICATE_EXECUTION: NOT_OBSERVED
+TESTS: 26_PASSED_22_SUBTESTS
+```

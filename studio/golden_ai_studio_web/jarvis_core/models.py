@@ -22,6 +22,16 @@ class ResponsePolicy(str, Enum):
     BACKGROUND = "BACKGROUND"
 
 
+class SideEffectClass(str, Enum):
+    """Describes impact metadata; it never grants execution permission."""
+
+    READ_ONLY = "READ_ONLY"
+    LOCAL_MUTATION = "LOCAL_MUTATION"
+    EXTERNAL_MUTATION = "EXTERNAL_MUTATION"
+    SENSITIVE_OPERATION = "SENSITIVE_OPERATION"
+    FINANCIAL_OPERATION = "FINANCIAL_OPERATION"
+
+
 BROWSER_READ = "BROWSER_READ"
 BROWSER_ACTION = "BROWSER_ACTION"
 
@@ -43,3 +53,10 @@ class Tool:
     expected_latency_ms: int = 0
     action_class: str = BROWSER_ACTION
     authorization_scope: str = ""
+    provider: str = "jarvis_core"
+    side_effect_class: str = ""
+    security_requirements: tuple[str, ...] = ()
+    approval_requirements: tuple[str, ...] = ()
+    availability: str = "registered"
+    health: str = "unknown"
+    provenance: str = "internal"
