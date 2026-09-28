@@ -153,6 +153,49 @@ dependency gate.
 
 `BLOCKS_HARDWARE_GATES: YES_FOR_GLOBAL_INTERPRETER`
 
+### Gate 1 validation result
+
+Gate 1 was validated on 2026-09-28 with the existing Golden virtual
+environment. No package installation, device open, model download, or real
+audio operation occurred.
+
+```yaml
+VOICE_RUNTIME_ENVIRONMENT_ALIGNMENT: PASS
+VOICE_RUNTIME_IS_GOLDEN_VENV: YES
+PYTHON_EXECUTABLE: C:\\GoldenAI\\.venv\\Scripts\\python.exe
+PYTHON_VERSION: 3.13.15
+PLATFORM: Windows-11-10.0.26200-SP0 / AMD64 / 64bit
+SOUNDDEVICE: PASS (0.5.6)
+NUMPY: PASS (2.5.2)
+SCIPY: PASS (1.18.0)
+SILERO_RUNTIME: PASS (onnxruntime 1.29.0; local ONNX session load/unload)
+FASTER_WHISPER: PASS (1.2.1)
+CTRANSLATE2: PASS (4.8.1)
+PYTEST: PASS (9.1.1)
+PYTEST_ASYNCIO: PASS (1.4.0)
+APPROVED_STT_ARTIFACT_RESOLVABLE: YES
+MODEL_DOWNLOADED: NO
+```
+
+The approved faster-whisper snapshot resolved and passed the project's
+required-file check at:
+
+`C:\Users\Anderson\.cache\huggingface\hub\models--Systran--faster-whisper-small\snapshots\536b0662742c02347bc0e980a01041f333bce120`
+
+The required files were present: `config.json`, `model.bin`,
+`tokenizer.json`, and `vocabulary.txt`. The Silero asset also loaded and
+unloaded successfully from the installed faster-whisper assets without
+feeding audio.
+
+The previously environment-blocked target was rerun as:
+
+`C:\GoldenAI\.venv\Scripts\python.exe -m pytest tests/test_barge_in_runtime_wiring.py -vv --tb=short`
+
+Result: `25 passed in 25.52s`. The prior sounddevice-related environment
+failure does not reproduce under the canonical Golden interpreter. This was a
+software/runtime-wiring test only; it did not enumerate or open an audio
+device.
+
 ## Regression classification
 
 The broader run's 14 failures are not counted as new adapter regressions.
@@ -300,11 +343,11 @@ POST_E2E_OPTIMIZATIONS:
   - investigate AEC only if controlled acoustic evidence requires it
 ```
 
-`NEXT_GATE: VOICE_RUNTIME_ENVIRONMENT_ALIGNMENT`
+`NEXT_GATE: APPROVED_LOCAL_TTS_PROVIDER_AND_ARTIFACT_GATE`
 
-`NEXT_STEP: run the existing hardware-free readiness checks and later real
-hardware gate with C:\\GoldenAI\\.venv\\Scripts\\python.exe, without installing
-packages or opening devices during this review.`
+`NEXT_STEP: proceed to reuse-first local TTS provider and artifact selection;
+keep using C:\\GoldenAI\\.venv\\Scripts\\python.exe for all future Voice
+validation commands.`
 
 ## Closure definitions
 
@@ -349,4 +392,3 @@ Created by this review:
 - `docs/architecture/JARVIS_VOICE_CONVERSATION_ADAPTER_CLOSURE.md`
 
 No unrelated dirty worktree file is part of this document or its commit.
-
