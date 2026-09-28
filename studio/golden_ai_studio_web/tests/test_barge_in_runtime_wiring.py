@@ -208,14 +208,15 @@ class TestFollowupTransitionViaProductionLoop:
         with patch.object(vs, "_capture_followup_after_barge_in", return_value=mock_record):
             with patch.object(vs._voice, "transcribe_audio_bytes",
                               return_value={"ok": True, "text": "não, quero saber somente da memória"}):
-                with patch.object(vs, "_stop_barge_in_monitor"):
-                    with patch.object(vs, "_handle", side_effect=fake_handle):
-                        with patch.object(vs._voice, "record_until_silence",
-                                          return_value={"ok": True, "speech_detected": False,
-                                                         "utterance_id": "idle"}):
-                            vs.stop_event = threading.Event()
-                            threading.Timer(2.0, vs.stop_event.set).start()
-                            vs._loop()
+                with patch.object(vs, "_start_barge_in_monitor"):
+                    with patch.object(vs, "_stop_barge_in_monitor"):
+                        with patch.object(vs, "_handle", side_effect=fake_handle):
+                            with patch.object(vs._voice, "record_until_silence",
+                                              return_value={"ok": True, "speech_detected": False,
+                                                             "utterance_id": "idle"}):
+                                vs.stop_event = threading.Event()
+                                threading.Timer(2.0, vs.stop_event.set).start()
+                                vs._loop()
 
         # === Assert: production _loop() processed follow-up ===
         assert vs._barge_in_followup_active is False, \
@@ -271,14 +272,15 @@ class TestFollowupTransitionViaProductionLoop:
         with patch.object(vs, "_capture_followup_after_barge_in", return_value=mock_record):
             with patch.object(vs._voice, "transcribe_audio_bytes",
                               return_value={"ok": True, "text": "quero saber da memória"}):
-                with patch.object(vs, "_stop_barge_in_monitor"):
-                    with patch.object(vs._voice, "record_until_silence",
-                                      return_value={"ok": True, "speech_detected": False,
-                                                     "utterance_id": "idle"}):
-                        with patch.object(VoiceService, "__setattr__", track_state):
-                            vs.stop_event = threading.Event()
-                            threading.Timer(2.0, vs.stop_event.set).start()
-                            vs._loop()
+                with patch.object(vs, "_start_barge_in_monitor"):
+                    with patch.object(vs, "_stop_barge_in_monitor"):
+                        with patch.object(vs._voice, "record_until_silence",
+                                          return_value={"ok": True, "speech_detected": False,
+                                                         "utterance_id": "idle"}):
+                            with patch.object(VoiceService, "__setattr__", track_state):
+                                vs.stop_event = threading.Event()
+                                threading.Timer(2.0, vs.stop_event.set).start()
+                                vs._loop()
 
         # State must include CAPTURING_FOLLOWUP (set by production _loop())
         assert "CAPTURING_FOLLOWUP" in state_log, \
@@ -401,13 +403,14 @@ class TestUtteranceSourceMetadata:
         with patch.object(vs, "_capture_followup_after_barge_in", return_value=mock_record):
             with patch.object(vs._voice, "transcribe_audio_bytes",
                               return_value={"ok": True, "text": "teste"}):
-                with patch.object(vs, "_stop_barge_in_monitor"):
-                    with patch.object(vs._voice, "record_until_silence",
-                                      return_value={"ok": True, "speech_detected": False,
-                                                     "utterance_id": "idle"}):
-                        vs.stop_event = threading.Event()
-                        threading.Timer(2.0, vs.stop_event.set).start()
-                        vs._loop()
+                with patch.object(vs, "_start_barge_in_monitor"):
+                    with patch.object(vs, "_stop_barge_in_monitor"):
+                        with patch.object(vs._voice, "record_until_silence",
+                                          return_value={"ok": True, "speech_detected": False,
+                                                         "utterance_id": "idle"}):
+                            vs.stop_event = threading.Event()
+                            threading.Timer(2.0, vs.stop_event.set).start()
+                            vs._loop()
 
         assert vs._utterance_source == ""
 

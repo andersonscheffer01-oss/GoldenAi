@@ -266,6 +266,221 @@ class VADDiagnosticObservation:
         }
 
 
+@dataclass
+class RawSignalWindow:
+    """Aggregate-only raw PCM metrics for one bounded capture window."""
+
+    frame_count: int = 0
+    sample_count: int = 0
+    sum_squared: float = 0.0
+    rms_sum: float = 0.0
+    rms_max: float = 0.0
+    peak_max: float = 0.0
+    raw_min: float | None = None
+    raw_max: float | None = None
+    nonzero_samples: int = 0
+    clipped_samples: int = 0
+    unique_values_sum: int = 0
+    unique_values_max: int = 0
+    frame_timestamps: list[float] = field(default_factory=list)
+    frame_hashes: list[str] = field(default_factory=list)
+    input_overflow: int = 0
+
+    def record(self, frame: bytes, timestamp: float, overflowed: bool = False) -> None:
+        import numpy as np
+
+        samples = np.frombuffer(frame, dtype="<i2")
+        if samples.size == 0:
+            return
+        values = samples.astype(np.float64)
+        rms = float(np.sqrt(np.mean(values ** 2)))
+        self.frame_count += 1
+        self.sample_count += int(samples.size)
+        self.sum_squared += float(np.sum(values ** 2))
+        self.rms_sum += rms
+        self.rms_max = max(self.rms_max, rms)
+        self.peak_max = max(self.peak_max, float(np.max(np.abs(samples))))
+        frame_min = float(np.min(samples))
+        frame_max = float(np.max(samples))
+        self.raw_min = frame_min if self.raw_min is None else min(self.raw_min, frame_min)
+        self.raw_max = frame_max if self.raw_max is None else max(self.raw_max, frame_max)
+        self.nonzero_samples += int(np.count_nonzero(samples))
+        self.clipped_samples += int(np.count_nonzero(np.abs(samples) >= 32767))
+        unique_values = int(np.unique(samples).size)
+        self.unique_values_sum += unique_values
+        self.unique_values_max = max(self.unique_values_max, unique_values)
+        self.frame_timestamps.append(float(timestamp))
+        self.frame_hashes.append(hashlib.sha256(frame).hexdigest())
+        if overflowed:
+            self.input_overflow += 1
+
+    def report(self) -> dict[str, Any]:
+        gaps = [
+            (right - left) * 1000.0
+            for left, right in zip(self.frame_timestamps, self.frame_timestamps[1:])
+        ]
+        return {
+            "RMS_MEAN": self.rms_sum / self.frame_count if self.frame_count else None,
+            "RMS_MAX": self.rms_max if self.frame_count else None,
+            "PEAK": self.peak_max if self.frame_count else None,
+            "MIN": self.raw_min,
+            "MAX": self.raw_max,
+            "NONZERO_SAMPLE_PERCENT": (
+                self.nonzero_samples / self.sample_count * 100.0
+                if self.sample_count else None
+            ),
+            "UNIQUE_SAMPLE_COUNT_MEAN": (
+                self.unique_values_sum / self.frame_count if self.frame_count else None
+            ),
+            "UNIQUE_SAMPLE_COUNT_MAX": self.unique_values_max if self.frame_count else None,
+            "CLIPPED_SAMPLE_PERCENT": (
+                self.clipped_samples / self.sample_count * 100.0
+                if self.sample_count else None
+            ),
+            "FRAME_COUNT": self.frame_count,
+            "FRAME_DROPS": 0,
+            "MAX_FRAME_GAP_MS": max(gaps) if gaps else None,
+            "INPUT_OVERFLOW": self.input_overflow,
+            "FRAME_HASH_UNIQUE_COUNT": len(set(self.frame_hashes)),
+            "FRAME_BYTE_CHANGE_DETECTED": len(set(self.frame_hashes)) > 1,
+        }
+
+
+@dataclass
+class HostApiCaptureObservation:
+    """Raw endpoint A/B observation; human validity is never inferred."""
+
+    device: int
+    device_name: str
+    host_api: str
+    sample_rate: float
+    channels: int
+    duration_seconds: float
+    silence: RawSignalWindow = field(default_factory=RawSignalWindow)
+    speech: RawSignalWindow = field(default_factory=RawSignalWindow)
+    stream_opened: bool = False
+    human_confirmation: bool | None = None
+    error: str = ""
+
+    def report(self) -> dict[str, Any]:
+        silence = self.silence.report()
+        speech = self.speech.report()
+        silence_rms = silence["RMS_MEAN"]
+        speech_rms = speech["RMS_MEAN"]
+        ratio = None
+        db = None
+        if isinstance(silence_rms, (int, float)) and silence_rms > 0 and isinstance(speech_rms, (int, float)):
+            ratio = speech_rms / silence_rms
+            db = 20.0 * math.log10(ratio) if ratio > 0 else None
+        return {
+            "DEVICE": self.device,
+            "DEVICE_NAME": self.device_name,
+            "HOST_API": self.host_api,
+            "SAMPLE_RATE": self.sample_rate,
+            "CHANNELS": self.channels,
+            "STREAM_OPENED": self.stream_opened,
+            "HUMAN_CONFIRMATION": (
+                "SIM" if self.human_confirmation is True
+                else "NAO" if self.human_confirmation is False
+                else "PENDING_HUMAN_CONFIRMATION"
+            ),
+            "SILENCE": silence,
+            "SPEECH": speech,
+            "SPEECH_TO_SILENCE_RMS_RATIO": ratio,
+            "SPEECH_TO_SILENCE_DB": db,
+            "HUMAN_SIGNAL_USABLE": (
+                "YES" if self.human_confirmation is True and isinstance(db, (int, float)) and db > 0
+                else "NO" if self.human_confirmation is False
+                else "PENDING_HUMAN_CONFIRMATION"
+            ),
+            "ERROR": self.error,
+        }
+
+
+def _capture_raw_window(stream: Any, window: RawSignalWindow, seconds: float, blocksize: int) -> None:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        frame, overflowed = stream.read(blocksize)
+        window.record(bytes(frame), time.monotonic(), bool(overflowed))
+
+
+def _host_api_device_details(device: int) -> tuple[str, str, float, int]:
+    import sounddevice as sd
+
+    details = sd.query_devices(device)
+    host_api = sd.query_hostapis()[int(details["hostapi"])]
+    return (
+        str(details["name"]),
+        str(host_api["name"]),
+        float(details["default_samplerate"]),
+        int(details["max_input_channels"]),
+    )
+
+
+def run_host_api_capture(
+    *,
+    input_device: int,
+    sample_rate: float | None = None,
+    duration_seconds: float = 4.0,
+    silence_seconds: float = 1.5,
+    announce: Callable[[str], None] = print,
+) -> HostApiCaptureObservation:
+    """Capture one silence window and one human window from one endpoint."""
+    import sounddevice as sd
+
+    name, host_api, default_rate, channels = _host_api_device_details(input_device)
+    rate = float(sample_rate or default_rate)
+    observation = HostApiCaptureObservation(
+        device=input_device,
+        device_name=name,
+        host_api=host_api,
+        sample_rate=rate,
+        channels=1,
+        duration_seconds=duration_seconds,
+    )
+    if channels < 1:
+        observation.error = "no_input_channels"
+        return observation
+    blocksize = max(1, round(rate * FRAME_DURATION_MS / 1000.0))
+    stream: Any = None
+    try:
+        sd.check_input_settings(
+            device=input_device,
+            samplerate=rate,
+            channels=1,
+            dtype="int16",
+        )
+        stream = sd.RawInputStream(
+            device=input_device,
+            samplerate=rate,
+            channels=1,
+            dtype="int16",
+            blocksize=blocksize,
+        )
+        stream.start()
+        observation.stream_opened = True
+        announce("SILENCE_BASELINE_START")
+        _capture_raw_window(stream, observation.silence, silence_seconds, blocksize)
+        announce("HUMAN_ACTION_REQUIRED")
+        announce('Quando a janela abrir, diga em voz normal: "Jarvis, teste de microfone."')
+        announce("HUMAN_SPEECH_WINDOW_OPEN")
+        _capture_raw_window(stream, observation.speech, duration_seconds, blocksize)
+        announce("HUMAN_SPEECH_WINDOW_CLOSED")
+        announce("CONFIRMACAO_HUMANA_NECESSARIA: responda SIM ou NAO")
+    except Exception as exc:
+        observation.error = str(exc)
+    finally:
+        if stream is not None:
+            for method_name in ("stop", "close"):
+                method = getattr(stream, method_name, None)
+                if method is not None:
+                    try:
+                        method()
+                    except Exception as exc:
+                        observation.error = observation.error or str(exc)
+    return observation
+
+
 def _install_vad_diagnostics(
     pipeline: RealtimeVoicePipeline,
     observation: VADDiagnosticObservation,
@@ -744,8 +959,21 @@ def main() -> int:
     parser.add_argument("--preflight-hold-seconds", type=float, default=0.0)
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--diagnostic-mode", choices=("silence", "speech-only"))
+    parser.add_argument("--host-api-capture", action="store_true")
+    parser.add_argument("--capture-rate", type=float)
+    parser.add_argument("--silence-seconds", type=float, default=1.5)
     parser.add_argument("--duration-seconds", type=float, default=3.0)
     args = parser.parse_args()
+    if args.host_api_capture:
+        observation = run_host_api_capture(
+            input_device=args.input_device,
+            sample_rate=args.capture_rate,
+            duration_seconds=args.duration_seconds,
+            silence_seconds=args.silence_seconds,
+        )
+        for key, value in observation.report().items():
+            print(f"{key}: {value}")
+        return 0 if not observation.error else 1
     if args.diagnostic_mode:
         observation = asyncio.run(
             run_vad_diagnostic(

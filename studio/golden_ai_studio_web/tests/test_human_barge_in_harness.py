@@ -1,5 +1,7 @@
 from jarvis_core.realtime_voice.human_barge_in_harness import (
     HarnessObservation,
+    HostApiCaptureObservation,
+    RawSignalWindow,
     VADDiagnosticObservation,
     report_dict,
 )
@@ -105,3 +107,36 @@ def test_vad_diagnostic_probability_aggregates_are_numeric():
     assert report["VAD_PROB_MIN"] == 0.05
     assert report["VAD_PROB_MAX"] == 0.8
     assert report["FRAMES_ABOVE_CURRENT_THRESHOLD"] == 2
+
+
+def test_raw_signal_window_reports_aggregate_metrics_without_audio_buffer():
+    window = RawSignalWindow()
+    window.record((0).to_bytes(2, "little", signed=True) * 4, 1.0)
+    window.record((1000).to_bytes(2, "little", signed=True) * 4, 1.1)
+    report = window.report()
+    assert report["FRAME_COUNT"] == 2
+    assert report["RMS_MEAN"] == 500.0
+    assert report["PEAK"] == 1000.0
+    assert report["NONZERO_SAMPLE_PERCENT"] == 50.0
+    assert report["UNIQUE_SAMPLE_COUNT_MAX"] == 1
+    assert report["FRAME_BYTE_CHANGE_DETECTED"] is True
+
+
+def test_host_api_report_requires_human_confirmation_for_signal_usability():
+    observation = HostApiCaptureObservation(
+        device=15,
+        device_name="USB mic",
+        host_api="Windows WASAPI",
+        sample_rate=48000.0,
+        channels=1,
+        duration_seconds=1.0,
+    )
+    observation.silence.rms_sum = 10.0
+    observation.silence.frame_count = 1
+    observation.speech.rms_sum = 100.0
+    observation.speech.frame_count = 1
+    report = observation.report()
+    assert report["SPEECH_TO_SILENCE_DB"] == 20.0
+    assert report["HUMAN_SIGNAL_USABLE"] == "PENDING_HUMAN_CONFIRMATION"
+    observation.human_confirmation = True
+    assert observation.report()["HUMAN_SIGNAL_USABLE"] == "YES"
