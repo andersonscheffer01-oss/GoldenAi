@@ -5,6 +5,7 @@ from .models import Risk, SideEffectClass, Tool
 class ToolRegistry:
     def __init__(self):
         self._tools = {}
+        self._disabled = set()
 
     def register(self, tool: Tool):
         if tool.name in self._tools:
@@ -13,6 +14,21 @@ class ToolRegistry:
 
     def get(self, name):
         return self._tools.get(name)
+
+    def disable(self, name):
+        if name not in self._tools:
+            return False
+        self._disabled.add(name)
+        return True
+
+    def enable(self, name):
+        if name not in self._tools:
+            return False
+        self._disabled.discard(name)
+        return True
+
+    def is_enabled(self, name):
+        return name in self._tools and name not in self._disabled
 
     def resolve_capability(self, capability_name, provider=None):
         """Resolve one logical capability without silent provider replacement."""
@@ -38,6 +54,8 @@ class ToolRegistry:
                 "healthy" if available else "unavailable")
 
     def availability_error(self, tool: Tool):
+        if tool.name in self._disabled:
+            return "Capability desabilitada pelo operador."
         availability, _ = self._runtime_health(tool)
         if availability == "unavailable":
             return "Capability provider indisponível."
@@ -95,23 +113,37 @@ class ToolRegistry:
 
     def capability_catalog(self, names=None):
         allowed = set(names) if names is not None else None
-        return [self.capability_descriptor(tool) for tool in self._tools.values()
-                if allowed is None or tool.name in allowed]
+        catalog = []
+        for tool in self._tools.values():
+            if allowed is not None and tool.name not in allowed:
+                continue
+            descriptor = self.capability_descriptor(tool)
+            if tool.name in self._disabled:
+                descriptor["availability"] = "disabled"
+                descriptor["health"] = "disabled"
+            catalog.append(descriptor)
+        return catalog
 
     def public_catalog(self):
-        return [{"name": t.name, "description": t.description, "risk": t.risk.value,
-                 "confirmation": t.confirmation, "timeout": t.timeout,
-                 "llm_enabled": t.llm_enabled, "parameters": list(t.parameters),
-                 "provider": t.provider,
-                 "capability_name": t.capability_name or t.name,
-                 "priority": t.priority,
-                 "side_effect_class": self._effective_side_effect(t),
-                 "availability": self._runtime_health(t)[0],
-                 "health": self._runtime_health(t)[1],
-                 "provenance": t.provenance}
-                | {"response_policy": t.response_policy.value,
-                   "expected_latency_ms": t.expected_latency_ms}
-                for t in self._tools.values()]
+        catalog = []
+        for tool in self._tools.values():
+            availability, health = self._runtime_health(tool)
+            if tool.name in self._disabled:
+                availability, health = "disabled", "disabled"
+            catalog.append({"name": tool.name, "description": tool.description,
+                            "risk": tool.risk.value,
+                            "confirmation": tool.confirmation, "timeout": tool.timeout,
+                            "llm_enabled": tool.llm_enabled,
+                            "parameters": list(tool.parameters),
+                            "provider": tool.provider,
+                            "capability_name": tool.capability_name or tool.name,
+                            "priority": tool.priority,
+                            "side_effect_class": self._effective_side_effect(tool),
+                            "availability": availability, "health": health,
+                            "provenance": tool.provenance}
+                           | {"response_policy": tool.response_policy.value,
+                              "expected_latency_ms": tool.expected_latency_ms})
+        return catalog
 
     @staticmethod
     def _json_type(value):

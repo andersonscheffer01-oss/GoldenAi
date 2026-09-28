@@ -20,6 +20,7 @@ from .cancellation import CancellationToken
 from .memory import GoldenMemoryManager
 from .memory.boundary import CanonicalMemoryBoundary
 from .memory.models import MemoryCategory, MemorySource
+from .mcp_client import McpClientManager
 from .orchestrator import CentralOrchestrator, JarvisRuntimeCoordinator
 from .task_manager import TaskManager
 
@@ -179,6 +180,7 @@ class JarvisService:
             self.project_memory = None
         self.memory_boundary = CanonicalMemoryBoundary(
             self.memory_v2, self.legacy_memory)
+        self.mcp_clients = McpClientManager()
         self._register_tools()
         self.task_manager = TaskManager(
             base_dir, security=self.security, runtime_mode=task_db_mode)
@@ -319,6 +321,10 @@ class JarvisService:
             from .browser import _browser_thread
             if _browser_thread is not None:
                 _browser_thread.stop()
+        except Exception:
+            pass
+        try:
+            self.mcp_clients.close()
         except Exception:
             pass
 
@@ -598,12 +604,33 @@ class JarvisService:
             "pending": len(self.security.pending),
             "programs": sorted(set(self.PROGRAMS)),
             "tools": self.registry.public_catalog(),
+            "capabilities": self.capability_governance_snapshot(),
             "history": self.audit.recent(20),
             "memory": self._memory_status(),
             "orchestrator": self.orchestrator.status(),
             "tasks": {"active_task_id": self.runtime.active_task_id,
                       "recent": len(self.task_manager.list(limit=20))},
         }
+
+    def capability_governance_snapshot(self):
+        """Return a secret-free capability/server read model for Control Center."""
+        return {
+            "capabilities": self.registry.capability_catalog(),
+            "mcp_servers": self.mcp_clients.health(),
+        }
+
+    def set_capability_enabled(self, name, enabled):
+        changed = (self.registry.enable(name) if enabled
+                   else self.registry.disable(name))
+        return {"ok": changed, "name": name,
+                "enabled": bool(changed and enabled)}
+
+    def set_mcp_server_enabled(self, server_id, enabled):
+        try:
+            return {"ok": True,
+                    "server": self.mcp_clients.set_enabled(server_id, enabled)}
+        except KeyError:
+            return {"ok": False, "error": "MCP server not configured."}
 
     def background_control_snapshot(self, **kwargs):
         """Expose the canonical read-only background control snapshot."""

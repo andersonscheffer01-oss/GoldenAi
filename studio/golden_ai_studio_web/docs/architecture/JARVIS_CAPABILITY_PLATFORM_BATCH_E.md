@@ -212,3 +212,33 @@ MEMORY_PROMOTION_POLICY: EXPLICIT_ONLY
 DUPLICATE_EXECUTION: NOT_OBSERVED
 TESTS: 11_PASSED
 ```
+
+## E5 checkpoint
+
+The existing Control Center-facing service status now includes a bounded,
+secret-free capability governance read model. It reports capability name,
+provider, logical identity, availability, health, side-effect class, approval
+requirements and provenance. It reports configured MCP server identity,
+enabled state, transport, health and running state without exposing command
+arguments, environment values, credentials or tokens.
+
+Capabilities can be disabled and re-enabled through the service boundary;
+disabled capabilities are rejected before handler dispatch and remain present
+in history/audit. MCP servers can be explicitly disabled, which stops their
+owned process and makes imported tools unavailable. Re-enabling does not
+auto-start a server or auto-trust it.
+
+No broad Desktop UI redesign was necessary for this gate. The backend read
+model is ready for a later small Control Center presentation change.
+
+```yaml
+E5_STATUS: PASS_WITH_RESTRICTIONS
+CONTROL_CENTER_IMPLEMENTATION: BACKEND_READ_MODEL
+BACKEND_READ_MODEL: PASS
+SERVER_ENABLE_DISABLE: PASS
+CAPABILITY_ENABLE_DISABLE: PASS
+HEALTH_VISIBLE: YES
+SECURITY_VISIBLE: YES
+SECRETS_VISIBLE: NO
+TESTS: 9_PASSED
+```

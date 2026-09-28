@@ -13,7 +13,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -372,6 +372,13 @@ class McpClientManager:
 
     def health(self) -> list[dict[str, Any]]:
         return [client.health() for client in self._clients.values()]
+
+    def set_enabled(self, server_id: str, enabled: bool) -> dict[str, Any]:
+        client = self._require(server_id)
+        client.config = replace(client.config, enabled=bool(enabled))
+        if not enabled:
+            client.stop()
+        return client.health()
 
     def stop(self, server_id: Optional[str] = None):
         clients = ([self._require(server_id)] if server_id else list(self._clients.values()))
