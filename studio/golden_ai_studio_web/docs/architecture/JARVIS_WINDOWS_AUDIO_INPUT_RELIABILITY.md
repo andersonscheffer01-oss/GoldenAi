@@ -172,3 +172,44 @@ unchanged.
 
 The next permitted step is a controlled real-microphone validation with a
 human present. Real-speech VAD and barge-in remain later gates.
+
+## Controlled real-microphone validation
+
+Baseline under test: `eae9543`, with one necessary follow-up fix to normalize
+the `sounddevice.default.device` `_InputOutputPair` returned by the installed
+PortAudio binding.
+
+The single authorized human attempt used the resolved default endpoint:
+
+- device: `Microfone (3- USB Audio Device)`
+- host API: `MME`
+- runtime index: `1`
+- native rate: `44100 Hz`
+- generation: `1`
+- canonical output: `16000 Hz`, mono, PCM16
+- human confirmation: `SIM`
+
+The confirmed speech window produced the following in-memory metrics:
+
+| Metric | Silence | Speech |
+| --- | ---: | ---: |
+| RMS mean | 169.56 | 1566.11 |
+| RMS max | 169.56 | 1566.11 |
+| peak | 14566 | 23494 |
+
+Speech min/max were `-14774 / 23494`, nonzero sample percentage was `31.04%`,
+and unique sample count was `7268`. The speech-to-silence RMS ratio was
+`9.2365` (`19.31 dB`). This is a clear usable-signal increase for the same
+execution; it does not prove repeatability from one attempt.
+
+The run observed `2870` native callback frames and `2857` canonical frames,
+with `13` raw-queue drops, `2560` canonical-queue drops, `0` input overflows,
+and a maximum observed delivery gap of `32.54 ms`. The canonical queue drops
+include the period after the speech window while the stream remained open for
+the required human confirmation; they are reported as evidence of bounded
+backpressure, not hidden. No VAD inference was run in this gate.
+
+Teardown passed: stream stopped and closed, conversion worker stopped, no
+native worker remained, and the process exited with code `0`. No audio, WAV,
+transcript, or remote data was persisted. The next gate is real-speech VAD
+observation; barge-in remains blocked until that gate is separately authorized.
