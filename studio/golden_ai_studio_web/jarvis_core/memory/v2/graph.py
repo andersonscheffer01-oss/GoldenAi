@@ -55,6 +55,11 @@ RELATION_CATALOG: Dict[str, tuple] = {
     "resulted_in": (EdgeDirection.DIRECTED, "resulted_from", False),
     "documented_by": (EdgeDirection.DIRECTED, "documents", False),
     "runs_on": (EdgeDirection.DIRECTED, "hosts", False),
+    "supports": (EdgeDirection.DIRECTED, "supported_by", False),
+    "contradicts": (EdgeDirection.DIRECTED, "contradicted_by", False),
+    "derived_from": (EdgeDirection.DIRECTED, "source_of", False),
+    "supersedes": (EdgeDirection.DIRECTED, "superseded_by", False),
+    "revises": (EdgeDirection.DIRECTED, "revised_by", False),
 }
 
 # Ordem de restrição: PUBLIC < INTERNAL < SENSITIVE < SECRET.

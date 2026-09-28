@@ -5512,6 +5512,12 @@ void OnTick()
             "/api/jarvis/voice/status": lambda d: self._api_jarvis_voice_status(d),
             "/api/jarvis/chat": lambda d: self._api_jarvis_chat(d),
             "/api/jarvis/golden/overview": lambda d: self._api_jarvis_golden_overview(d),
+            "/api/jarvis/golden/radar": lambda d: self._api_jarvis_golden_radar(d),
+            "/api/jarvis/golden/risk": lambda d: self._api_jarvis_golden_risk(d),
+            "/api/jarvis/golden/validation": lambda d: self._api_jarvis_golden_validation(d),
+            "/api/jarvis/golden/deep-analysis": lambda d: self._api_jarvis_golden_deep_analysis(d),
+            "/api/jarvis/golden/recovery-manifest": lambda d: self._api_jarvis_golden_recovery_manifest(d),
+            "/api/jarvis/memory/scientific": lambda d: self._api_jarvis_scientific_memory(d),
             "/api/jarvis/brain/status": lambda d: self._api_jarvis_brain_status(d),
             "/api/jarvis/brain/execute": lambda d: self._api_jarvis_brain_execute(d),
             "/api/jarvis/vision/analyze": lambda d: self._api_jarvis_vision_analyze(d),
@@ -6163,6 +6169,49 @@ void OnTick()
         except Exception as exc:
             return {"ok": False, "status": "UNAVAILABLE",
                     "error": type(exc).__name__}
+
+    def _execute_jarvis_read(self, tool_name, arguments=None):
+        try:
+            from desktop_center import DESKTOP_CENTER
+            return DESKTOP_CENTER.service.execute_tool(
+                tool_name, arguments or {}, command="control_center_golden_b2_read",
+                task_id="control_center",
+            )
+        except Exception as exc:
+            return {"ok": False, "status": "UNAVAILABLE", "error": type(exc).__name__}
+
+    def _api_jarvis_golden_radar(self, data):
+        payload = data or {}
+        return self._execute_jarvis_read("golden_radar_detail", {
+            "symbol": str(payload.get("symbol") or ""),
+            "timeframe": str(payload.get("timeframe") or "M15"),
+            "correlation_id": str(payload.get("correlation_id") or ""),
+        })
+
+    def _api_jarvis_golden_risk(self, data):
+        return self._execute_jarvis_read("golden_risk_detail")
+
+    def _api_jarvis_golden_validation(self, data):
+        payload = data or {}
+        return self._execute_jarvis_read("golden_validation_detail", {
+            "limit": int(payload.get("limit") or 20),
+        })
+
+    def _api_jarvis_golden_deep_analysis(self, data):
+        payload = data or {}
+        return self._execute_jarvis_read("golden_deep_analysis_detail", {
+            "symbol": str(payload.get("symbol") or "XAUUSD"),
+            "correlation_id": str(payload.get("correlation_id") or ""),
+        })
+
+    def _api_jarvis_golden_recovery_manifest(self, data):
+        payload = data or {}
+        return self._execute_jarvis_read("golden_recovery_manifest", {
+            "root": str(payload.get("root") or ""),
+        })
+
+    def _api_jarvis_scientific_memory(self, data):
+        return self._execute_jarvis_read("scientific_memory_status")
 
     def _api_jarvis_voice_service_listen(self, data):
         try:

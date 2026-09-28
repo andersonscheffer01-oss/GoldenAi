@@ -13,11 +13,13 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 
 from .audit import AuditLog
+from .b2_contracts import FRESHNESS_POLICIES
 from .models import AgentState, BROWSER_READ, ResponsePolicy, Risk, SideEffectClass, Tool
 from .registry import ToolRegistry
 from .security import READ_ONLY_PUBLIC_BROWSER_OBSERVATION, SecurityManager
 from .cancellation import CancellationToken
 from .golden_bridge import GoldenReadBridge
+from .scientific_memory import CanonicalScientificMemory
 from .memory import GoldenMemoryManager
 from .memory.boundary import CanonicalMemoryBoundary
 from .memory.models import MemoryCategory, MemorySource
@@ -182,6 +184,7 @@ class JarvisService:
             self.project_memory = None
         self.memory_boundary = CanonicalMemoryBoundary(
             self.memory_v2, self.legacy_memory)
+        self.scientific_memory = CanonicalScientificMemory(self.memory_v2)
         # Robot intelligence remains a bounded Jarvis read model. Discovery
         # is explicit and never opens MT5, starts a tester, or writes memory.
         service_root = Path(__file__).resolve().parents[1]
@@ -609,6 +612,58 @@ class JarvisService:
                  security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
                  provider="jarvis_core", provenance="golden_bridge",
                  capability_name="golden.mt5_read"),
+            # --- GOLDEN / MEMORY B2 READ CONTRACTS ---
+            Tool("golden_radar_detail", "Lê o read model detalhado do Radar sem executar ações.",
+                 self.golden_radar_detail, Risk.LOW, timeout=45,
+                 parameters={"symbol": str, "timeframe": str, "correlation_id": str},
+                 category="golden_b2", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.radar.detail"),
+            Tool("golden_risk_detail", "Lê cálculos e contexto de risco sem autorizar ação.",
+                 self.golden_risk_detail, Risk.LOW, timeout=35,
+                 category="golden_b2", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.risk.detail"),
+            Tool("golden_validation_detail", "Lê evidências de validação classificadas.",
+                 self.golden_validation_detail, Risk.LOW, timeout=25,
+                 parameters={"limit": int}, category="golden_b2", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.validation.detail"),
+            Tool("golden_deep_analysis_detail", "Lê contexto estruturado de análise profunda sem chamar modelo.",
+                 self.golden_deep_analysis_detail, Risk.LOW, timeout=45,
+                 parameters={"symbol": str, "correlation_id": str},
+                 category="golden_b2", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="golden_bridge",
+                 capability_name="golden.deep_analysis.detail"),
+            Tool("golden_recovery_manifest", "Gera manifesto determinístico de candidatos legacy sem importar dados.",
+                 self.golden_recovery_manifest, Risk.LOW, timeout=45,
+                 parameters={"root": str}, category="golden_b2", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="b2_contracts",
+                 capability_name="golden.recovery_manifest"),
+            Tool("scientific_memory_contract", "Expõe contratos científicos sobre a memória canônica.",
+                 self.scientific_memory_contract, Risk.LOW, timeout=10,
+                 category="golden_b2", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="scientific_memory",
+                 capability_name="memory.scientific.contract"),
+            Tool("scientific_memory_status", "Consulta o estado da memória científica canônica.",
+                 self.scientific_memory_status, Risk.LOW, timeout=15,
+                 category="golden_b2", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="scientific_memory",
+                 capability_name="memory.scientific.status"),
             # --- ROBOT INTELLIGENCE (SOMENTE LEITURA) ---
             Tool("robot_catalog_discover", "Descobre robos e evidencias locais sem executar MT5.",
                  self.discover_robot_catalog, Risk.LOW, timeout=90, category="robot_catalog",
@@ -773,6 +828,44 @@ class JarvisService:
 
     def golden_mt5_read_snapshot(self):
         return self.golden_bridge.mt5_read_snapshot()
+
+    def golden_radar_detail(self, symbol="", timeframe="M15", correlation_id=""):
+        return self.golden_bridge.radar_detail(str(symbol or ""),
+                                               str(timeframe or "M15"),
+                                               str(correlation_id or ""))
+
+    def golden_risk_detail(self):
+        return self.golden_bridge.risk_detail()
+
+    def golden_validation_detail(self, limit=20):
+        return self.golden_bridge.validation_detail(int(limit or 20))
+
+    def golden_deep_analysis_detail(self, symbol="XAUUSD", correlation_id=""):
+        return self.golden_bridge.deep_analysis_detail(
+            str(symbol or "XAUUSD"), str(correlation_id or ""))
+
+    def golden_recovery_manifest(self, root=""):
+        base = str(root or Path(__file__).resolve().parents[3])
+        return self.golden_bridge.recovery_manifest(base)
+
+    def scientific_memory_contract(self):
+        return {"ok": True, "read_only": True, "authority": "CanonicalMemoryBoundary",
+                "schema_change_required": False, "import_executed": False,
+                "matrix": self.scientific_memory.contract_matrix()}
+
+    def scientific_memory_status(self):
+        return {"ok": True, "read_only": True,
+                "contract": self.scientific_memory.status(),
+                "matrix": self.scientific_memory.contract_matrix(),
+                "schema_change_required": False, "import_executed": False}
+
+    @staticmethod
+    def golden_provenance_policy():
+        return {"ok": True, "read_only": True, "observed_at_never_inferred": True,
+                "freshness_states": ["FRESH", "RECENT", "STALE", "UNKNOWN", "UNAVAILABLE"],
+                "policies": {name: {"fresh_seconds": value.fresh_seconds,
+                                    "recent_seconds": value.recent_seconds}
+                             for name, value in FRESHNESS_POLICIES.items()}}
 
     def discover_robot_catalog(self):
         """Run controlled local discovery through the canonical Jarvis owner."""

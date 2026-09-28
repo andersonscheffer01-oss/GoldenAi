@@ -92,6 +92,11 @@ class RelationType(str, Enum):
     RESULTED_IN = "resulted_in"  # M1.2
     DOCUMENTED_BY = "documented_by"  # M1.2
     RUNS_ON = "runs_on"  # M1.2
+    SUPPORTS = "supports"
+    CONTRADICTS = "contradicts"
+    DERIVED_FROM = "derived_from"
+    SUPERSEDES = "supersedes"
+    REVISES = "revises"
 
 
 class MatchSource(str, Enum):

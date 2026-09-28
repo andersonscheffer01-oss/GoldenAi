@@ -1323,6 +1323,8 @@ async function runBoot() {
 async function refreshGoldenBridge() {
   const state = $("#gGoldenBridgeState");
   const output = $("#gGoldenBridgeSummary");
+  const radarOutput = $("#gGoldenRadarDetail");
+  const memoryOutput = $("#gScientificMemorySummary");
   if (!state || !output) return;
   state.textContent = "CONSULTANDO";
   output.textContent = "Consultando read model...";
@@ -1341,9 +1343,30 @@ async function refreshGoldenBridge() {
     state.textContent = "READ-ONLY";
     output.textContent = `Capabilities: ${capabilities} · Robôs catalogados: ${robots} · `
       + `Evidências: ${runs} · Matching existente: ${matching.join(", ") || "UNKNOWN"}`;
+    const [radar, memory] = await Promise.all([
+      window.Gateway?.httpPost?.("/api/jarvis/golden/radar", {
+        symbol: "XAUUSD", timeframe: "M15",
+      }),
+      window.Gateway?.httpPost?.("/api/jarvis/memory/scientific", {}),
+    ]);
+    if (radarOutput) {
+      const radarData = radar?.data || {};
+      radarOutput.textContent = `Radar: ${radar?.availability || "UNKNOWN"} · `
+        + `Ativos: ${radarData.market_map?.length ?? 0} · `
+        + `Notícias: ${radarData.news?.length ?? 0} · `
+        + `Freshness: ${radar?.freshness || "UNKNOWN"}`;
+    }
+    if (memoryOutput) {
+      const contract = memory?.contract || {};
+      memoryOutput.textContent = `Memória científica: ${contract.status || "UNKNOWN"} · `
+        + `Schema change: ${contract.schema_change_required ? "YES" : "NO"} · `
+        + `Import: ${contract.import_executed ? "YES" : "NO"}`;
+    }
   } catch (error) {
     state.textContent = "UNAVAILABLE";
     output.textContent = error?.message || "Read bridge indisponível";
+    if (radarOutput) radarOutput.textContent = "Radar: UNAVAILABLE";
+    if (memoryOutput) memoryOutput.textContent = "Memória científica: UNAVAILABLE";
   }
 }
 

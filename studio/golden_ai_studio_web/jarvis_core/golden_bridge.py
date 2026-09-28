@@ -11,6 +11,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from .b2_contracts import (EvidenceClass, FreshnessState, build_recovery_manifest,
+                           provenance_for_payload, utc_now)
+
 
 READ_ONLY = "READ_ONLY"
 NO_SIDE_EFFECT = "NO_SIDE_EFFECT"
@@ -20,7 +23,7 @@ STALE = "STALE"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return utc_now()
 
 
 def _json(value: Any) -> Any:
@@ -126,7 +129,14 @@ def _envelope(capability_id: str, payload: Any, source_module: str,
               evidence_class: str = "CALCULATED") -> dict[str, Any]:
     data = _json(payload)
     availability, health, stale = _availability(data)
-    now = _now()
+    provenance = provenance_for_payload(
+        data, source_module, source_type="GOLDEN_LEGACY",
+        evidence_class=evidence_class,
+        capability=capability_id.rsplit(".", 1)[-1],
+    ).to_dict()
+    provenance.update({"source_module": source_module,
+                       "calculation_origin": provenance.get("calculation_origin")
+                       or "existing_golden_implementation"})
     return {
         "ok": isinstance(data, dict) and data.get("ok", True) is not False,
         "capability_id": capability_id,
@@ -135,14 +145,14 @@ def _envelope(capability_id: str, payload: Any, source_module: str,
         "security_state": "READ_ONLY_NO_SIDE_EFFECT",
         "availability": availability,
         "health": health,
-        "freshness": STALE if stale and availability == STALE else availability,
+        "freshness": (FreshnessState.STALE.value if stale and availability == STALE
+                       else provenance["freshness_state"]),
         "stale": stale,
         "evidence_class": evidence_class,
-        "observed_at": now,
-        "received_at": now,
-        "provenance": {
-            "source_module": source_module,
-            "calculation_origin": "existing_golden_implementation",
+        "observed_at": provenance.get("observed_at"),
+        "received_at": provenance.get("received_at"),
+        "content_fingerprint": provenance.get("content_fingerprint"),
+        "provenance": provenance | {
             "provider": (data.get("source") if isinstance(data, dict) else None) or source_module,
         },
         "data": data,
@@ -188,6 +198,9 @@ def _normalize_scan(raw: Any) -> dict[str, Any]:
         "risk_reward": value.get("risk_reward", value.get("best_rr")),
         "confluence": value.get("confluence", value.get("best_confluence")),
         "setup_conditions": value.get("setup_conditions", value.get("best_conditions_met", [])),
+        "status": value.get("status", value.get("setup_status", "UNKNOWN")),
+        "alert": value.get("alert", value.get("alert_state", "UNKNOWN")),
+        "daily_movement": value.get("daily_movement", value.get("daily_pips")),
         "indicators": {
             "RSI_H1": value.get("RSI_H1", value.get("rsi_h1")),
             "RSI_M15": value.get("RSI_M15", value.get("rsi_m15")),
@@ -235,6 +248,43 @@ class GoldenReadBridge:
             return overview
         return _safe("golden.radar", "market_data.py", read)
 
+    def radar_detail(self, symbol: str = "", timeframe: str = "M15",
+                     correlation_id: str = "") -> dict[str, Any]:
+        """Project existing Radar providers without copying the Radar UI."""
+        def read():
+            import market_data
+            overview = market_data.get_market_overview()
+            chart = (market_data.get_market_chart(symbol, timeframe)
+                     if symbol else {"status": "NOT_REQUESTED", "ok": True})
+            assets = overview.get("assets") or []
+            groups = {}
+            for item in assets:
+                groups.setdefault(str(item.get("group") or "UNKNOWN"), []).append(item)
+            return {
+                "market_map": assets,
+                "gold": overview.get("gold") or overview.get("gold_levels"),
+                "gold_levels": overview.get("gold_levels"),
+                "forex": groups.get("Forex", []),
+                "indices": groups.get("Indices", []),
+                "crypto": groups.get("Cripto", groups.get("Crypto", [])),
+                "news": overview.get("news", []),
+                "technical_state": chart,
+                "support_resistance": chart.get("levels", []) if isinstance(chart, dict) else [],
+                "currency_strength": overview.get("currency_strength", "UNAVAILABLE"),
+                "market_sessions": overview.get("sessions", "UNAVAILABLE"),
+                "macro_indicators": (overview.get("macro") or {}).get("indicators", []),
+                "economic_calendar": overview.get("economic_calendar", []),
+                "opportunity_ranking": overview.get("ranking", "UNAVAILABLE"),
+                "validation_pipeline": overview.get("validation", "UNAVAILABLE"),
+                "performance": overview.get("performance", "UNAVAILABLE"),
+                "source_integrity": {"sources": overview.get("sources", []),
+                                     "configured": overview.get("configured", {})},
+                "replay_metadata": overview.get("replay_metadata", "UNAVAILABLE"),
+                "updated_at": overview.get("updated_at"),
+                "source": "market_data.py",
+            }
+        return _safe("golden.radar", "market_data.py", read)
+
     def market_context(self, symbol: str = "XAUUSD", timeframe: str = "M15") -> dict[str, Any]:
         def read():
             from market_data import get_market_ai_context
@@ -261,6 +311,29 @@ class GoldenReadBridge:
     def risk(self) -> dict[str, Any]:
         from .tools.market_readonly import golden_risk_status
         return _safe("golden.risk_engine", "risk_engine.py", golden_risk_status)
+
+    def risk_detail(self) -> dict[str, Any]:
+        def read():
+            from .tools.market_readonly import golden_risk_status
+            result = golden_risk_status()
+            risk = result.get("risk") or {}
+            return {
+                "risk_per_trade": risk.get("risk_per_trade_pct"),
+                "lot_sizing": risk.get("lot_size") or risk.get("lot_sizing", "UNAVAILABLE"),
+                "sl": risk.get("sl") or risk.get("stop_loss", "UNAVAILABLE"),
+                "tp": risk.get("tp") or risk.get("take_profit", "UNAVAILABLE"),
+                "rr": risk.get("rr") or risk.get("risk_reward", "UNAVAILABLE"),
+                "spread_constraints": risk.get("spread_constraints", "UNAVAILABLE"),
+                "exposure": risk.get("correlation_report", risk.get("exposure", "UNAVAILABLE")),
+                "portfolio_constraints": risk.get("details", "UNAVAILABLE"),
+                "risk_state": result.get("status", "UNKNOWN"),
+                "calculation_inputs": risk.get("inputs", "UNAVAILABLE"),
+                "calculation_outputs": risk,
+                "security_authority": "SecurityManager; RiskEngine never authorizes action",
+                "source": "risk_engine.py",
+                "updated_at": result.get("timestamp"),
+            }
+        return _safe("golden.risk_engine", "risk_engine.py", read)
 
     def strategy_summary(self) -> dict[str, Any]:
         def read():
@@ -293,6 +366,24 @@ class GoldenReadBridge:
         return _safe("golden.validation", "mt5_backtest.py", read,
                      evidence_class="HISTORICAL_EVIDENCE")
 
+    def validation_detail(self, limit: int = 20) -> dict[str, Any]:
+        result = self.validation_summary(limit)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        history = data.get("history") or []
+        classified = []
+        for item in history:
+            row = dict(item) if isinstance(item, dict) else {"value": item}
+            raw_class = str(row.get("evidence_class") or row.get("evidence_type") or "HISTORICAL_EVIDENCE").upper()
+            allowed = {item.value for item in EvidenceClass}
+            row["evidence_class"] = raw_class if raw_class in allowed else EvidenceClass.UNKNOWN.value
+            classified.append(row)
+        if isinstance(data, dict):
+            data["history"] = classified
+            data["evidence_classes"] = [item.value for item in EvidenceClass]
+            data["forward_evidence"] = [item for item in classified if item.get("forward") is True]
+        result["data"] = data
+        return result
+
     def deep_analysis_context(self, symbol: str = "XAUUSD") -> dict[str, Any]:
         def read():
             from market_data import get_market_ai_context
@@ -300,6 +391,39 @@ class GoldenReadBridge:
                     "execution_authority": "NONE",
                     "provider_routing": "Jarvis ModelRouter remains owner"}
         return _safe("golden.deep_analysis", "market_data.py", read)
+
+    def deep_analysis_detail(self, symbol: str = "XAUUSD",
+                             correlation_id: str = "") -> dict[str, Any]:
+        def read():
+            from market_data import get_market_ai_context
+            context = get_market_ai_context(symbol)
+            strategy = {}
+            try:
+                from meta_strategy import analyze_symbol
+                strategy = analyze_symbol(symbol)
+            except Exception as exc:
+                strategy = {"status": "UNAVAILABLE", "error": type(exc).__name__}
+            return {
+                "technical": context.get("multitimeframe", {}),
+                "multi_timeframe": context.get("multitimeframe", {}),
+                "regime": strategy.get("regime", "UNAVAILABLE"),
+                "support_resistance": [item.get("levels", []) for item in context.get("multitimeframe", {}).values()],
+                "scanner": strategy.get("market_snapshot", "UNAVAILABLE"),
+                "strategy": {key: strategy.get(key) for key in ("best_opportunity", "ranked_setups", "blocked_setups")},
+                "risk": strategy.get("risk", "UNAVAILABLE"),
+                "macro": context.get("fundamentals", "UNAVAILABLE"),
+                "news_events": context.get("fundamentals", {}).get("events", []) if isinstance(context.get("fundamentals"), dict) else [],
+                "history": "UNAVAILABLE",
+                "performance": "UNAVAILABLE",
+                "correlation": "UNAVAILABLE",
+                "ai_model_context": {"model_called": False, "provider": "NONE"},
+                "source": "market_data.py + meta_strategy.py",
+                "updated_at": context.get("updated_at") or strategy.get("generated_at"),
+            }
+        return _safe("golden.deep_analysis", "market_data.py + meta_strategy.py", read)
+
+    def recovery_manifest(self, root: str) -> dict[str, Any]:
+        return build_recovery_manifest(root)
 
     def robot_catalog_summary(self) -> dict[str, Any]:
         if self.robot_catalog is None:
