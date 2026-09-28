@@ -139,6 +139,7 @@ def test_catalog_persists_compile_and_test_evidence_without_execution(tmp_path):
     detail = reopened.detail(robot_id)["robot"]
     assert detail["compile_evidence_count"] == 1
     assert detail["test_run_count"] == 1
+    assert detail["parameter_set_count"] == 1
     assert detail["latest_test_status"] == "PLANNED"
     reopened.close()
 

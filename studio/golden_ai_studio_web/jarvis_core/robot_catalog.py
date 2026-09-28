@@ -757,6 +757,10 @@ class RobotCatalogReadModel:
                 record.compile_evidence.append(evidence)
             elif kind == "TEST_RUN" and evidence not in record.test_runs:
                 record.test_runs.append(evidence)
+            if kind == "TEST_RUN":
+                parameters = evidence.get("manifest", {}).get("parameters")
+                if isinstance(parameters, dict) and parameters not in record.parameter_sets:
+                    record.parameter_sets.append(parameters)
         if record.test_runs:
             record.latest_test_status = str(record.test_runs[-1].get("status") or
                                             record.test_runs[-1].get("identity", {}).get("status") or
@@ -1041,6 +1045,9 @@ class RobotCatalogReadModel:
             record.test_runs = [existing for existing in record.test_runs
                                 if existing.get("test_run_id") != item["test_run_id"]]
             record.test_runs.append(item)
+            parameter_set = manifest.get("parameters")
+            if isinstance(parameter_set, dict) and parameter_set not in record.parameter_sets:
+                record.parameter_sets.append(parameter_set)
             record.latest_test_status = str(item["status"])
             if self._store:
                 self._store.save_evidence("TEST_RUN", item)
