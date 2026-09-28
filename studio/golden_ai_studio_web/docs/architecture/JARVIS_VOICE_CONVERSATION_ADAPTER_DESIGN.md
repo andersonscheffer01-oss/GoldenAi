@@ -11,6 +11,31 @@ conversation patterns from Pipecat, LiveKit Agents, and Wyoming. It does not
 implement production code, add dependencies, run the real-speech VAD gate, or
 replace any Golden owner.
 
+## Adapter 1 implementation status
+
+`VOICE_ADAPTER_1` is now implemented as a pure deterministic decision engine
+in `jarvis_core/realtime_voice/semantic_turn.py`. It preserves the approved
+contract and returns only `CONTINUE_LISTENING`, `LIKELY_COMPLETE`, `COMPLETE`,
+or `UNCERTAIN`, with bounded reason codes and the unchanged
+`session_id`/`turn_id`/`utterance_id`/`epoch` identity.
+
+The implementation is deliberately not wired into `VoiceService` or
+`RealtimeVoicePipeline`; that integration belongs to `VOICE_ADAPTER_2`. It has
+no Core, SecurityManager, STT, TTS, audio, filesystem, network, or model
+dependency. Its first strategy is a small PT-BR-aware heuristic set that keeps
+unfinished trailing connectives and ellipses open, requires the existing
+acoustic endpoint for completion, and falls back deterministically when the
+bounded continuation window expires.
+
+Offline coverage is in `tests/test_semantic_turn.py` and includes incomplete
+Portuguese phrases, continuation, complete phrases, natural pauses, ambiguity,
+timeout fallback, malformed timing, Unicode, identity preservation, partial
+transcripts, speech-active precedence, repeatability, and no-side-effect
+behavior.
+
+Known limitation: this adapter does not fix `CORE_GENERATION_CANCEL: PARTIAL`
+and does not tune Silero VAD, `HybridEndpoint`, or `TurnManager`.
+
 ## Non-negotiable architecture
 
 ```yaml
