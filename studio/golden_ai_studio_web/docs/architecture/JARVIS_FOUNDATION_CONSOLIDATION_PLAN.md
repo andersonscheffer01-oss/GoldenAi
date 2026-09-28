@@ -358,6 +358,38 @@ No ownership convergence, security bypass repair, audit consolidation,
 model-router consolidation, memory migration, device-registry change or
 hardware activity was performed in F2.
 
+### F2.1 task lifecycle evidence
+
+F2.1 completed with an explicit two-phase lifecycle for the owned scheduler
+and runner:
+
+```yaml
+REQUEST_STOP: TaskManager.request_shutdown() / shutdown(wait=False)
+FINAL_JOIN_AND_CLOSE: TaskManager.finalize_shutdown() / shutdown(wait=True)
+```
+
+The scheduler no longer discards a live thread reference after a timed join.
+The final path joins the worker without a timeout, then shuts down the task
+runner pool with `wait=True`. `JarvisService.close()` now uses that final path.
+Repeated finalization is idempotent. The nonblocking request path remains
+available for callers that intentionally cannot wait immediately.
+
+The F2 `WinError 32` cleanup failure was fixed at its ownership boundary:
+the final shutdown joins the scheduler before the temporary/runtime directory
+is removed. No sleep, delete retry, forced garbage collection, ignored error
+or process termination was introduced. Focused tests verified normal
+shutdown, nonblocking request semantics, final join, no live scheduler worker,
+double shutdown, scheduler restart, and immediate temporary DB cleanup.
+
+```yaml
+F2_1_STATUS: PASS
+THREAD_JOIN_CONFIRMED: YES
+SQLITE_RELEASE_CONFIRMED: YES
+DOUBLE_SHUTDOWN: PASS
+ZOMBIE_WORKERS: NO
+SCHEDULER_BEHAVIOR_CHANGED: NO
+```
+
 ### F3 - Security convergence
 
 Route legacy server tool authorization through a Jarvis security adapter. Preserve root ExecutionService only as a translated compatibility API. Add regressions for read, write, command, browser, plugin and confirmation paths.

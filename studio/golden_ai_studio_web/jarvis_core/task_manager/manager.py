@@ -41,6 +41,8 @@ class TaskManager:
                 run_id, record_audit=False),
             recovery_eligibility=lambda run_id: self.get_recovery_eligibility(
                 run_id, record_audit=False))
+        self._shutdown_requested = False
+        self._shutdown_complete = False
 
     def create(self, plan):
         plan = PlannerContracts.validate(plan)
@@ -575,9 +577,29 @@ class TaskManager:
                             actor="background_control"):
         return self.deny_background_approval(approval_id, confirmation_token, actor)
 
+    def request_shutdown(self):
+        """Request stop without waiting for owned workers to finish."""
+        if self._shutdown_complete:
+            return
+        self._shutdown_requested = True
+        self.scheduler.stop(wait=False)
+        self.runner.shutdown(wait=False)
+
+    def finalize_shutdown(self):
+        """Join owned workers and complete final resource shutdown."""
+        if self._shutdown_complete:
+            return
+        self._shutdown_requested = True
+        self.scheduler.stop(wait=True)
+        self.runner.shutdown(wait=True)
+        self._shutdown_complete = True
+
     def shutdown(self, wait=True):
-        self.scheduler.stop(wait=wait)
-        self.runner.shutdown(wait=wait)
+        """Preserve the API while exposing request and final shutdown phases."""
+        if wait:
+            self.finalize_shutdown()
+        else:
+            self.request_shutdown()
 
     @staticmethod
     def _validate_persistence(plan):

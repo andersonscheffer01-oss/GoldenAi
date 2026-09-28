@@ -302,7 +302,7 @@ class JarvisService:
             return
         self._closed = True
         try:
-            self.task_manager.shutdown(wait=False)
+            self.task_manager.finalize_shutdown()
         except Exception:
             pass
         try:

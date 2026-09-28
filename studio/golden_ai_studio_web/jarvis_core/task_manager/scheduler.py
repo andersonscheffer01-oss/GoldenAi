@@ -84,11 +84,14 @@ class BackgroundTaskScheduler:
             self._thread.start()
 
     def stop(self, wait=True):
+        """Request stop, optionally completing the owned worker join."""
         self._stop.set()
         thread = self._thread
         if wait and thread and thread is not threading.current_thread():
-            thread.join(timeout=max(1.0, self.tick_interval * 3))
-        self._thread = None
+            thread.join()
+        if not thread or not thread.is_alive():
+            self._thread = None
+        return not self._thread or not self._thread.is_alive()
 
     def status(self):
         """Return scheduler health without touching task or run state."""
