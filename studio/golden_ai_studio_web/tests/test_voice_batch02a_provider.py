@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import time
+
+import numpy as np
 
 from jarvis_core.realtime_voice.audio_input import (
     AudioInputProvider,
     FakeAudioInputProvider,
 )
 from jarvis_core.realtime_voice.audio_queue import AudioFrameQueue
-from jarvis_core.realtime_voice.constants import FRAME_BYTES
+from jarvis_core.realtime_voice.constants import FRAME_BYTES, FRAME_SAMPLES
 
 
 def _frame(value: int = 1) -> bytes:
@@ -149,3 +152,135 @@ def test_fake_provider_restart_and_queue_cancellation_are_safe():
         assert provider.stop()["ok"] is True
 
     asyncio.run(exercise())
+
+
+def _device_snapshot(devices, default_device=1):
+    return {
+        "devices": devices,
+        "hostapis": [{"name": "MME"}, {"name": "WASAPI"}],
+        "default_device": default_device,
+    }
+
+
+def _mic(name="Microfone USB", hostapi=0, rate=48000, channels=2):
+    return {
+        "name": name,
+        "hostapi": hostapi,
+        "max_input_channels": channels,
+        "default_samplerate": rate,
+    }
+
+
+class _CapturedStream:
+    def __init__(self, kwargs, streams):
+        self.kwargs = kwargs
+        self.streams = streams
+        self.closed = False
+        streams.append(self)
+
+    def start(self):
+        return None
+
+    def stop(self):
+        return None
+
+    def close(self):
+        self.closed = True
+
+
+def test_native_rate_and_stereo_are_converted_to_canonical_frames():
+    streams = []
+    queue = AudioFrameQueue(maxsize=4)
+    snapshot = lambda: _device_snapshot([{"name": "Speakers", "hostapi": 0, "max_input_channels": 0}, _mic()])
+    provider = AudioInputProvider(
+        frame_queue=queue,
+        device=1,
+        stream_factory=lambda **kwargs: _CapturedStream(kwargs, streams),
+        device_query=snapshot,
+    )
+
+    result = provider.start()
+    assert result["ok"] is True
+    assert streams[0].kwargs["samplerate"] == 48000
+    assert streams[0].kwargs["channels"] == 2
+    assert streams[0].kwargs["blocksize"] == 1440
+
+    stereo = np.zeros((1440, 2), dtype=np.int16)
+    stereo[:, 0] = 1000
+    stereo[:, 1] = 3000
+    streams[0].kwargs["callback"](stereo.tobytes(), 1440, None, None)
+
+    deadline = time.monotonic() + 3.0
+    while queue.qsize == 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert queue.qsize == 1
+    assert len(queue._queue.get_nowait()) == FRAME_BYTES
+    assert provider.diagnostics()["native_samplerate"] == 48000
+    assert provider.diagnostics()["canonical_frames_delivered"] == 1
+    provider.stop()
+    assert provider._conversion_thread is None
+
+
+def test_numeric_index_is_reresolved_by_logical_identity_after_reordering():
+    snapshots = [
+        _device_snapshot([{"name": "Speakers", "hostapi": 0, "max_input_channels": 0}, _mic(rate=44100, channels=1)]),
+        _device_snapshot([{"name": "Speakers", "hostapi": 0, "max_input_channels": 0}, {"name": "Other mic", "hostapi": 0, "max_input_channels": 1, "default_samplerate": 16000}, _mic(rate=44100, channels=1)], default_device=2),
+    ]
+    streams = []
+    provider = AudioInputProvider(
+        device=1,
+        stream_factory=lambda **kwargs: _CapturedStream(kwargs, streams),
+        device_query=lambda: snapshots.pop(0),
+    )
+
+    assert provider.start()["resolved_device"] == 1
+    provider.stop()
+    assert provider.start()["resolved_device"] == 2
+    assert streams[-1].kwargs["device"] == 2
+    provider.stop()
+
+
+def test_missing_intended_device_is_rejected_without_unrelated_fallback():
+    created = []
+    provider = AudioInputProvider(
+        device="Microfone USB",
+        stream_factory=lambda **kwargs: created.append(kwargs),
+        device_query=lambda: _device_snapshot([{"name": "Other mic", "hostapi": 0, "max_input_channels": 1, "default_samplerate": 16000}], default_device=0),
+    )
+
+    result = provider.start()
+    assert result["ok"] is False
+    assert "not found" in result["error"]
+    assert created == []
+
+
+def test_old_callback_is_rejected_after_stop_and_restart():
+    streams = []
+    provider = AudioInputProvider(
+        stream_factory=lambda **kwargs: _CapturedStream(kwargs, streams),
+    )
+    assert provider.start()["ok"] is True
+    old_callback = streams[0].kwargs["callback"]
+    provider.stop()
+    provider.queue.flush()
+    assert provider.start()["ok"] is True
+    before = provider.diagnostics()["frames_received"]
+    old_callback(_frame(4), FRAME_SAMPLES, None, None)
+    assert provider.diagnostics()["frames_received"] == before
+    assert provider.queue.empty
+    provider.stop()
+
+
+def test_callback_status_tracks_input_overflow_without_leaking_exception():
+    class Status:
+        input_overflow = True
+
+        def __str__(self):
+            return "input overflow"
+
+    provider = AudioInputProvider(stream_factory=lambda **_: _CapturedStream({}, []))
+    assert provider.start()["ok"] is True
+    provider._on_callback(_frame(2), FRAME_SAMPLES, None, Status())
+    assert provider.diagnostics()["input_overflow"] == 1
+    assert provider.diagnostics()["frames_received"] == 1
+    provider.stop()
