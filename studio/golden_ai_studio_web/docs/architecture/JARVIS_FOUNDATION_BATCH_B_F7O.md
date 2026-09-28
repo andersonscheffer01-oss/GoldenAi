@@ -2,7 +2,7 @@
 
 ## Status
 
-`DESIGN_READY_IMPLEMENT_SEPARATE_GATE`.
+`PILOT_VALIDATED_SEPARATE_FROM_OBSIDIAN_APP`.
 
 Golden already has two local, non-cloud knowledge surfaces:
 
@@ -67,13 +67,33 @@ manifest/idempotency check. It must not scan personal folders, import human
 notes, alter original user files, open applications, access microphone/camera,
 or contact a cloud service.
 
-Implementation is deferred to a separate gate because the canonical memory
-write path is still unresolved in F7 and the two existing vault/index layouts
-need an explicit owner decision.
+The F7.3 boundary now gives the pilot an explicit owner: V2 SQLite remains
+canonical and the Markdown vault is a one-way projection. The pilot is still
+temporary/test-owned; it does not open the Obsidian application, scan personal
+folders or modify the real user vault.
 
 ## Validation evidence
 
 - Existing context-index and V2 vault tests are the relevant regression
-  coverage.
+  coverage. They exercise PUBLIC/INTERNAL projection, SECRET/SENSITIVE
+  exclusion, relation wikilinks, managed-note separation, drift detection,
+  rebuild, invalid/unavailable vault degradation and SQLite preservation.
+- The pilot uses temporary vault/database roots only and verifies that
+  projection failures remain isolated from canonical SQLite writes.
 - No full-PC scan, Obsidian process interaction, user-file modification,
   cloud upload, database migration, or new dependency was performed.
+
+```yaml
+PILOT_VAULT: TEMPORARY_TEST_ROOT
+PROJECTION_OWNER: GoldenMemoryEngine_V2
+SYNC_DIRECTION: JARVIS_TO_APPROVED_LOCAL_VAULT
+OBSIDIAN_CANONICAL: NO
+OBSIDIAN_REQUIRED: NO
+EXPORTED_CLASSIFICATIONS: PUBLIC,INTERNAL
+SECRET_EXCLUSION: PASS
+GENERATED_USER_CONTENT_SEPARATION: PASS
+LINKS: PASS
+FAILURE_ISOLATION: PASS
+FULL_PC_SCAN: NO
+REAL_USER_FILES_MODIFIED: NO
+```
