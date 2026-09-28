@@ -108,6 +108,11 @@ def _parameter_fingerprint(parameters: dict[str, Any]) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
 
 
+def parameter_fingerprint(parameters: dict[str, Any]) -> str:
+    """Public canonical fingerprint shared by catalog and evidence contracts."""
+    return _parameter_fingerprint(parameters)
+
+
 def _logical_robot_id(name: str, version: str, role: str) -> str:
     """Keep executable identity independent from path and content revisions."""
     material = ":".join((_normal_key(name), str(version or "UNKNOWN"),
@@ -230,7 +235,11 @@ class RobotRecord:
     source_artifacts: list[dict[str, Any]] = field(default_factory=list)
     compiled_artifacts: list[dict[str, Any]] = field(default_factory=list)
     parameter_presets: list[dict[str, Any]] = field(default_factory=list)
+    parameter_sets: list[dict[str, Any]] = field(default_factory=list)
     aliases: list[dict[str, Any]] = field(default_factory=list)
+    compile_evidence: list[dict[str, Any]] = field(default_factory=list)
+    test_runs: list[dict[str, Any]] = field(default_factory=list)
+    latest_test_status: str = "NOT_PRESENT"
     documentation_artifacts: list[dict[str, Any]] = field(default_factory=list)
     backtest_artifacts: list[dict[str, Any]] = field(default_factory=list)
     optimization_artifacts: list[dict[str, Any]] = field(default_factory=list)
@@ -279,6 +288,10 @@ class RobotRecord:
             "source_artifacts": list(self.source_artifacts),
             "compiled_artifacts": list(self.compiled_artifacts),
             "parameter_presets": list(self.parameter_presets),
+            "parameter_set_count": len(self.parameter_sets),
+            "compile_evidence_count": len(self.compile_evidence),
+            "test_run_count": len(self.test_runs),
+            "latest_test_status": self.latest_test_status,
             "aliases": list(self.aliases),
             "documentation_artifacts": list(self.documentation_artifacts),
             "backtest_count": len(self.backtest_artifacts),
@@ -297,6 +310,10 @@ class RobotRecord:
                 "optimization_artifacts": list(self.optimization_artifacts),
                 "supported_symbols": list(self.supported_symbols),
                 "supported_timeframes": list(self.supported_timeframes),
+                "parameter_sets": list(self.parameter_sets),
+                "compile_evidence": list(self.compile_evidence),
+                "test_runs": list(self.test_runs),
+                "latest_test_status": self.latest_test_status,
                 "aliases": list(self.aliases),
                 "entry_logic_summary": self.entry_logic_summary,
                 "exit_logic_summary": self.exit_logic_summary,
@@ -465,6 +482,14 @@ class RobotCatalogStore:
                 completed_at REAL NOT NULL,
                 payload_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS catalog_evidence (
+                evidence_id TEXT PRIMARY KEY,
+                robot_id TEXT,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
             """
         )
         row = connection.execute(
@@ -582,6 +607,34 @@ class RobotCatalogStore:
         ).fetchone()
         return json.loads(row["path_history_json"]) if row else []
 
+    def save_evidence(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        evidence_id = str(payload.get("evidence_id") or payload.get("test_run_id") or "")
+        if not evidence_id:
+            raise ValueError("EVIDENCE_ID_REQUIRED")
+        now = time.time()
+        with self._connection:
+            self._connection.execute(
+                "INSERT INTO catalog_evidence(evidence_id, robot_id, kind, status, payload_json, created_at) "
+                "VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(evidence_id) DO UPDATE SET robot_id=excluded.robot_id, "
+                "kind=excluded.kind, status=excluded.status, payload_json=excluded.payload_json",
+                (evidence_id, payload.get("robot_id") or payload.get("identity", {}).get("robot_id"),
+                 kind, str(payload.get("status") or payload.get("identity", {}).get("status") or "UNKNOWN"),
+                 json.dumps(_bounded(payload), ensure_ascii=True), now),
+            )
+        return {"ok": True, "evidence_id": evidence_id, "kind": kind, "read_only": False}
+
+    def evidence_for_robot(self, robot_id: str) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT kind, payload_json FROM catalog_evidence WHERE robot_id = ? ORDER BY created_at",
+            (robot_id,),
+        )
+        result = []
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            payload.setdefault("evidence_kind", row["kind"])
+            result.append(payload)
+        return result
+
     def close(self) -> None:
         self._connection.close()
 
@@ -685,6 +738,8 @@ class RobotCatalogReadModel:
                 robot_id: self._record_from_payload(payload)
                 for robot_id, payload in stored_records.items()
             }
+            for record in self._robots.values():
+                self._hydrate_evidence(record)
 
     @staticmethod
     def _record_from_payload(payload: dict[str, Any]) -> RobotRecord:
@@ -692,6 +747,20 @@ class RobotCatalogReadModel:
         values = {key: payload[key] for key in known if key in payload}
         values["provenance"] = [EvidenceClaim(**claim) for claim in payload.get("provenance", [])]
         return RobotRecord(**values)
+
+    def _hydrate_evidence(self, record: RobotRecord) -> None:
+        if not self._store:
+            return
+        for evidence in self._store.evidence_for_robot(record.robot_id):
+            kind = evidence.get("evidence_kind", "")
+            if kind == "COMPILE" and evidence not in record.compile_evidence:
+                record.compile_evidence.append(evidence)
+            elif kind == "TEST_RUN" and evidence not in record.test_runs:
+                record.test_runs.append(evidence)
+        if record.test_runs:
+            record.latest_test_status = str(record.test_runs[-1].get("status") or
+                                            record.test_runs[-1].get("identity", {}).get("status") or
+                                            "UNKNOWN")
 
     def discover(self, roots: Optional[Iterable[Path | str]] = None) -> dict[str, Any]:
         """Perform one bounded, read-only scan and replace only discovered facts."""
@@ -737,6 +806,10 @@ class RobotCatalogReadModel:
                     record = RobotRecord(
                         robot_id=robot_id, name=name, artifact_role=role,
                         discovered_at=(old.discovered_at if old else now), last_seen_at=now,
+                        parameter_sets=list(old.parameter_sets) if old else [],
+                        compile_evidence=list(old.compile_evidence) if old else [],
+                        test_runs=list(old.test_runs) if old else [],
+                        latest_test_status=(old.latest_test_status if old else "NOT_PRESENT"),
                     )
                     robots[robot_id] = record
                 else:
@@ -936,6 +1009,42 @@ class RobotCatalogReadModel:
             if self._store:
                 self._store.save_override(str(robot_id), override)
             return {"ok": True, "robot": record.to_dict(detail=True)}
+
+    def record_compile_evidence(self, robot_id: str, evidence: dict[str, Any]) -> dict[str, Any]:
+        """Attach compiler evidence; this never compiles or opens MetaEditor."""
+        with self._lock:
+            record = self._robots.get(str(robot_id))
+            if record is None:
+                return {"ok": False, "error": "ROBOT_NOT_FOUND", "robot_id": str(robot_id)}
+            item = _bounded(dict(evidence))
+            item.setdefault("robot_id", str(robot_id))
+            item.setdefault("evidence_kind", "COMPILE")
+            if item not in record.compile_evidence:
+                record.compile_evidence.append(item)
+            if self._store:
+                self._store.save_evidence("COMPILE", item)
+            return {"ok": True, "read_only": False, "evidence": item}
+
+    def record_test_run(self, robot_id: str, manifest: dict[str, Any],
+                        result: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        """Persist a manifest/result pair without starting a tester process."""
+        with self._lock:
+            record = self._robots.get(str(robot_id))
+            if record is None:
+                return {"ok": False, "error": "ROBOT_NOT_FOUND", "robot_id": str(robot_id)}
+            item = {"robot_id": str(robot_id), "evidence_kind": "TEST_RUN",
+                    "manifest": _bounded(manifest), "result": _bounded(result) if result else None,
+                    "test_run_id": manifest.get("test_run_id") or manifest.get("identity", {}).get("test_run_id"),
+                    "status": (result or {}).get("status") or manifest.get("identity", {}).get("status", "PLANNED")}
+            if not item["test_run_id"]:
+                return {"ok": False, "error": "TEST_RUN_ID_REQUIRED"}
+            record.test_runs = [existing for existing in record.test_runs
+                                if existing.get("test_run_id") != item["test_run_id"]]
+            record.test_runs.append(item)
+            record.latest_test_status = str(item["status"])
+            if self._store:
+                self._store.save_evidence("TEST_RUN", item)
+            return {"ok": True, "read_only": False, "test_run": item}
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -1292,5 +1401,5 @@ __all__ = [
     "ASSOCIATION_STATUSES", "EVIDENCE_TYPES", "FACT_SOURCES", "LIFECYCLE_STATES",
     "BacktestEvidence", "RobotCatalogStore", "default_catalog_store_path",
     "DiscoveryReport", "EvidenceClaim", "RobotArtifact", "RobotCatalogReadModel",
-    "RobotRecord", "default_approved_roots",
+    "RobotRecord", "default_approved_roots", "parameter_fingerprint",
 ]
