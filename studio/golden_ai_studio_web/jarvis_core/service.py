@@ -18,6 +18,7 @@ from .registry import ToolRegistry
 from .security import READ_ONLY_PUBLIC_BROWSER_OBSERVATION, SecurityManager
 from .cancellation import CancellationToken
 from .memory import GoldenMemoryManager
+from .memory.boundary import CanonicalMemoryBoundary
 from .memory.models import MemoryCategory, MemorySource
 from .orchestrator import CentralOrchestrator, JarvisRuntimeCoordinator
 from .task_manager import TaskManager
@@ -176,6 +177,8 @@ class JarvisService:
             self.research_provider = None
             self.learning_engine = None
             self.project_memory = None
+        self.memory_boundary = CanonicalMemoryBoundary(
+            self.memory_v2, self.legacy_memory)
         self._register_tools()
         self.task_manager = TaskManager(
             base_dir, security=self.security, runtime_mode=task_db_mode)
@@ -706,24 +709,24 @@ class JarvisService:
         return payload
 
     def _memory_search(self, query, namespace="jarvis"):
-        items = self.memory.search(query, top_k=8, namespace=namespace)
-        return {"ok": True, "items": [self._memory_record_dict(item) for item in items],
-                "count": len(items), "fallback": self.memory.embedding.status().get("fallback")}
+        items = self.memory_boundary.search(query, namespace=namespace, limit=8)
+        return {"ok": True, "items": items, "count": len(items),
+                "store": self.memory_boundary.mode,
+                "fallback": self.memory.embedding.status().get("fallback")}
 
     def _memory_remember(self, content, namespace="jarvis"):
         if self.memory._unsafe_content_reason(content):
             return {"ok": False, "error": "Conteúdo sensível, binário ou excessivo não foi armazenado."}
-        rid = self.memory.remember(content, source=MemorySource.USER,
-                                   category=MemoryCategory.GENERAL,
-                                   importance=75, confidence=0.95, namespace=namespace)
-        return {"ok": bool(rid), "id": rid,
-                "message": "Memória registrada." if rid else "Memória não registrada."}
+        result = self.memory_boundary.remember(content, namespace=namespace)
+        return {"ok": result["ok"], "id": result["id"],
+                "store": result.get("mode", self.memory_boundary.mode),
+                "message": "Memória registrada." if result["ok"]
+                else "Memória não registrada."}
 
     def _memory_recent(self, limit=10, namespace="jarvis"):
-        limit = max(1, min(int(limit), 50))
-        items = self.memory.get_recent(limit=limit, namespace=namespace)
-        return {"ok": True, "items": [self._memory_record_dict(item) for item in items],
-                "count": len(items)}
+        items = self.memory_boundary.recent(limit=limit, namespace=namespace)
+        return {"ok": True, "items": items, "count": len(items),
+                "store": self.memory_boundary.mode}
 
     def _web_research(self, query, limit=5, privacy="PUBLIC"):
         return self._run_web_research(query, limit, privacy, learn=False)
