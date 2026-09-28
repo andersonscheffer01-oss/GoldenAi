@@ -328,6 +328,74 @@ COMMIT_CREATED: YES
 PUSH: NO
 ```
 
+## Gate 2F: SAPI human listening and Golden playback
+
+Gate 2F was validated from baseline `0f49274dd881a4ac4682d9405ddd65626a8e9207`
+using the existing `SoundDeviceAudioOutputProvider`. SAPI remained synthesis
+only; no direct SAPI speaker output, microphone, VAD, or STT path was opened.
+
+The selected output was device index `3`, `Alto-falantes (3- USB Audio Device)`,
+through the MME host API. The existing output provider accepted the SAPI PCM
+format directly: 22050 Hz, mono, `s16le`. The real playback opened and drained
+without output errors, and the provider was released cleanly.
+
+The first human confirmation was invalid because playback had not yet been
+started. After the controlled retry, the sentence was played through Golden's
+output path and the operator confirmed both `OUVI: SIM` and
+`VOZ_ACEITAVEL: SIM`. A cancellation smoke using a longer local synthesis also
+passed: playback was aborted, the queue was flushed, no stale audio resumed,
+and the provider remained reusable for memory-only synthesis.
+
+### Gate 2F final report
+
+```yaml
+SAPI_HUMAN_LISTENING_AND_PLAYBACK_GATE: PASS
+PROVIDER: WindowsSapiTTSProvider
+VOICE: Microsoft Maria Desktop - Portuguese(Brazil)
+OUTPUT_PROVIDER: SoundDeviceAudioOutputProvider
+OUTPUT_DEVICE_NAME: Alto-falantes (3- USB Audio Device)
+OUTPUT_HOST_API: MME
+OUTPUT_DEVICE_INDEX: 3
+OUTPUT_SAMPLE_RATE_SUPPORT: PASS
+REAL_SYNTHESIS: PASS
+REAL_SPEAKER_PLAYBACK: PASS
+PLAYBACK_COMPLETED: YES
+OUTPUT_ERROR: NONE
+HUMAN_CONFIRMATION_RECEIVED: YES
+HUMAN_HEARD_AUDIO: YES
+HUMAN_VOICE_ACCEPTABLE_FOR_MVP: YES
+HUMAN_COMMENT: Maria foi ouvida e considerada aceitável para o MVP.
+PLAYBACK_CANCELLATION_SMOKE: PASS
+PLAYBACK_ABORTED: YES
+QUEUE_FLUSHED: YES
+STALE_AUDIO_RESUMED: NO
+OUTPUT_PROVIDER_REUSABLE: YES
+LOCAL_SYNTHESIS: YES
+REMOTE_TEXT_SENT: NO
+REMOTE_AUDIO_SENT: NO
+SYNTHESIZED_AUDIO_PERSISTED: NO
+TEMP_AUDIO_LEFT_ON_DISK: NO
+MICROPHONE_OPENED: NO
+HUMAN_SPEECH_REQUESTED: NO
+AUDIO_PLAYED: YES
+DEPENDENCIES_INSTALLED: NO
+MODELS_DOWNLOADED: NO
+WINDOWS_VOICE_INSTALLED: NO
+WINDOWS_SETTINGS_CHANGED: NO
+DEVICE_REGISTRY_TOUCHED: NO
+TASK_DB_SCHEMA_MIGRATION: NONE
+PRODUCTION_CODE_CHANGED: NO
+FOCUSED_TESTS: 65 passed
+FAILED_NEW: NONE
+ZOMBIE_THREADS: NO
+TECHNICAL_PLAYBACK: PASS
+REAL_LOCAL_TTS_MVP: PASS
+READY_FOR_REAL_SPEECH_VAD_GATE: YES
+NEXT_GATE: REAL_SPEECH_VAD_AND_ENDPOINT_GATE
+KNOWN_RESTRICTIONS: active synchronous SAPI cancellation remains partial; no microphone/VAD/STT validation was performed
+PUSH: NO
+```
+
 ## Gate 2B addendum: Kokoro artifact and license pinning
 
 This addendum supersedes the earlier conditional candidate assessment for
