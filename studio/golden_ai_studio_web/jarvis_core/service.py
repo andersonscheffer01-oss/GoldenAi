@@ -1451,6 +1451,13 @@ class JarvisService:
             return {"ok": False, "error": error}
         if self.cancellation.is_cancelled():
             return {"ok": False, "error": "Execução cancelada antes de iniciar.", "cancelled": True}
+        availability_error = self.registry.availability_error(tool)
+        if availability_error:
+            self.state = AgentState.IDLE
+            self.audit.add(task_id=task_id, command=command, tool=name,
+                           arguments=arguments, risk=effective_risk.value,
+                           status="indisponivel", result=availability_error)
+            return {"ok": False, "error": availability_error, "tool": name}
         decision = self.security.decision(
             tool, effective_risk, force_confirmation,
             authorization_scope=authorization_scope,

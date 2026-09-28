@@ -14,11 +14,40 @@ class ToolRegistry:
     def get(self, name):
         return self._tools.get(name)
 
+    def resolve_capability(self, capability_name, provider=None):
+        """Resolve one logical capability without silent provider replacement."""
+        logical = str(capability_name or "")
+        candidates = [tool for tool in self._tools.values()
+                      if (tool.capability_name or tool.name) == logical]
+        if provider is not None:
+            candidates = [tool for tool in candidates if tool.provider == provider]
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda tool: (int(tool.priority), tool.provider,
+                                                    tool.name))[0]
+
+    @staticmethod
+    def _runtime_health(tool: Tool):
+        if not callable(tool.availability_check):
+            return tool.availability, tool.health
+        try:
+            available = bool(tool.availability_check())
+        except Exception:
+            available = False
+        return ("available" if available else "unavailable",
+                "healthy" if available else "unavailable")
+
+    def availability_error(self, tool: Tool):
+        availability, _ = self._runtime_health(tool)
+        if availability == "unavailable":
+            return "Capability provider indisponível."
+        return ""
+
     @staticmethod
     def _effective_side_effect(tool: Tool) -> str:
         """Return impact metadata without turning metadata into authority."""
         if tool.side_effect_class:
-            return str(tool.side_effect_class)
+            return getattr(tool.side_effect_class, "value", str(tool.side_effect_class))
         name = str(tool.name or "").casefold()
         local_mutations = (
             "browser_click", "browser_type", "browser_navigate", "keyboard_",
@@ -36,12 +65,15 @@ class ToolRegistry:
     @classmethod
     def capability_descriptor(cls, tool: Tool) -> dict:
         """Normalize provider metadata for governance and future adapters."""
+        availability, health = cls._runtime_health(tool)
         return {
             "id": tool.name,
             "name": tool.name,
             "description": tool.description,
             "source": tool.provider,
             "provider": tool.provider,
+            "capability_name": tool.capability_name or tool.name,
+            "priority": tool.priority,
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -55,8 +87,8 @@ class ToolRegistry:
             "side_effect_class": cls._effective_side_effect(tool),
             "security_requirements": list(tool.security_requirements),
             "approval_requirements": list(tool.approval_requirements),
-            "availability": tool.availability,
-            "health": tool.health,
+            "availability": availability,
+            "health": health,
             "timeout": tool.timeout,
             "provenance": tool.provenance,
         }
@@ -71,8 +103,11 @@ class ToolRegistry:
                  "confirmation": t.confirmation, "timeout": t.timeout,
                  "llm_enabled": t.llm_enabled, "parameters": list(t.parameters),
                  "provider": t.provider,
+                 "capability_name": t.capability_name or t.name,
+                 "priority": t.priority,
                  "side_effect_class": self._effective_side_effect(t),
-                 "availability": t.availability, "health": t.health,
+                 "availability": self._runtime_health(t)[0],
+                 "health": self._runtime_health(t)[1],
                  "provenance": t.provenance}
                 | {"response_policy": t.response_policy.value,
                    "expected_latency_ms": t.expected_latency_ms}

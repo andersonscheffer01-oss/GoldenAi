@@ -60,3 +60,6 @@ class Tool:
     availability: str = "registered"
     health: str = "unknown"
     provenance: str = "internal"
+    capability_name: str = ""
+    priority: int = 100
+    availability_check: Callable[[], bool] | None = None

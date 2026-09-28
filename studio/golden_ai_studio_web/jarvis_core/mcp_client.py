@@ -412,6 +412,9 @@ class McpClientManager:
                 approval_requirements=(() if is_read_only else ("human_confirmation",)),
                 availability="configured", health=client.last_health,
                 provenance=descriptor.provenance,
+                capability_name=descriptor.name,
+                priority=100,
+                availability_check=lambda _client=client: _client.health()["running"],
             ))
             registered.append(tool_name)
         return registered

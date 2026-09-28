@@ -186,3 +186,29 @@ TESTS: 5_PASSED
 The restriction is deliberate: no Streamable HTTP, resources, prompts, tasks,
 automatic server discovery or dependency installation is included until the
 stdio provider path has interoperability coverage.
+
+## E4 checkpoint
+
+Interoperability reuses the same `ToolRegistry` catalog. Internal tools and
+MCP tools retain provider identity; MCP names are namespaced and a duplicate
+registration fails closed. Logical capability resolution is deterministic:
+host/internal priority wins over imported-provider priority, and callers may
+select an explicit provider when needed. No universal MCP-wins rule exists.
+
+Provider health is dynamic for imported tools. When the owned MCP process is
+stopped or unavailable, the canonical execution boundary rejects the call
+before dispatch and emits an audit receipt. A successful result retains
+provider/server/provenance metadata. MCP results are response data only; they
+are not automatically promoted to `CanonicalMemoryBoundary` memory.
+
+```yaml
+E4_STATUS: PASS
+SKILL_AND_MCP_COMMON_DISCOVERY: PASS
+COLLISION_HANDLING: FAIL_CLOSED
+PROVIDER_PRIORITY: INTERNAL_FIRST_DETERMINISTIC
+HEALTH: DYNAMIC_AND_EXECUTION_GATED
+RESULT_PROVENANCE: PASS
+MEMORY_PROMOTION_POLICY: EXPLICIT_ONLY
+DUPLICATE_EXECUTION: NOT_OBSERVED
+TESTS: 11_PASSED
+```
