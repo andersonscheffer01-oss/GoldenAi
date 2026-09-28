@@ -776,3 +776,216 @@ NEXT_GATE: LOCAL_TTS_FALLBACK_SELECTION_GATE
 NEXT_STEP: Reconsider Sherpa-ONNX, a maintained Piper successor, or SAPI fallback using existing evidence; do not reopen Kokoro research
 KNOWN_RESTRICTIONS: no install, download, runtime creation, model/voice acquisition, synthesis, audio, hardware, production code, device registry, DB migration, or push
 ```
+
+## Gate 2D: local TTS fallback selection
+
+This gate is selection-only and reuses the existing Golden contracts. No
+provider, package, model, voice, Windows component, path, or environment was
+installed or changed. No synthesis, playback, microphone, or speaker access
+was performed. Kokoro remains closed as a primary decision from Gate 2C.
+
+### Reuse-first findings
+
+Golden already owns `VoiceService`, `TurnManager`, `TextToSpeechProvider`,
+`StreamingTTSOrchestrator`, `AudioOutputProvider`, generation guards,
+cancellation, playback, and security boundaries. The provider-neutral pipeline
+currently has a fake provider, while the legacy `VoiceService` already has a
+SAPI fallback through `pywin32`. The selected path must reuse the provider
+abstraction and make SAPI an adapter; it must not create a second voice owner,
+speaker path, turn manager, or cancellation architecture.
+
+The canonical runtime remains `C:\\GoldenAI\\.venv\\Scripts\\python.exe`,
+Python 3.13.15. A read-only import check found `pywin32` available, while
+`piper` and `sherpa_onnx` are absent. The machine exposes these SAPI voices:
+
+- `Microsoft Maria Desktop - Portuguese(Brazil)`; language `416`, female,
+  Microsoft vendor;
+- `Microsoft Zira Desktop - English (United States)`; language `409`, female,
+  Microsoft vendor.
+
+### Windows SAPI assessment
+
+SAPI is a Windows-native API and does not require Golden to distribute a neural
+voice artifact. The installed Maria voice is an actual PT-BR capability on this
+machine, and enumeration was read-only. Microsoft documents voice enumeration
+through `SpVoice.GetVoices`, output to `SpMemoryStream`/`SpFileStream`, standard
+PCM stream formats, asynchronous speech, and `Skip`/`Pause` controls. This is
+enough architectural evidence for a small adapter that renders bounded text
+segments to PCM/WAV and hands the bytes to Golden's existing output pipeline.
+
+The exact Maria native format was not probed because this gate forbids
+synthesis. SAPI supports standard PCM formats, but the adapter must read the
+actual stream format and convert only at the provider boundary if required.
+Cancellation remains conditional until the adapter proves that `Skip` or
+equivalent SAPI control invalidates the pending request and that Golden's
+generation guard rejects any late PCM. `NATURALNESS` and `LATENCY` remain
+unvalidated.
+
+The license model is different from a model artifact: Maria is an OS-installed
+Microsoft voice selected through the local Windows SAPI registry, not a file
+bundled by Golden. This supports local/private use on the licensed Windows
+installation. It is not permission to redistribute the voice or generated
+corpora; any product redistribution remains subject to the applicable Windows
+terms and legal review.
+
+### Sherpa-ONNX assessment
+
+The sherpa-onnx runtime is Apache-2.0, publishes Windows x64 Python wheels
+including CPython 3.13, supports offline TTS, and exposes Python/C/C++ APIs
+that return generated samples. The official TTS catalog includes the exact
+PT-BR artifact `vits-piper-pt_BR-dii-high`, converted from
+`OpenVoiceOS/pipertts_pt-BR_dii`, with 22,050 Hz mono output. Its public model
+card explicitly declares CC BY-NC-ND 4.0 and non-commercial/no-derivatives
+restrictions. The runtime is technically viable, but this model is not a
+Golden primary or distributable fallback.
+
+The sherpa catalog also references PT-BR Piper artifacts such as
+`vits-piper-pt_BR-faber-medium` and `vits-piper-pt_BR-cadu-medium`. Their
+available cards identify language, sample rate, and CC0 datasets, but do not
+provide a separate explicit voice/model grant sufficient to approve the ONNX
+artifact for Golden distribution. No model was downloaded and no hash was
+computed locally in this gate.
+
+### Piper assessment
+
+The current maintained implementation is `OHF-Voice/piper1-gpl`. Its runtime
+is GPL-3.0-or-later, supports Windows/Python and offline CPU synthesis, and
+the Python API exposes WAV and chunk-level PCM output. The exact official
+PT-BR candidate `pt_BR-faber-medium` at Piper voices revision `v1.0.0` is
+22,050 Hz, one speaker, with ONNX artifact SHA256
+`858555e3a064209c57088fe6bd70c4c3dc54d03eaa00c45d5ecaf43a33f95aa7`.
+Its model card identifies the CC0 dataset but does not explicitly grant the
+voice/model artifact rights needed for Golden approval. The separate
+OpenVoiceOS PT-BR Dii model is explicit but CC BY-NC-ND 4.0, so it is not a
+general product fallback.
+
+Piper is therefore technically credible but blocked for this selection by the
+runtime distribution implications and unresolved Faber voice/model grant. It
+is not rejected because GPL is inherently unusable; it is rejected because
+the complete runtime plus voice distribution package is not approved here.
+
+### Decision matrix
+
+| Provider | Implementation | Maintenance | Runtime license | PT-BR | Voice/model license | Windows | Runtime form | Offline | Artifact clarity | Golden integration | Naturalness | Latency | Decision |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Windows SAPI | Microsoft `SpVoice` | OS-provided | Windows/provider terms | Maria installed | OS component; no bundled artifact | YES on this machine | Windows native API | YES | Machine-specific, no model pin | Small adapter | UNVALIDATED | UNVALIDATED | SELECT_PRIMARY |
+| sherpa-onnx + Dii | Apache runtime | Active | Apache-2.0 | `vits-piper-pt_BR-dii-high` | CC BY-NC-ND 4.0 | YES | Python 3.13 or native child | YES | URL/revision, no local hash | Medium adapter | UNVALIDATED | UNVALIDATED | REJECT |
+| Piper + Faber | OHF-Voice `piper1-gpl` | Active | GPL-3.0-or-later | `pt_BR-faber-medium` | Explicit voice grant absent | YES | Python or local process | YES | Revision and model hash | Small/medium adapter | UNVALIDATED | UNVALIDATED | REJECT |
+
+### Selected boundary
+
+SAPI is selected as Golden's local PT-BR primary for this machine, with a
+conditional approval limited to local use of the already installed Windows
+voice. The next gate must implement or validate only a small adapter behind
+the existing `TextToSpeechProvider`: select the installed PT-BR token, render
+bounded segments to an in-memory or temporary stream, convert to bounded
+mono `s16le` PCM when needed, attach session/turn/generation identity, and
+honor cancellation before enqueueing. The Golden `AudioOutputProvider`
+remains the only playback owner.
+
+No neural model is selected as fallback at this gate. If the Maria voice is
+unavailable on another Windows installation, fail closed and require a new
+provider/artifact approval; do not silently download or substitute a cloud
+voice. `IMPLICIT_DOWNLOAD_DISABLED: YES`.
+
+### Final Gate 2D report
+
+```yaml
+JARVIS_VOICE_PHASE: PARTIAL
+LOCAL_TTS_FALLBACK_SELECTION_GATE: PASS_WITH_RESTRICTIONS
+BASELINE: b9403c791fbd96736f960dacae2fb55a7f487a8e
+
+SHERPA_ONNX:
+  STATUS: TECHNICALLY_VIABLE_NOT_SELECTED
+  RUNTIME_LICENSE: Apache-2.0
+  WINDOWS: YES
+  RUNTIME_FORM: IN_PROCESS_PYTHON_3_13_OR_STANDALONE_LOCAL_PROCESS
+  PT_BR_MODEL: vits-piper-pt_BR-dii-high
+  PT_BR_MODEL_LICENSE: CC BY-NC-ND 4.0
+  PT_BR_LICENSE_VERIFIED: YES
+  ARTIFACT_PINNABLE: NO
+  DECISION: REJECT
+
+PIPER:
+  STATUS: TECHNICALLY_VIABLE_LICENSE_CONSTRAINED
+  IMPLEMENTATION: OHF-Voice/piper1-gpl
+  RUNTIME_LICENSE: GPL-3.0-or-later
+  WINDOWS: YES
+  RUNTIME_FORM: IN_PROCESS_PYTHON_OR_STANDALONE_LOCAL_PROCESS
+  PT_BR_MODEL: pt_BR-faber-medium @ rhasspy/piper-voices v1.0.0
+  PT_BR_MODEL_LICENSE: Explicit voice/model grant absent; dataset CC0 only
+  PT_BR_LICENSE_VERIFIED: NO
+  ARTIFACT_PINNABLE: YES
+  DECISION: REJECT
+
+WINDOWS_SAPI:
+  STATUS: INSTALLED_AND_READ_ONLY_VALIDATED
+  INSTALLED_PT_BR_VOICE_FOUND: YES
+  VOICE: Microsoft Maria Desktop - Portuguese(Brazil)
+  OFFLINE: YES
+  PCM_CAPTURE: YES_DOCUMENTED_NOT_EXECUTED
+  LICENSE_MODEL: OS-installed Microsoft voice; no Golden-distributed artifact
+  DECISION: SELECT_PRIMARY
+
+OTHER_FINALIST:
+  PROVIDER: NONE
+  STATUS: NONE
+  PT_BR: NONE
+  LICENSE: NONE
+  DECISION: NONE
+
+PRIMARY:
+  PRIMARY_PROVIDER: Windows SAPI
+  PRIMARY_IMPLEMENTATION: Microsoft SpVoice / installed Maria token
+  PRIMARY_RUNTIME_FORM: WINDOWS_NATIVE_API
+  PRIMARY_PT_BR_VOICE_OR_MODEL: Microsoft Maria Desktop - Portuguese(Brazil)
+  PRIMARY_RUNTIME_LICENSE: Windows/SAPI OS component terms
+  PRIMARY_MODEL_OR_VOICE_LICENSE: Installed OS voice; redistribution not cleared
+  PRIMARY_LICENSE_VERIFIED: CONDITIONAL_LOCAL_USE
+  PRIMARY_WINDOWS_READY: YES
+  PRIMARY_OFFLINE: YES
+  PRIMARY_ARTIFACT_PINNABLE: NOT_APPLICABLE
+  PRIMARY_NATURALNESS: UNVALIDATED
+  PRIMARY_LATENCY: UNVALIDATED
+  PRIMARY_INTEGRATION_COST: SMALL_ADAPTER
+  PRIMARY_DECISION: CONDITIONALLY_APPROVED
+  PRIMARY_REASON: Existing PT-BR voice is installed, offline, requires no model distribution, and fits a native adapter boundary; cancellation/PCM details require the next controlled adapter gate.
+
+FALLBACK:
+  FALLBACK_PROVIDER: NONE_SELECTED
+  FALLBACK_VOICE_OR_MODEL: NONE
+  FALLBACK_REASON: Neural PT-BR candidates have unresolved or restrictive artifact licensing.
+
+GOLDEN:
+  VOICE_SERVICE_REMAINS_OWNER: YES
+  TURN_MANAGER_REMAINS_OWNER: YES
+  TTS_PROVIDER_REUSED: YES
+  STREAMING_TTS_ORCHESTRATOR_REUSED: YES
+  AUDIO_OUTPUT_REMAINS_OWNER: YES
+  GENERATION_GUARDS_REMAIN_OWNER: YES
+  SECOND_VOICE_ARCHITECTURE: NO
+
+SAFETY:
+  PRODUCTION_CODE_CHANGED: NO
+  DEPENDENCIES_INSTALLED: NO
+  MODELS_DOWNLOADED: NO
+  VOICE_ARTIFACTS_DOWNLOADED: NO
+  WINDOWS_VOICES_INSTALLED: NO
+  MICROPHONE_OPENED: NO
+  AUDIO_SYNTHESIZED: NO
+  AUDIO_PLAYED: NO
+  DEVICE_REGISTRY_TOUCHED: NO
+  TASK_DB_SCHEMA_MIGRATION: NONE
+  PUSH: NO
+
+CHANGES:
+  FILES_MODIFIED: docs/architecture/JARVIS_LOCAL_TTS_PROVIDER_AUDIT.md
+  COMMIT: DOCUMENTATION_ONLY_PENDING
+
+DECISION:
+  LOCAL_TTS_PROVIDER_SELECTED: YES
+  READY_FOR_CONTROLLED_TTS_INSTALLATION: NO
+  NEXT_GATE: WINDOWS_SAPI_ADAPTER_AND_PCM_VALIDATION_GATE
+  NEXT_STEP: Validate Maria token selection, actual PCM stream format, bounded segment conversion, cancellation, stale-generation rejection, and AudioOutputProvider handoff without synthesizing during this gate.
+  KNOWN_RESTRICTIONS: no install, download, model acquisition, voice installation, synthesis, playback, microphone, production runtime change, device registry change, DB migration, or push
+```
