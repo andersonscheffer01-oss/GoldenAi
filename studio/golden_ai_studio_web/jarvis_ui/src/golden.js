@@ -81,7 +81,7 @@ const QUICK = [
 
 const CONTROLS = [
   { label: "Abrir MetaTrader 5", cmd: "abrir mt5", icon: "chart2" },
-  { label: "Analisar mercado", cmd: "analisar mercado", icon: "radar" },
+  { label: "Analisar mercado", action: "open_market_intelligence", icon: "radar" },
   { label: "Tocar / pausar mídia", cmd: "pausar música", icon: "media" },
   { label: "Volume +10%", cmd: "aumentar volume", icon: "vol" },
   { label: "Capturar tela", cmd: "tirar print da tela", icon: "shot" },
@@ -92,7 +92,7 @@ const CONTROLS = [
 
 const PILLS = [
   { label: "Status do sistema", cmd: "status do sistema" },
-  { label: "Analisar mercado", cmd: "analisar mercado" },
+  { label: "Analisar mercado", action: "open_market_intelligence" },
   { label: "Projetos", view: "projetos" },
   { label: "Pesquisar na web", view: "pesquisa" },
   { label: "Modo foco", role: "focus" },
@@ -208,8 +208,65 @@ export function createGolden(api) {
     if (v === "projetos") renderProjects();
     if (v === "memoria") renderMemoria();
     if (v === "pesquisa") renderHist();
+    if (v === "controle") window.JarvisB3Refresh?.();
     relayout();
     if (!silent) api.log?.(`painel → ${v}`, "ok");
+  }
+
+  function openB3(target) {
+    setView("controle");
+    if (window.location.hash === "#market-intelligence") {
+      setMarketSurface(target);
+      return;
+    }
+    if (!target) return;
+    const focus = () => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(focus);
+    else window.setTimeout(focus, 0);
+  }
+
+  const B3_SURFACE_IDS = [
+    "gB3OverviewSection", "gB3MarketSection", "gB3ScannerSection",
+    "gB3RobotsSection", "gB3EvidenceSection", "gB3MemorySection",
+    "gB3ProvenanceSection",
+  ];
+  function setMarketSurface(target) {
+    if (window.location.hash !== "#market-intelligence") return;
+    const selected = B3_SURFACE_IDS.includes(target) ? target : "gB3MarketSection";
+    root.dataset.marketSurface = selected;
+    root.dataset.marketSurfaceVersion = "b3-market-v2";
+    B3_SURFACE_IDS.forEach((id) => {
+      const node = document.getElementById(id);
+      if (!node) return;
+      const active = id === "gB3OverviewSection" || id === selected;
+      node.hidden = !active;
+      node.dataset.b3SurfaceActive = active && id === selected ? "1" : "0";
+      node.setAttribute("data-b3-surface-active", active && id === selected ? "1" : "0");
+    });
+    $$(".gB3Jump", root).forEach((button) => {
+      button.classList.toggle("on", button.dataset.b3Target === selected);
+      button.setAttribute("aria-current", button.dataset.b3Target === selected ? "page" : "false");
+    });
+  }
+
+  function openMarketIntelligence() {
+    const desktopOpen = window.__JARVIS_DESKTOP_OPEN_MARKET__;
+    if (typeof desktopOpen === "function") {
+      desktopOpen();
+      return;
+    }
+    const target = new URL(window.location.href);
+    target.hash = "market-intelligence";
+    const child = window.open(
+      target.href,
+      "jarvis-market-intelligence",
+      "popup=yes,width=1500,height=900,resizable=yes,scrollbars=yes"
+    );
+    if (child) {
+      child.focus?.();
+      return;
+    }
+    window.location.assign(target.href);
   }
 
   function expandedAtBottom() {
@@ -802,6 +859,8 @@ export function createGolden(api) {
         api.sfx?.("click");
         if (p.role === "settings") return api.openSettings?.();
         if (p.role === "focus") return toggleFocus();
+        if (p.action === "open_market_intelligence") return openMarketIntelligence();
+        if (p.view === "controle") return openB3(p.target);
         if (p.view) return setView(p.view);
         api.submitCommand(p.cmd);
       };
@@ -836,7 +895,19 @@ export function createGolden(api) {
       `<button class="gCtrlBtn" type="button" data-i="${i}"><svg viewBox="0 0 24 24">${SVG[c.icon] || SVG.chip}</svg><span>${esc(c.label)}</span></button>`
     ).join("");
     $$(".gCtrlBtn", el.controls).forEach((b) => {
-      b.onclick = () => { api.sfx?.("click"); api.submitCommand(CONTROLS[+b.dataset.i].cmd); };
+      b.onclick = () => {
+        const control = CONTROLS[+b.dataset.i];
+        api.sfx?.("click");
+        if (control.action === "open_market_intelligence") return openMarketIntelligence();
+        if (control.view === "controle") return openB3(control.target);
+        api.submitCommand(control.cmd);
+      };
+    });
+  }
+
+  function wireB3Navigation() {
+    $$(".gB3Jump", root).forEach((button) => {
+      button.onclick = () => { api.sfx?.("click"); openB3(button.dataset.b3Target); };
     });
   }
 
@@ -1049,6 +1120,13 @@ export function createGolden(api) {
   function mount() {
     if (st.mounted) return;
     st.mounted = true;
+    const marketWindow = window.location.hash === "#market-intelligence";
+    if (marketWindow) {
+      root.dataset.marketWindow = "1";
+      root.dataset.marketSurfaceVersion = "b3-market-v2";
+      st.view = "controle";
+      document.title = "JARVIS — Market Intelligence";
+    }
     root.classList.add("on");
     root.setAttribute("aria-hidden", "false");
     const sysName = (api.cfg?.systemName || "GOLDEN JARVIS").toUpperCase();
@@ -1070,8 +1148,15 @@ export function createGolden(api) {
     }
     renderPills();
     renderControls();
+    wireB3Navigation();
     renderQuick();
     setView(st.view, true);
+    if (marketWindow) {
+      setMarketSurface("gB3MarketSection");
+      const focusMarket = () => setMarketSurface("gB3MarketSection");
+      if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(focusMarket);
+      else window.setTimeout(focusMarket, 0);
+    }
     paintGauges(api.getTelemetry?.() || st.diagData || {});
     paintAgents();
     paintMemory();
@@ -1238,6 +1323,9 @@ export function createGolden(api) {
     if (st.shadow) setShadow(false, false);
     st.mounted = false;
     root.classList.remove("on");
+    delete root.dataset.marketWindow;
+    delete root.dataset.marketSurface;
+    delete root.dataset.marketSurfaceVersion;
     root.setAttribute("aria-hidden", "true");
     cancelAnimationFrame(st.raf);
     st.timers.forEach(clearInterval);

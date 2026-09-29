@@ -220,8 +220,49 @@ def _normalize_scan(raw: Any) -> dict[str, Any]:
 class GoldenReadBridge:
     """Jarvis-owned read facade over existing Golden implementations."""
 
-    def __init__(self, robot_catalog=None):
+    def __init__(self, robot_catalog=None, runtime_profile=None):
         self.robot_catalog = robot_catalog
+        self.runtime_profile = runtime_profile
+
+    def set_runtime_profile(self, profile):
+        self.runtime_profile = profile
+
+    def _mt5_enabled(self):
+        if self.runtime_profile is not None:
+            return bool(self.runtime_profile.mt5_enabled)
+        try:
+            from .runtime_profile import active_runtime_profile
+            return bool(active_runtime_profile().mt5_enabled)
+        except Exception:
+            return True
+
+    @staticmethod
+    def _source_disabled(capability_id, source_module):
+        return _envelope(capability_id, {
+            "ok": False,
+            "status": "SOURCE_DISABLED",
+            "availability": "SOURCE_DISABLED",
+            "reason": "MT5_DISABLED_BY_PROFILE",
+            "source": "MT5",
+        }, source_module)
+
+    def _market_overview(self):
+        from market_data import get_market_overview
+        if self.runtime_profile is None:
+            return get_market_overview()
+        return get_market_overview(mt5_enabled=self._mt5_enabled())
+
+    def _market_chart(self, symbol, timeframe):
+        from market_data import get_market_chart
+        if self.runtime_profile is None:
+            return get_market_chart(symbol, timeframe)
+        return get_market_chart(symbol, timeframe, mt5_enabled=self._mt5_enabled())
+
+    def _market_ai_context(self, symbol):
+        from market_data import get_market_ai_context
+        if self.runtime_profile is None:
+            return get_market_ai_context(symbol)
+        return get_market_ai_context(symbol, mt5_enabled=self._mt5_enabled())
 
     def capability_registry(self) -> dict[str, Any]:
         capabilities = [item.to_dict() for item in _CAPABILITIES]
@@ -230,6 +271,8 @@ class GoldenReadBridge:
                 "mutation_execution": "DISABLED_IN_B1", "timestamp": _now()}
 
     def scanner_snapshot(self, symbol: str = "", limit: int = 3) -> dict[str, Any]:
+        if not self._mt5_enabled():
+            return self._source_disabled("golden.scanner", "golden_scanner.py")
         from .tools.market_readonly import golden_scanner_results
         result = _safe("golden.scanner", "golden_scanner.py",
                        lambda: golden_scanner_results(symbol, limit))
@@ -240,8 +283,7 @@ class GoldenReadBridge:
 
     def radar_snapshot(self, symbol: str = "", limit: int = 8) -> dict[str, Any]:
         def read():
-            from market_data import get_market_overview
-            overview = get_market_overview()
+            overview = self._market_overview()
             if symbol:
                 overview["requested_symbol"] = symbol
             overview["requested_limit"] = max(1, min(int(limit or 8), 20))
@@ -252,9 +294,8 @@ class GoldenReadBridge:
                      correlation_id: str = "") -> dict[str, Any]:
         """Project existing Radar providers without copying the Radar UI."""
         def read():
-            import market_data
-            overview = market_data.get_market_overview()
-            chart = (market_data.get_market_chart(symbol, timeframe)
+            overview = self._market_overview()
+            chart = (self._market_chart(symbol, timeframe)
                      if symbol else {"status": "NOT_REQUESTED", "ok": True})
             assets = overview.get("assets") or []
             groups = {}
@@ -287,13 +328,14 @@ class GoldenReadBridge:
 
     def market_context(self, symbol: str = "XAUUSD", timeframe: str = "M15") -> dict[str, Any]:
         def read():
-            from market_data import get_market_ai_context
-            context = get_market_ai_context(symbol)
+            context = self._market_ai_context(symbol)
             context["requested_timeframe"] = timeframe
             return context
         return _safe("golden.market_data", "market_data.py", read)
 
     def market_regime(self, symbol: str = "XAUUSD") -> dict[str, Any]:
+        if not self._mt5_enabled():
+            return self._source_disabled("golden.market_regime", "meta_strategy.py")
         def read():
             from meta_strategy import analyze_symbol
             result = analyze_symbol(symbol)
@@ -303,16 +345,22 @@ class GoldenReadBridge:
         return _safe("golden.market_regime", "meta_strategy.py", read)
 
     def meta_strategy(self, symbol: str = "XAUUSD", limit: int = 8) -> dict[str, Any]:
+        if not self._mt5_enabled():
+            return self._source_disabled("golden.meta_strategy", "meta_strategy.py")
         def read():
             from meta_strategy import analyze_radar, analyze_symbol
             return analyze_symbol(symbol) if symbol else analyze_radar(limit=limit)
         return _safe("golden.meta_strategy", "meta_strategy.py", read)
 
     def risk(self) -> dict[str, Any]:
+        if not self._mt5_enabled():
+            return self._source_disabled("golden.risk_engine", "risk_engine.py")
         from .tools.market_readonly import golden_risk_status
         return _safe("golden.risk_engine", "risk_engine.py", golden_risk_status)
 
     def risk_detail(self) -> dict[str, Any]:
+        if not self._mt5_enabled():
+            return self._source_disabled("golden.risk_engine", "risk_engine.py")
         def read():
             from .tools.market_readonly import golden_risk_status
             result = golden_risk_status()
@@ -387,7 +435,7 @@ class GoldenReadBridge:
     def deep_analysis_context(self, symbol: str = "XAUUSD") -> dict[str, Any]:
         def read():
             from market_data import get_market_ai_context
-            return {"symbol": symbol, "context": get_market_ai_context(symbol),
+            return {"symbol": symbol, "context": self._market_ai_context(symbol),
                     "execution_authority": "NONE",
                     "provider_routing": "Jarvis ModelRouter remains owner"}
         return _safe("golden.deep_analysis", "market_data.py", read)
@@ -396,9 +444,11 @@ class GoldenReadBridge:
                              correlation_id: str = "") -> dict[str, Any]:
         def read():
             from market_data import get_market_ai_context
-            context = get_market_ai_context(symbol)
+            context = self._market_ai_context(symbol)
             strategy = {}
             try:
+                if not self._mt5_enabled():
+                    raise RuntimeError("MT5_DISABLED_BY_PROFILE")
                 from meta_strategy import analyze_symbol
                 strategy = analyze_symbol(symbol)
             except Exception as exc:
@@ -444,6 +494,8 @@ class GoldenReadBridge:
                          "robot_catalog.py", evidence_class="HISTORICAL_EVIDENCE")
 
     def mt5_read_snapshot(self) -> dict[str, Any]:
+        if not self._mt5_enabled():
+            return self._source_disabled("golden.market_data", "market_readonly.py")
         from .tools import market_readonly as market
         return _safe("golden.market_data", "market_readonly.py", lambda: {
             "terminal": market.mt5_status(),

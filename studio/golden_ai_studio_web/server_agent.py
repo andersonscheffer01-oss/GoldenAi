@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import asyncio
+import uuid
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -42,6 +43,10 @@ ROOT = Path(r"C:\GoldenAI")
 MT5_PATH = Path(r"C:\Users\Anderson\AppData\Roaming\MetaQuotes\Terminal")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from jarvis_core.runtime_profile import DEFAULT_PROFILE, resolve_runtime_profile
+
+ACTIVE_RUNTIME_PROFILE = DEFAULT_PROFILE
 
 # Import Ollama
 try:
@@ -399,7 +404,7 @@ def probe_ollama_health(timeout=2):
         return "OFFLINE", []
 
 
-def warm_jarvis_boot():
+def warm_jarvis_boot(skip_voice=False):
     """Boot EAGER do Jarvis (background, idempotente, sem gastar geração).
 
     Registra adapters, valida saúde leve (Groq models-list, Ollama tags) e
@@ -452,26 +457,29 @@ def warm_jarvis_boot():
             problems.append("ollama OFFLINE")
     except Exception:
         problems.append("ollama probe error")
-    try:
-        from jarvis_core.voice import get_voice
-        from jarvis_core.voice_service import get_voice_service
-        vs = get_voice_service()
-        if vs.enabled:
-            voice = get_voice()
-            thread = voice.warmup_async()
-            deadline = time.time() + float(os.environ.get("JARVIS_STT_WARMUP_TIMEOUT", "30"))
-            while thread.is_alive() and time.time() < deadline:
-                time.sleep(0.2)
-            warm = dict(voice.warmup)
-            ready.record(stt_load_ms=warm.get("latency_ms", 0),
-                         stt_warmup_ms=warm.get("latency_ms", 0),
-                         stt_warm=warm.get("state", ""))
-            if warm.get("state") != "READY":
-                problems.append("stt %s" % warm.get("state", "timeout"))
-        else:
-            ready.record(stt_warm="disabled")
-    except Exception:
-        problems.append("stt warmup error")
+    if skip_voice:
+        ready.record(stt_warm="disabled_by_profile")
+    else:
+        try:
+            from jarvis_core.voice import get_voice
+            from jarvis_core.voice_service import get_voice_service
+            vs = get_voice_service()
+            if vs.enabled:
+                voice = get_voice()
+                thread = voice.warmup_async()
+                deadline = time.time() + float(os.environ.get("JARVIS_STT_WARMUP_TIMEOUT", "30"))
+                while thread.is_alive() and time.time() < deadline:
+                    time.sleep(0.2)
+                warm = dict(voice.warmup)
+                ready.record(stt_load_ms=warm.get("latency_ms", 0),
+                             stt_warmup_ms=warm.get("latency_ms", 0),
+                             stt_warm=warm.get("state", ""))
+                if warm.get("state") != "READY":
+                    problems.append("stt %s" % warm.get("state", "timeout"))
+            else:
+                ready.record(stt_warm="disabled")
+        except Exception:
+            problems.append("stt warmup error")
     ready.complete(degraded=bool(problems), reason="; ".join(problems)[:300])
 
 
@@ -5471,6 +5479,14 @@ void OnTick()
     # ═══════════════════════════════════════════════════════════════
 
     def route_api(self, path, data):
+        profile_error = ACTIVE_RUNTIME_PROFILE.api_disabled_reason(path)
+        if profile_error:
+            return {
+                "ok": False,
+                "error": profile_error,
+                "disabled_by_profile": True,
+                "runtime_profile": ACTIVE_RUNTIME_PROFILE.name,
+            }
         routes = {
             "/api/status": self.api_status,
             "/api/security/status": self.api_security_status,
@@ -5513,6 +5529,10 @@ void OnTick()
             "/api/jarvis/chat": lambda d: self._api_jarvis_chat(d),
             "/api/jarvis/golden/overview": lambda d: self._api_jarvis_golden_overview(d),
             "/api/jarvis/golden/radar": lambda d: self._api_jarvis_golden_radar(d),
+            "/api/jarvis/golden/scanner": lambda d: self._api_jarvis_golden_scanner(d),
+            "/api/jarvis/golden/robots": lambda d: self._api_jarvis_golden_robots(d),
+            "/api/jarvis/golden/robot": lambda d: self._api_jarvis_golden_robot(d),
+            "/api/jarvis/golden/evidence": lambda d: self._api_jarvis_golden_evidence(d),
             "/api/jarvis/golden/risk": lambda d: self._api_jarvis_golden_risk(d),
             "/api/jarvis/golden/validation": lambda d: self._api_jarvis_golden_validation(d),
             "/api/jarvis/golden/deep-analysis": lambda d: self._api_jarvis_golden_deep_analysis(d),
@@ -5631,16 +5651,17 @@ void OnTick()
         mt5_account = None
         mt5_server = None
         mt5_balance = 0
-        try:
-            from mt5_connector import ensure_connection, get_status as mt5_status
-            ensure_connection()
-            st = mt5_status()
-            mt5_ok = st.get('connected', False)
-            mt5_account = st.get('account')
-            mt5_server = st.get('server')
-            mt5_balance = st.get('balance', 0)
-        except Exception:
-            pass
+        if ACTIVE_RUNTIME_PROFILE.mt5_enabled:
+            try:
+                from mt5_connector import ensure_connection, get_status as mt5_status
+                ensure_connection()
+                st = mt5_status()
+                mt5_ok = st.get('connected', False)
+                mt5_account = st.get('account')
+                mt5_server = st.get('server')
+                mt5_balance = st.get('balance', 0)
+            except Exception:
+                pass
         # Ollama
         ollama_ok = False
         try:
@@ -5682,6 +5703,7 @@ void OnTick()
             "ok": True, "status": "online", "version": "V6.0-AutoConnect",
             "security": {"mode": EXECUTION_SERVICE.get_mode().value if EXECUTION_SERVICE else "UNAVAILABLE"},
             "system": {"cpu": cpu, "memory": mem, "disk": disk},
+            "runtime_profile": ACTIVE_RUNTIME_PROFILE.status(),
             "connections": {
                 "mt5": {"ok": mt5_ok, "account": mt5_account, "server": mt5_server, "balance": mt5_balance},
                 "ollama": {"ok": ollama_ok},
@@ -5969,13 +5991,35 @@ void OnTick()
     def _api_jarvis_chat(self, data):
         """Chat completo: texto → LLM → plano → executa → resposta."""
         try:
+            payload = data or {}
+            surface = str(payload.get("surface") or "").strip().lower()
+            if surface == "market" or payload.get("canonical_response") is True:
+                from desktop_center import DESKTOP_CENTER
+                service = DESKTOP_CENTER.service
+                requested_context = payload.get("market_context") or payload.get("context") or {}
+                context_result = service.market_context_snapshot(requested_context)
+                context = context_result.get("context") or {
+                    "surface": "market",
+                    "selected_asset": str(requested_context.get("symbol") or "UNKNOWN")[:32],
+                    "symbol": str(requested_context.get("symbol") or "UNKNOWN")[:32],
+                    "timeframe": str(requested_context.get("timeframe") or "UNKNOWN")[:8],
+                    "availability": "UNAVAILABLE", "freshness": "UNAVAILABLE",
+                    "provenance": {},
+                }
+                result = service.generate_response(
+                    str(payload.get("text") or payload.get("message") or "").strip(),
+                    surface="market", conversation_id=payload.get("conversation_id") or
+                    payload.get("session_id") or "market-default",
+                    market_context=context, source="market")
+                result["market_context_status"] = "AVAILABLE" if context_result.get("ok") else "UNAVAILABLE"
+                return result
             request_started = time.perf_counter()
             request_id = uuid.uuid4().hex
             from jarvis_core.brain import get_brain
             from desktop_center import DESKTOP_CENTER
 
-            text = str((data or {}).get("text") or "").strip()
-            session_id = str((data or {}).get("session_id") or "desktop")[:120]
+            text = str(payload.get("text") or "").strip()
+            session_id = str(payload.get("session_id") or "desktop")[:120]
             if not text:
                 return {"ok": False, "error": "Texto vazio"}
             from jarvis_core.output_mode import get_output_mode_manager, to_spoken_text
@@ -6187,6 +6231,48 @@ void OnTick()
             "timeframe": str(payload.get("timeframe") or "M15"),
             "correlation_id": str(payload.get("correlation_id") or ""),
         })
+
+    def _api_jarvis_golden_scanner(self, data):
+        payload = data or {}
+        return self._execute_jarvis_read("golden_scanner_snapshot", {
+            "symbol": str(payload.get("symbol") or ""),
+            "limit": max(1, min(int(payload.get("limit") or 20), 100)),
+        })
+
+    def _api_jarvis_golden_robots(self, data):
+        return self._execute_jarvis_read("robot_catalog_snapshot")
+
+    def _api_jarvis_golden_robot(self, data):
+        payload = data or {}
+        robot_id = str(payload.get("robot_id") or "").strip()
+        if not robot_id:
+            return {"ok": False, "status": "EMPTY", "read_only": True,
+                    "error": "ROBOT_ID_REQUIRED"}
+        return self._execute_jarvis_read("robot_catalog_detail", {
+            "robot_id": robot_id,
+        })
+
+    def _api_jarvis_golden_evidence(self, data):
+        payload = data or {}
+        limit = max(1, min(int(payload.get("limit") or 20), 100))
+        validation = self._execute_jarvis_read("golden_validation_detail", {
+            "limit": limit,
+        })
+        tester = self._execute_jarvis_read("golden_tester_history")
+        validation_ok = validation.get("ok", True) if isinstance(validation, dict) else False
+        tester_ok = tester.get("ok", True) if isinstance(tester, dict) else False
+        return {
+            "ok": validation_ok and tester_ok,
+            "read_only": True,
+            "side_effect_class": "READ_ONLY",
+            "security_state": "READ_ONLY_NO_SIDE_EFFECT",
+            "validation": validation,
+            "tester": tester,
+            "evidence_classes": [
+                "VERIFIED_REAL_EVIDENCE", "HISTORICAL_EVIDENCE", "CALCULATED",
+                "SYNTHETIC", "DEMO", "UNKNOWN",
+            ],
+        }
 
     def _api_jarvis_golden_risk(self, data):
         return self._execute_jarvis_read("golden_risk_detail")
@@ -6619,24 +6705,29 @@ void OnTick()
 
     def _api_market_overview(self, data):
         from market_data import get_market_overview
-        return get_market_overview()
+        return get_market_overview(mt5_enabled=ACTIVE_RUNTIME_PROFILE.mt5_enabled)
 
     def _api_market_forex(self, data):
         from market_data import get_forex_analysis
-        return get_forex_analysis((data or {}).get("symbol"))
+        return get_forex_analysis((data or {}).get("symbol"),
+                                  mt5_enabled=ACTIVE_RUNTIME_PROFILE.mt5_enabled)
 
     def _api_market_chart(self, data):
         from market_data import get_market_chart
         data = data or {}
-        return get_market_chart(data.get("symbol", "XAUUSD"), data.get("timeframe", "M15"))
+        return get_market_chart(data.get("symbol", "XAUUSD"),
+                                data.get("timeframe", "M15"),
+                                mt5_enabled=ACTIVE_RUNTIME_PROFILE.mt5_enabled)
 
     def _api_market_tick(self, data):
         from market_data import get_market_tick
-        return get_market_tick((data or {}).get("symbol", "XAUUSD"))
+        return get_market_tick((data or {}).get("symbol", "XAUUSD"),
+                               mt5_enabled=ACTIVE_RUNTIME_PROFILE.mt5_enabled)
 
     def _api_market_ai_context(self, data):
         from market_data import get_market_ai_context
-        return get_market_ai_context((data or {}).get("symbol", "XAUUSD"))
+        return get_market_ai_context((data or {}).get("symbol", "XAUUSD"),
+                                     mt5_enabled=ACTIVE_RUNTIME_PROFILE.mt5_enabled)
 
     def _api_market_analysis_history(self, data):
         path = ROOT / "data" / "market_ai_audit.jsonl"
@@ -6792,49 +6883,76 @@ void OnTick()
         return {"ok": True, "ranking": sorted(ranked, key=lambda row: row["score"], reverse=True)[:12],
                 "method": "prontidao 65% + alinhamento MTF - penalidade de spread"}
 
-    def _api_market_analyze(self, data):
-        """Análise financeira isolada do chat geral e sem histórico contaminado."""
-        if not OLLAMA_AVAILABLE:
-            return {"ok": False, "error": "IA local desligada"}
-        prompt = str((data or {}).get("prompt", "")).strip()
-        if not prompt:
-            return {"ok": False, "error": "Contexto de análise vazio"}
-        system = (
-            "Você é o analista técnico e macroeconômico do Golden AI Radar. "
-            "Responda sempre em português do Brasil, de forma objetiva e profissional. "
-            "Cumpra somente a modalidade solicitada. Use exclusivamente os números fornecidos, "
-            "não invente dados e não transforme score em probabilidade. Não dê ordem direta de "
-            "compra ou venda: descreva cenários condicionais, evidências, invalidação e riscos."
+    @staticmethod
+    def _market_analysis_message(mode, symbol, timeframe, question=""):
+        instructions = {
+            "completa": "Cruze técnica, força relativa, macro, risco, setup e níveis; entregue cenários condicionais, gatilhos, invalidação, riscos e dados ausentes.",
+            "tecnica": "Analise candles, estrutura, RSI, ATR, tendências, níveis e confluências; informe gatilho técnico, invalidação e quando não operar.",
+            "fundamental": "Analise somente fundamentos disponíveis, juros, inflação, dólar, eventos, notícias e força relativa; diferencie observação de ausência.",
+            "risco": "Avalie volatilidade, ATR, spread, distância até níveis, alinhamento temporal, histórico e risco de evento sem sugerir execução.",
+            "setup": "Audite o setup do scanner, condições, direção, confluência, relação risco-retorno, gatilho, stop, alvos e cancelamento.",
+            "explicar": "Explique suportes e resistências, testes, relevância, distância, rompimentos e troca de polaridade.",
+            "pergunta_contextual": "Responda à pergunta contextual usando somente o MarketContext atual e declare dados ausentes.",
+        }
+        if mode == "pergunta_contextual" and question:
+            task = question[:2000]
+        else:
+            task = instructions.get(mode, instructions["completa"])
+        return (
+            f"Ativo {symbol} no timeframe {timeframe}. Modalidade {mode or 'completa'}. "
+            f"{task} Responda em português do Brasil. Use somente dados observados no "
+            "MARKET_CONTEXT estruturado. Não invente valores, não transforme score em "
+            "probabilidade e não emita ordem de compra ou venda."
         )
+
+    def _api_market_analyze(self, data):
+        """Canonical Market AI response with structured context and no tools."""
+        payload = data or {}
+        symbol = str(payload.get("symbol") or "XAUUSD").strip()[:32]
+        timeframe = str(payload.get("timeframe") or "M15").upper()[:8]
+        mode = str(payload.get("mode") or "completa").strip().lower()[:40]
+        question = str(payload.get("question") or "").strip()
+        from desktop_center import DESKTOP_CENTER
+        service = DESKTOP_CENTER.service
+        context_result = service.market_context_snapshot({
+            "symbol": symbol, "timeframe": timeframe,
+        })
+        context = context_result.get("context") or {
+            "surface": "market", "symbol": symbol, "selected_asset": symbol,
+            "timeframe": timeframe, "availability": "UNAVAILABLE",
+            "freshness": "UNAVAILABLE", "provenance": {},
+        }
+        message = self._market_analysis_message(mode, symbol, timeframe, question)
+        result = service.generate_response(
+            message, surface="market_deep_analysis",
+            conversation_id=payload.get("conversation_id") or
+            f"market-analysis:{symbol}:{timeframe}",
+            market_context=context, source="market")
+        timestamp = datetime.now().isoformat()
+        response = result.get("response") or result.get("error") or "Sem resposta."
+        snapshot = dict(payload.get("snapshot") or {})
+        snapshot.update({"context_timestamp": context.get("context_timestamp"),
+                         "freshness": context.get("freshness", "UNKNOWN"),
+                         "provenance": context.get("provenance", {}),
+                         "availability": context.get("availability", "UNKNOWN")})
+        audit = {
+            "timestamp": timestamp, "symbol": symbol, "timeframe": timeframe,
+            "mode": mode, "response": response, "snapshot": snapshot,
+            "evaluation_status": "pendente", "provider": result.get("provider", ""),
+            "model": result.get("model", ""),
+            "request_id": result.get("response_id", ""),
+            "surface": "market_deep_analysis",
+        }
+        audit_path = ROOT / "data" / "market_ai_audit.jsonl"
         try:
-            response = ollama_chat(model="qwen2.5-coder:14b", messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ], options={"temperature": 0.15, "num_predict": 900})
-            content = response.message.content if hasattr(response, "message") else response.get("message", {}).get("content", "")
-            timestamp = datetime.now().isoformat()
-            snapshot = dict((data or {}).get("snapshot", {}) or {})
-            if not snapshot.get("direction"):
-                direction_match = re.search(r'"best_direction"\s*:\s*"(BUY|SELL)"', prompt, re.IGNORECASE)
-                if direction_match:
-                    snapshot["direction"] = direction_match.group(1).upper()
-                elif "alta alinhada" in str(snapshot.get("alignment", "")).lower():
-                    snapshot["direction"] = "BUY"
-                elif "baixa alinhada" in str(snapshot.get("alignment", "")).lower():
-                    snapshot["direction"] = "SELL"
-            audit = {
-                "timestamp": timestamp, "symbol": str((data or {}).get("symbol", "")),
-                "timeframe": str((data or {}).get("timeframe", "")), "mode": str((data or {}).get("mode", "")),
-                "response": content, "snapshot": snapshot,
-                "evaluation_status": "pendente"
-            }
-            audit_path = ROOT / "data" / "market_ai_audit.jsonl"
             audit_path.parent.mkdir(parents=True, exist_ok=True)
             with audit_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(audit, ensure_ascii=False, cls=_NumpyEncoder) + "\n")
-            return {"ok": True, "response": content, "timestamp": timestamp, "audit": "registrada"}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {**result, "ok": False, "error": f"Registro de evidencia indisponível: {exc}",
+                    "audit": "falhou"}
+        return {**result, "timestamp": timestamp, "audit": "registrada",
+                "market_context_status": "AVAILABLE" if context_result.get("ok") else "UNAVAILABLE"}
 
     def api_search(self, data):
         query = data.get("query", "")
@@ -6952,7 +7070,13 @@ void OnTick()
             return {"ok": False, "error": str(e)}
 
 
-def start_server(port=8765):
+def start_server(port=8765, runtime_profile=None):
+    global ACTIVE_RUNTIME_PROFILE
+    ACTIVE_RUNTIME_PROFILE = resolve_runtime_profile(runtime_profile)
+    from desktop_center import DESKTOP_CENTER
+    DESKTOP_CENTER.service.apply_runtime_profile(ACTIVE_RUNTIME_PROFILE)
+    print('[RUNTIME] profile=%s' % ACTIVE_RUNTIME_PROFILE.name, flush=True)
+
     # Acquire ownership before HTTP, warmup, monitor, Gateway, or voice startup.
     from jarvis_core.single_instance import acquire_core_instance
     try:
@@ -6990,17 +7114,20 @@ def start_server(port=8765):
     _ready = get_readiness()
     _ready.begin()
 
-    # Conectar MT5 automaticamente
-    try:
-        from mt5_connector import ensure_connection, get_status as mt5_status
-        if ensure_connection():
-            st = mt5_status()
-            print('[MT5] ✅ Conectado! Conta: %s | Servidor: %s | Saldo: %.2f' % (
-                st.get('account', '?'), st.get('server', '?'), st.get('balance', 0)))
-        else:
-            print('[MT5] ⚠️ Nao conectado. Abrir MetaTrader 5 primeiro.')
-    except Exception as e:
-        print('[MT5] ⚠️ Erro ao conectar: %s' % str(e)[:80])
+    # Conectar MT5 automaticamente apenas no perfil operacional legado.
+    if ACTIVE_RUNTIME_PROFILE.mt5_enabled:
+        try:
+            from mt5_connector import ensure_connection, get_status as mt5_status
+            if ensure_connection():
+                st = mt5_status()
+                print('[MT5] ✅ Conectado! Conta: %s | Servidor: %s | Saldo: %.2f' % (
+                    st.get('account', '?'), st.get('server', '?'), st.get('balance', 0)))
+            else:
+                print('[MT5] ⚠️ Nao conectado. Abrir MetaTrader 5 primeiro.')
+        except Exception as e:
+            print('[MT5] ⚠️ Erro ao conectar: %s' % str(e)[:80])
+    else:
+        print('[MT5] DISABLED_BY_PROFILE — connector startup skipped', flush=True)
     
     # Verificar API key na inicialização
     if CLAUDE_AVAILABLE:
@@ -7028,7 +7155,7 @@ def start_server(port=8765):
         print(f'  SSL Mode:  ENABLED (TLS 1.2+)')
     else:
         print(f'  SSL Mode:  OFF (plain HTTP)')
-    print('  MT5:       Auto-connect (mantido vivo)')
+    print('  MT5:       %s' % ('Auto-connect (mantido vivo)' if ACTIVE_RUNTIME_PROFILE.mt5_enabled else 'DISABLED_BY_PROFILE'))
     print('═══════════════════════════════════════════')
     print('')
     
@@ -7037,32 +7164,38 @@ def start_server(port=8765):
     if _ssl_context:
         server.socket = _ssl_context.wrap_socket(server.socket, server_side=True)
 
+    if ACTIVE_RUNTIME_PROFILE.monitor_enabled:
+        try:
+            from monitor_service import get_monitor_service
+            get_monitor_service().start()
+            print('[RADAR] Monitor persistente iniciado (intervalo: 60s)')
+        except Exception as e:
+            print('[RADAR] Monitor persistente indisponivel: %s' % str(e)[:120])
+    else:
+        print('[RADAR] Monitor persistente DISABLED_BY_PROFILE', flush=True)
     try:
-        from monitor_service import get_monitor_service
-        get_monitor_service().start()
-        print('[RADAR] Monitor persistente iniciado (intervalo: 60s)')
-    except Exception as e:
-        print('[RADAR] Monitor persistente indisponivel: %s' % str(e)[:120])
-    try:
-        from desktop_center import DESKTOP_CENTER
-        from jarvis_core.voice_service import get_voice_service
         # CORE READY: registry/security/orchestrator/fast paths no ar.
         _ready.core_ready()
         # FULL READY em background: providers eager + probes + STT warmup.
         # O Desktop já pode abrir; a voz barra comandos até READY.
         import threading as _threading
         _warm_thread = _threading.Thread(target=warm_jarvis_boot,
+                                         kwargs={"skip_voice": not ACTIVE_RUNTIME_PROFILE.voice_enabled},
                                          name="jarvis-boot-warm", daemon=True)
         _warm_thread.start()
-        vs = get_voice_service()
-        if vs.enabled:
-            result = vs.start(DESKTOP_CENTER.service)
-            if result.get("ok") and vs.is_running():
-                print('[JARVIS-VOICE] Escuta local iniciada — diga "Jarvis" + comando (sem navegador).')
+        if ACTIVE_RUNTIME_PROFILE.voice_enabled:
+            from jarvis_core.voice_service import get_voice_service
+            vs = get_voice_service()
+            if vs.enabled:
+                result = vs.start(DESKTOP_CENTER.service)
+                if result.get("ok") and vs.is_running():
+                    print('[JARVIS-VOICE] Escuta local iniciada — diga "Jarvis" + comando (sem navegador).')
+                else:
+                    print('[JARVIS-VOICE] Nao iniciada: %s' % str(result.get("error") or result.get("message"))[:120])
             else:
-                print('[JARVIS-VOICE] Nao iniciada: %s' % str(result.get("error") or result.get("message"))[:120])
+                print('[JARVIS-VOICE] Desativado (JARVIS_VOICE_SERVICE=0).')
         else:
-            print('[JARVIS-VOICE] Desativado (JARVIS_VOICE_SERVICE=0).')
+            print('[JARVIS-VOICE] DISABLED_BY_PROFILE', flush=True)
     except Exception as e:
         print('[JARVIS-VOICE] Indisponivel: %s' % str(e)[:120])
 
@@ -7153,11 +7286,12 @@ def start_server(port=8765):
                 _gateway_loop.call_soon_threadsafe(_gateway_loop.stop)
             except Exception:
                 pass
-        try:
-            from jarvis_core.voice_service import get_voice_service as _get_vs
-            _get_vs().stop()
-        except Exception:
-            pass
+        if ACTIVE_RUNTIME_PROFILE.voice_enabled:
+            try:
+                from jarvis_core.voice_service import get_voice_service as _get_vs
+                _get_vs().stop()
+            except Exception:
+                pass
         try:
             from jarvis_core.device_pairing import get_device_pairing_service as _get_pairing
             _get_pairing().stop()
@@ -7179,5 +7313,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--runtime-profile", default="default")
     args = parser.parse_args()
-    start_server(args.port)
+    start_server(args.port, args.runtime_profile)

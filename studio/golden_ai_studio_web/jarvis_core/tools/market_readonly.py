@@ -65,11 +65,13 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
 
 
 def _offline(reason: str, **extra: Any) -> dict[str, Any]:
+    disabled = str(reason or "").startswith("SOURCE_DISABLED")
     return {
         "ok": True,
-        "status": "OFFLINE",
+        "status": "DISABLED_BY_PROFILE" if disabled else "OFFLINE",
         "connected": False,
         "reason": str(reason or "MT5 desconectado"),
+        "availability": "SOURCE_DISABLED" if disabled else "OFFLINE",
         "timestamp": _timestamp(),
         **extra,
     }
@@ -82,6 +84,9 @@ def _terminal_available() -> bool:
 def _connection() -> tuple[Any, Any, Any, str]:
     """Return the existing MT5 client, terminal, account and error reason."""
     try:
+        from jarvis_core.runtime_profile import active_runtime_profile
+        if not active_runtime_profile().mt5_enabled:
+            return None, None, None, "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE"
         import MetaTrader5 as mt5
         from mt5_connector import ensure_connection
 

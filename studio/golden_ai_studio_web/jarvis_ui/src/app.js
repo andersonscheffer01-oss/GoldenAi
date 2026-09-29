@@ -6,7 +6,7 @@ import { createBridge } from "./bridge.js";
 import { createBrain } from "./brain.js?v=20260921-4";
 import { sfx, setMuted, tone } from "./audio.js";
 import { createMetrics } from "./metrics.js";
-import { createGolden } from "./golden.js?v=20260921-4";
+import { createGolden } from "./golden.js?v=20260928-b3-runtime-reconcile";
 import { createSearch } from "./search.js?v=20260921-4";
 
 const $ = (s) => document.querySelector(s);
@@ -87,9 +87,10 @@ const CFG = {
   boot: pjsCfg("bootSequence", "true") !== "false",
 };
 
+const MARKET_WINDOW_MODE = window.location.hash === "#market-intelligence";
 const saved = loadJSON("settings", {});
 const settings = {
-  theme: saved.theme || CFG.defaultTheme,
+  theme: MARKET_WINDOW_MODE ? "golden" : (saved.theme || CFG.defaultTheme),
   speak: saved.speak != null ? saved.speak : CFG.speak,
   wake: saved.wake || false,
   voiceName: saved.voiceName || "",
@@ -1045,7 +1046,7 @@ function applyTheme(id, silent) {
   updateOrbTarget();
   if (theme.id === "golden") golden?.mount(); else golden?.unmount();
   settings.theme = theme.id;
-  persist();
+  if (!MARKET_WINDOW_MODE) persist();
   renderThemeGrid();
   if (!silent) {
     logLine("interface → " + theme.name, "ok");
@@ -1320,55 +1321,304 @@ async function runBoot() {
   setTimeout(() => bootOverlay.remove(), 800);
 }
 
+const b3State = {
+  symbol: "XAUUSD", timeframe: "M15", scanner: [], robots: [], selectedOpportunity: null,
+  selectedRobot: null, marketAssets: [], marketGroup: "ALL", marketResponse: null,
+  responses: {}, busy: false,
+};
+
+function b3Payload(response) {
+  return response?.data && typeof response.data === "object" ? response.data : (response || {});
+}
+function b3Status(response) {
+  if (!response) return "UNAVAILABLE";
+  if (response.error || response.ok === false && response.status === "ERROR") return "ERROR";
+  return String(response.availability || response.status || (response.ok === false ? "UNAVAILABLE" : "AVAILABLE")).toUpperCase();
+}
+function b3Value(value) {
+  if (value == null || value === "") return "UNKNOWN";
+  if (Array.isArray(value)) return value.length ? value.map((v) => b3Value(v)).join(", ") : "EMPTY";
+  if (typeof value === "object") {
+    try { return JSON.stringify(value); } catch { return "UNKNOWN"; }
+  }
+  return String(value);
+}
+function b3Short(value, max = 180) {
+  const text = b3Value(value);
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+function b3StateTag(value) {
+  const state = String(value || "UNKNOWN").toUpperCase();
+  return `<span class="gB3State" data-state="${esc(state)}">${esc(state)}</span>`;
+}
+function b3Empty(text = "Nenhum dado verificável disponível.") {
+  return `<p class="gB3Empty">${esc(text)}</p>`;
+}
+function b3Detail(items) {
+  return `<div class="gB3DetailGrid">${items.map(([label, value]) => `<div class="gB3DetailItem"><label>${esc(label)}</label><span title="${esc(b3Value(value))}">${esc(b3Short(value))}</span></div>`).join("")}</div>`;
+}
+function b3Num(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+function b3Fmt(value, digits = 2) {
+  const number = b3Num(value);
+  return number == null ? "UNKNOWN" : number.toLocaleString("pt-BR", { maximumFractionDigits: digits });
+}
+function b3AssetKey(value) {
+  return String(value || "").replace(/[^A-Z0-9]/gi, "").toUpperCase();
+}
+function b3MarketAssetRows() {
+  return b3State.marketGroup === "ALL"
+    ? b3State.marketAssets
+    : b3State.marketAssets.filter((item) => String(item.group || item.asset_class || "UNKNOWN") === b3State.marketGroup);
+}
+function b3RenderMarketChart(chart) {
+  const canvas = $("#gB3MarketChart");
+  const status = $("#gB3MarketChartState");
+  const candles = Array.isArray(chart?.candles) ? chart.candles.filter((item) =>
+    [item.open, item.high, item.low, item.close].every((value) => b3Num(value) != null)) : [];
+  if (status) status.textContent = candles.length ? `${chart.source || "OBSERVED"} · ${candles.length} CANDLES` : "DATA UNAVAILABLE";
+  if (!canvas || !candles.length) return;
+  const draw = () => {
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth || 640;
+    const height = canvas.clientHeight || 250;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    const pad = { left: 12, right: 58, top: 12, bottom: 22 };
+    const lows = candles.map((item) => Number(item.low));
+    const highs = candles.map((item) => Number(item.high));
+    const low = Math.min(...lows), high = Math.max(...highs), span = high - low || 1;
+    const plotWidth = Math.max(1, width - pad.left - pad.right);
+    const plotHeight = Math.max(1, height - pad.top - pad.bottom);
+    const y = (value) => pad.top + ((high - value) / span) * plotHeight;
+    const step = plotWidth / candles.length;
+    const body = Math.max(2, Math.min(9, step * 0.64));
+    ctx.clearRect(0, 0, width, height);
+    ctx.font = "9px Segoe UI";
+    ctx.fillStyle = "rgba(150, 200, 240, .58)";
+    ctx.strokeStyle = "rgba(120, 190, 230, .14)";
+    for (let index = 0; index < 5; index += 1) {
+      const lineY = pad.top + (plotHeight * index) / 4;
+      ctx.beginPath(); ctx.moveTo(pad.left, lineY); ctx.lineTo(width - pad.right, lineY); ctx.stroke();
+      ctx.fillText(b3Fmt(high - (span * index) / 4, 3), width - pad.right + 7, lineY + 3);
+    }
+    candles.forEach((item, index) => {
+      const x = pad.left + (index + 0.5) * step;
+      const up = Number(item.close) >= Number(item.open);
+      const color = up ? "#44e0a1" : "#ff6d86";
+      ctx.strokeStyle = color; ctx.fillStyle = color;
+      ctx.beginPath(); ctx.moveTo(x, y(Number(item.high))); ctx.lineTo(x, y(Number(item.low))); ctx.stroke();
+      const top = y(Math.max(Number(item.open), Number(item.close)));
+      const bottom = y(Math.min(Number(item.open), Number(item.close)));
+      ctx.fillRect(x - body / 2, top, body, Math.max(1, bottom - top));
+    });
+    const last = Number(candles.at(-1).close), lastY = y(last);
+    ctx.setLineDash([4, 4]); ctx.strokeStyle = "#e1ad45";
+    ctx.beginPath(); ctx.moveTo(pad.left, lastY); ctx.lineTo(width - pad.right, lastY); ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  draw();
+  window.addEventListener("resize", draw, { once: true });
+}
+function b3RenderMarketMiniRows(items) {
+  return items.length ? items.map((item) => {
+    const change = b3Num(item.change ?? item.variation);
+    const cls = change == null ? "" : change >= 0 ? "gB3MarketUp" : "gB3MarketDown";
+    return `<div class="gB3MarketMiniRow"><b>${esc(item.symbol || item.label || "UNKNOWN")}</b><span>${esc(b3Value(item.price))}</span><strong class="${cls}">${change == null ? "UNKNOWN" : `${change >= 0 ? "+" : ""}${b3Fmt(change)}%`}</strong></div>`;
+  }).join("") : b3Empty("Nenhum ativo verificável para este filtro.");
+}
+function b3RenderStatus(id, response) {
+  const el = $(`#${id}`);
+  if (!el) return;
+  const status = b3Status(response);
+  el.textContent = status;
+  el.dataset.status = status;
+}
+function b3Overview(overview, radar, scanner, robots, evidence, memory) {
+  const robotData = b3Payload(robots);
+  const report = robotData.report || {};
+  const counts = report.association_counts || {};
+  const radarData = b3Payload(radar);
+  const scannerData = b3Payload(scanner);
+  const evidenceData = evidence || {};
+  const validationData = b3Payload(evidenceData.validation);
+  const testerData = b3Payload(evidenceData.tester);
+  const memoryData = memory?.contract || {};
+  const metrics = [
+    ["CAPABILITIES", overview?.capabilities?.count ?? "UNKNOWN"],
+    ["OPORTUNIDADES", scannerData.normalized_results?.length ?? "UNKNOWN"],
+    ["ATIVOS MONITORADOS", radarData.market_map?.length ?? "UNKNOWN"],
+    ["ROBÔS NO CATÁLOGO", robotData.robots?.length ?? "UNKNOWN"],
+    ["EVIDÊNCIAS HISTÓRICAS", validationData.history?.length ?? "UNKNOWN"],
+    ["TESTER RUNS", testerData.test_runs?.length ?? "UNKNOWN"],
+    ["MEMÓRIA", memoryData.status || "UNKNOWN"],
+    ["BACKTESTS NÃO RESOLVIDOS", counts.UNRESOLVED ?? "UNKNOWN"],
+  ];
+  $("#gB3Overview").innerHTML = metrics.map(([label, value]) => `<div class="gB3Metric"><label>${esc(label)}</label><b title="${esc(b3Value(value))}">${esc(b3Short(value, 32))}</b></div>`).join("");
+  const matching = overview?.strategy?.data?.matching_coverage?.EXISTING_ROBOT_MARKET_MATCHING_COVERAGE || [];
+  $("#gGoldenBridgeSummary").innerHTML = b3Detail([
+    ["AUTORIDADE", overview?.authority || "JarvisService"],
+    ["MODO", overview?.read_only ? "READ_ONLY" : "UNKNOWN"],
+    ["SEGURANÇA", "READ_ONLY_NO_SIDE_EFFECT"],
+    ["MATCHING", matching.join(", ") || "UNKNOWN"],
+    ["FRESHNESS RADAR", radar?.freshness || "UNKNOWN"],
+    ["SOURCE INTEGRITY", radarData.source_integrity ? "AVAILABLE" : "UNKNOWN"],
+  ]);
+}
+function b3RenderMarket(response) {
+  const data = b3Payload(response);
+  const assets = Array.isArray(data.market_map) ? data.market_map : [];
+  b3State.marketAssets = assets;
+  b3State.marketResponse = response;
+  const groups = [...new Set(assets.map((item) => String(item.group || item.asset_class || "UNKNOWN")))].sort();
+  const groupSelect = $("#gB3MarketGroup");
+  if (groupSelect) {
+    const active = b3State.marketGroup;
+    groupSelect.innerHTML = `<option value="ALL">TODOS OS ATIVOS</option>${groups.map((group) => `<option value="${esc(group)}">${esc(group)}</option>`).join("")}`;
+    groupSelect.value = groups.includes(active) || active === "ALL" ? active : "ALL";
+    b3State.marketGroup = groupSelect.value;
+  }
+  const visibleAssets = b3MarketAssetRows();
+  const selected = assets.find((item) => b3AssetKey(item.symbol || item.label) === b3AssetKey(b3State.symbol)) || assets[0] || null;
+  const changes = assets.map((item) => b3Num(item.change ?? item.variation)).filter((value) => value != null);
+  const up = changes.filter((value) => value >= 0).length;
+  const down = changes.filter((value) => value < 0).length;
+  $("#gB3MarketSummary").innerHTML = b3Detail([
+    ["ATIVO", b3State.symbol], ["TIMEFRAME", b3State.timeframe],
+    ["NEWS", data.news?.length ?? "UNKNOWN"], ["MACRO", data.macro_indicators?.length ?? "UNKNOWN"],
+    ["FRESHNESS", response?.freshness || "UNKNOWN"], ["SOURCE", data.source || response?.provenance?.source_module || "UNKNOWN"],
+  ]);
+  $("#gB3MarketKpis").innerHTML = [
+    [selected?.symbol || b3State.symbol, selected?.price ?? "UNKNOWN", selected?.change, "ATIVO SELECIONADO"],
+    ["ATIVOS", assets.length, null, "MONITORADOS"], ["EM ALTA", up, null, "OBSERVED"], ["EM BAIXA", down, null, "OBSERVED"],
+  ].map(([label, value, change, caption]) => `<div class="gB3MarketKpi"><label>${esc(label)}</label><b>${esc(b3Value(value))}${change != null ? ` <em class="${change >= 0 ? "gB3MarketUp" : "gB3MarketDown"}">${change >= 0 ? "+" : ""}${esc(b3Fmt(change))}%</em>` : ""}</b><span>${esc(caption)}</span></div>`).join("");
+  $("#gB3MarketAssets").innerHTML = visibleAssets.length ? `<table class="gB3Table"><thead><tr><th>ATIVO</th><th>GRUPO</th><th>PREÇO</th><th>VARIAÇÃO</th><th>FONTE</th></tr></thead><tbody>${visibleAssets.slice(0, 40).map((item) => `<tr><td>${esc(item.symbol || item.label || "UNKNOWN")}</td><td>${esc(item.group || item.asset_class || "UNKNOWN")}</td><td>${esc(b3Value(item.price))}</td><td>${esc(b3Value(item.change ?? item.variation))}</td><td class="gB3Muted">${esc(item.source || data.source || "UNKNOWN")}</td></tr>`).join("")}</tbody></table>` : b3Empty("Radar sem ativos disponíveis; o estado não foi convertido em zero.");
+  const heatmap = $("#gB3MarketHeatmap");
+  if (heatmap) heatmap.innerHTML = visibleAssets.length ? visibleAssets.slice(0, 24).map((item) => {
+    const change = b3Num(item.change ?? item.variation);
+    const tone = change == null ? "unknown" : change >= 0 ? "up" : "down";
+    return `<div class="gB3HeatCell ${tone}" title="${esc(`${item.symbol || item.label || "UNKNOWN"} · ${b3Value(item.change ?? item.variation)}`)}"><b>${esc(item.symbol || item.label || "UNKNOWN")}</b><span>${change == null ? "UNKNOWN" : `${change >= 0 ? "+" : ""}${b3Fmt(change)}%`}</span></div>`;
+  }).join("") : b3Empty("Mapa indisponível: nenhum ativo observado.");
+  b3RenderMarketChart(data.technical_state || {});
+  $("#gB3MarketFlow").innerHTML = data.capital_flow ? b3RenderMarketMiniRows(Array.isArray(data.capital_flow) ? data.capital_flow : []) : b3Empty("Fluxo de capitais não fornecido pelo read model.");
+  const topAssets = assets.slice().sort((a, b) => Math.abs(bNum(b.change ?? b.variation) ?? 0) - Math.abs(bNum(a.change ?? a.variation) ?? 0)).slice(0, 6);
+  $("#gB3MarketTop").innerHTML = b3RenderMarketMiniRows(topAssets);
+  const news = Array.isArray(data.news) ? data.news.slice(0, 5) : [];
+  $("#gB3MarketNews").innerHTML = news.length ? news.map((item) => `<div class="gB3MarketNewsRow"><b>${esc(item.title || "UNKNOWN")}</b><span>${esc(item.source || "SOURCE UNKNOWN")} · ${esc(item.published_at || "TIME UNKNOWN")}</span></div>`).join("") : b3Empty("Nenhuma notícia verificável disponível.");
+  $("#gB3MarketDetail").innerHTML = b3Detail([
+    ["SUPORTE/RESISTÊNCIA", data.support_resistance], ["FORÇA DE MOEDAS", data.currency_strength],
+    ["SESSÕES", data.market_sessions], ["CALENDÁRIO", data.economic_calendar?.length ?? "UNKNOWN"],
+    ["INTEGRIDADE", data.source_integrity], ["REPLAY", data.replay_metadata],
+  ]);
+}
+function b3RenderScanner(response) {
+  const data = b3Payload(response);
+  b3State.scanner = Array.isArray(data.normalized_results) ? data.normalized_results : [];
+  $("#gB3Scanner").innerHTML = b3State.scanner.length ? `<table class="gB3Table"><thead><tr><th>ATIVO</th><th>DIREÇÃO</th><th>SCORE</th><th>READINESS</th><th>SETUP</th><th>ESTADO</th></tr></thead><tbody>${b3State.scanner.map((item, index) => `<tr data-selectable="1" data-opportunity="${index}"><td>${esc(item.symbol)}</td><td>${esc(item.direction)}</td><td>${esc(b3Value(item.score))}</td><td>${esc(b3Value(item.readiness))}</td><td>${esc(b3Short(item.selected_setup, 42))}</td><td>${b3StateTag(item.status || item.alert_state)}</td></tr>`).join("")}</tbody></table>` : b3Empty("Scanner sem oportunidades verificáveis neste momento.");
+  $("#gB3OpportunityDetail").innerHTML = b3State.selectedOpportunity ? b3Detail([
+    ["ATIVO", b3State.selectedOpportunity.symbol], ["REGIME", b3State.selectedOpportunity.market_regime],
+    ["VOLATILIDADE", b3State.selectedOpportunity.volatility], ["SESSÃO", b3State.selectedOpportunity.session],
+    ["HTF BIAS", b3State.selectedOpportunity.HTF_bias], ["H4/H1/M15/M5", b3State.selectedOpportunity.trend],
+    ["R:R", b3State.selectedOpportunity.risk_reward], ["CONFLUÊNCIA", b3State.selectedOpportunity.confluence],
+    ["INDICADORES", b3State.selectedOpportunity.indicators], ["PROVENANCE", b3State.selectedOpportunity.provenance],
+  ]) : b3Empty("Selecione uma oportunidade para abrir o detalhe.");
+  document.querySelectorAll("#gB3Scanner tr[data-opportunity]").forEach((row) => {
+    row.onclick = () => { b3State.selectedOpportunity = b3State.scanner[Number(row.dataset.opportunity)] || null; b3RenderScanner(response); };
+  });
+}
+function b3RenderRobots(response) {
+  const data = b3Payload(response);
+  b3State.robots = Array.isArray(data.robots) ? data.robots : [];
+  const report = data.report || {};
+  const unresolved = report.association_counts?.UNRESOLVED ?? "UNKNOWN";
+  $("#gB3Robots").innerHTML = b3State.robots.length ? `<table class="gB3Table"><thead><tr><th>IDENTIDADE</th><th>STATUS FONTE</th><th>COMPILADO</th><th>BACKTESTS</th><th>LIFECYCLE</th></tr></thead><tbody>${b3State.robots.slice(0, 50).map((item, index) => `<tr data-selectable="1" data-robot="${index}"><td>${esc(item.display_name || item.robot_id || "UNKNOWN")}</td><td>${esc(item.source_artifacts?.length ? "AVAILABLE" : "UNKNOWN")}</td><td>${esc(item.compiled_artifacts?.length ? "AVAILABLE" : "UNKNOWN")}</td><td>${esc(b3Value(item.backtest_artifacts?.length ?? item.test_runs?.length))}</td><td>${b3StateTag(item.status || "UNKNOWN")}</td></tr>`).join("")}</tbody></table>` : b3Empty("Catálogo sem robôs observados. Discovery não é executado pelo painel.");
+  $("#gB3Unresolved").textContent = `Evidência histórica não resolvida: ${b3Value(unresolved)} · ACTIVE = active in repertoire · autorização de trading: NONE`;
+  $("#gB3RobotDetail").innerHTML = b3State.selectedRobot ? b3Detail([
+    ["ROBOT ID", b3State.selectedRobot.robot_id], ["NOME", b3State.selectedRobot.display_name],
+    ["SOURCE HASH", b3State.selectedRobot.source_hash], ["COMPILED HASH", b3State.selectedRobot.compiled_hash],
+    ["PRESETS", b3State.selectedRobot.parameter_sets?.length], ["EVIDÊNCIAS", b3State.selectedRobot.provenance],
+    ["TEST RUNS", b3State.selectedRobot.test_runs?.length], ["LIMITAÇÕES", b3State.selectedRobot.known_limitations],
+  ]) : b3Empty("Selecione um robô para abrir identidade e evidências.");
+  document.querySelectorAll("#gB3Robots tr[data-robot]").forEach((row) => {
+    row.onclick = () => { b3State.selectedRobot = b3State.robots[Number(row.dataset.robot)] || null; b3RenderRobots(response); };
+  });
+}
+function b3RenderEvidence(response) {
+  const validation = b3Payload(response?.validation);
+  const tester = b3Payload(response?.tester);
+  const rows = [...(validation.history || []).map((item) => ({ ...item, kind: "VALIDATION" })), ...(tester.test_runs || []).map((item) => ({ ...item, kind: "TESTER" }))];
+  $("#gB3Evidence").innerHTML = rows.length ? `<table class="gB3Table"><thead><tr><th>TIPO</th><th>IDENTIDADE</th><th>CLASSIFICAÇÃO</th><th>STATUS</th><th>FONTE</th></tr></thead><tbody>${rows.slice(0, 80).map((item) => `<tr><td>${esc(item.kind)}</td><td>${esc(item.run_id || item.test_run_id || item.id || "UNKNOWN")}</td><td>${esc(item.evidence_class || item.evidence_type || "UNKNOWN")}</td><td>${esc(item.status || "UNKNOWN")}</td><td class="gB3Muted">${esc(item.source || item.artifact || "UNKNOWN")}</td></tr>`).join("")}</tbody></table>` : b3Empty("Nenhuma evidência verificável disponível.");
+}
+function b3RenderMemory(response) {
+  const contract = response?.contract || {};
+  const status = contract.status || "UNKNOWN";
+  $("#gScientificMemorySummary").innerHTML = b3Detail([
+    ["STATUS", status], ["AUTORIDADE", contract.authority || "CanonicalMemoryBoundary"],
+    ["SCHEMA CHANGE", response?.schema_change_required ? "YES" : "NO"],
+    ["IMPORT EXECUTADO", response?.import_executed ? "YES" : "NO"],
+    ["REGISTROS", contract.engine?.memory_count ?? contract.engine?.records ?? "UNKNOWN"],
+    ["ENTIDADES", contract.graph?.entities ?? "UNKNOWN"],
+  ]);
+  const matrix = Array.isArray(response?.matrix) ? response.matrix : [];
+  $("#gB3MemoryRelations").innerHTML = matrix.length ? `<table class="gB3Table"><thead><tr><th>CONCEITO</th><th>EQUIVALENTE JARVIS</th><th>RELAÇÃO/GAP</th><th>DECISÃO</th></tr></thead><tbody>${matrix.map((item) => `<tr><td>${esc(item.legacy_concept)}</td><td>${esc(item.current_jarvis_equivalent)}</td><td>${esc(item.gap)}</td><td>${esc(item.decision)}</td></tr>`).join("")}</tbody></table>` : b3Empty("Nenhuma relação científica disponível.");
+}
+function b3RenderProvenance(responses) {
+  const rows = Object.entries(responses).map(([name, response]) => [name, b3Status(response), response?.freshness || response?.provenance?.freshness_state || "UNKNOWN", response?.provenance?.source_module || response?.provenance?.provider || "JarvisService", response?.content_fingerprint || response?.provenance?.content_fingerprint || "UNKNOWN"]);
+  $("#gB3Provenance").innerHTML = `<table class="gB3Table"><thead><tr><th>READ MODEL</th><th>STATUS</th><th>FRESHNESS</th><th>SOURCE</th><th>FINGERPRINT</th></tr></thead><tbody>${rows.map((item) => `<tr><td>${esc(item[0])}</td><td>${b3StateTag(item[1])}</td><td>${esc(item[2])}</td><td>${esc(item[3])}</td><td class="gB3Muted" title="${esc(item[4])}">${esc(b3Short(item[4], 24))}</td></tr>`).join("")}</tbody></table>`;
+}
 async function refreshGoldenBridge() {
   const state = $("#gGoldenBridgeState");
-  const output = $("#gGoldenBridgeSummary");
-  const radarOutput = $("#gGoldenRadarDetail");
-  const memoryOutput = $("#gScientificMemorySummary");
-  if (!state || !output) return;
+  if (!state || b3State.busy) return;
+  b3State.busy = true;
+  b3State.symbol = ($(("#gB3Symbol"))?.value || "XAUUSD").trim().toUpperCase() || "XAUUSD";
+  b3State.timeframe = $("#gB3Timeframe")?.value || "M15";
   state.textContent = "CONSULTANDO";
-  output.textContent = "Consultando read model...";
+  $("#gB3Safety").textContent = "READ-ONLY · NO TRADING";
+  $("#gB3MarketSummary").innerHTML = b3Empty("Atualizando o read model do Radar...");
+  $("#gB3MarketKpis").innerHTML = "";
+  $("#gB3MarketHeatmap").innerHTML = b3Empty("Atualizando ativos observados...");
+  $("#gB3MarketFlow").innerHTML = "";
+  $("#gB3MarketTop").innerHTML = "";
+  $("#gB3MarketNews").innerHTML = "";
   try {
-    const data = await window.Gateway?.httpPost?.("/api/jarvis/golden/overview", {
-      include_live: false,
-    });
-    if (!data || data.ok === false) {
-      throw new Error(data?.error || "Read bridge indisponível");
-    }
-    const capabilities = data.capabilities?.count ?? 0;
-    const robots = data.robot_catalog?.data?.robots?.length ?? 0;
-    const runs = data.tester_evidence?.data?.count ?? 0;
-    const matching = data.strategy?.data?.matching_coverage
-      ?.EXISTING_ROBOT_MARKET_MATCHING_COVERAGE || [];
-    state.textContent = "READ-ONLY";
-    output.textContent = `Capabilities: ${capabilities} · Robôs catalogados: ${robots} · `
-      + `Evidências: ${runs} · Matching existente: ${matching.join(", ") || "UNKNOWN"}`;
-    const [radar, memory] = await Promise.all([
-      window.Gateway?.httpPost?.("/api/jarvis/golden/radar", {
-        symbol: "XAUUSD", timeframe: "M15",
-      }),
-      window.Gateway?.httpPost?.("/api/jarvis/memory/scientific", {}),
+    const post = window.Gateway?.httpPost;
+    if (!post) throw new Error("Gateway indisponível");
+    const [overview, market, scanner, robots, evidence, memory] = await Promise.all([
+      post.call(window.Gateway, "/api/jarvis/golden/overview", { include_live: false }),
+      post.call(window.Gateway, "/api/jarvis/golden/radar", { symbol: b3State.symbol, timeframe: b3State.timeframe }),
+      post.call(window.Gateway, "/api/jarvis/golden/scanner", { symbol: b3State.symbol, limit: 30 }),
+      post.call(window.Gateway, "/api/jarvis/golden/robots", {}),
+      post.call(window.Gateway, "/api/jarvis/golden/evidence", { limit: 30 }),
+      post.call(window.Gateway, "/api/jarvis/memory/scientific", {}),
     ]);
-    if (radarOutput) {
-      const radarData = radar?.data || {};
-      radarOutput.textContent = `Radar: ${radar?.availability || "UNKNOWN"} · `
-        + `Ativos: ${radarData.market_map?.length ?? 0} · `
-        + `Notícias: ${radarData.news?.length ?? 0} · `
-        + `Freshness: ${radar?.freshness || "UNKNOWN"}`;
-    }
-    if (memoryOutput) {
-      const contract = memory?.contract || {};
-      memoryOutput.textContent = `Memória científica: ${contract.status || "UNKNOWN"} · `
-        + `Schema change: ${contract.schema_change_required ? "YES" : "NO"} · `
-        + `Import: ${contract.import_executed ? "YES" : "NO"}`;
-    }
+    b3State.responses = { overview, market, scanner, robots, evidence, memory };
+    const failures = Object.values(b3State.responses).filter((item) => !item || item.ok === false).length;
+    state.textContent = failures ? (failures === 6 ? "UNAVAILABLE" : "PARTIAL") : "READ-ONLY";
+    ["gB3MarketState", "gB3ScannerState", "gB3RobotState", "gB3EvidenceState", "gB3MemoryState"].forEach((id, index) => b3RenderStatus(id, [market, scanner, robots, evidence, memory][index]));
+    b3Overview(overview || {}, market, scanner, robots, evidence || {}, memory || {});
+    b3RenderMarket(market || {});
+    b3RenderScanner(scanner || {});
+    b3RenderRobots(robots || {});
+    b3RenderEvidence(evidence || {});
+    b3RenderMemory(memory || {});
+    b3RenderProvenance(b3State.responses);
+    $("#gB3ProvenanceState").textContent = failures ? "PARTIAL" : "AVAILABLE";
   } catch (error) {
     state.textContent = "UNAVAILABLE";
-    output.textContent = error?.message || "Read bridge indisponível";
-    if (radarOutput) radarOutput.textContent = "Radar: UNAVAILABLE";
-    if (memoryOutput) memoryOutput.textContent = "Memória científica: UNAVAILABLE";
+    $("#gGoldenBridgeSummary").innerHTML = b3Empty(error?.message || "Read models indisponíveis.");
+    ["gB3MarketSummary", "gB3MarketAssets", "gB3MarketHeatmap", "gB3MarketFlow", "gB3MarketTop", "gB3MarketNews", "gB3MarketDetail"].forEach((id) => {
+      const el = $(`#${id}`); if (el) el.innerHTML = b3Empty("Read model indisponível; nenhum valor foi substituído.");
+    });
+    ["gB3MarketState", "gB3ScannerState", "gB3RobotState", "gB3EvidenceState", "gB3MemoryState", "gB3ProvenanceState"].forEach((id) => { const el = $(`#${id}`); if (el) el.textContent = "UNAVAILABLE"; });
+  } finally {
+    b3State.busy = false;
   }
 }
+window.JarvisB3Refresh = refreshGoldenBridge;
 
 // ------------------------------------------------------------------ INIT ----
 function wireUI() {
@@ -1411,6 +1661,10 @@ function wireUI() {
   };
   $("#bootSkipBtn").onclick = () => { bootOverlay.classList.add("done"); };
   $("#gGoldenBridgeRefresh")?.addEventListener("click", refreshGoldenBridge);
+  $("#gB3MarketGroup")?.addEventListener("change", (event) => {
+    b3State.marketGroup = event.target.value || "ALL";
+    if (b3State.marketResponse) b3RenderMarket(b3State.marketResponse);
+  });
 
   document.addEventListener("keydown", (e) => {
     const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);

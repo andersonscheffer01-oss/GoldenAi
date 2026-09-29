@@ -39,6 +39,17 @@ def _try_launch_mt5():
 def ensure_connection():
     """Garante que MT5 esta conectado. Reconecta automaticamente se necessario."""
     global _connected, _initialized
+    # RuntimeProfile is the capability boundary.  Legacy callers may still
+    # reach this connector indirectly through read models, so fail closed
+    # before touching MetaTrader5 or attempting an auto-launch.
+    try:
+        from jarvis_core.runtime_profile import active_runtime_profile
+        if not active_runtime_profile().mt5_enabled:
+            return False
+    except Exception:
+        # Preserve historical behavior if the optional Jarvis profile module
+        # is unavailable to a standalone legacy caller.
+        pass
     with _lock:
         if _connected:
             # Verificar se ainda esta vivo

@@ -38,6 +38,16 @@ _STRENGTH_CACHE = {"expires": 0, "data": None}
 _CALENDAR_CACHE = {"expires": 0, "items": [], "state": "configure"}
 _CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "BRL", "MXN", "ZAR", "CNH", "CNY", "SGD", "HKD", "NOK", "SEK", "DKK", "PLN", "HUF", "CZK", "TRY", "ILS", "INR", "THB", "GHS", "NGN", "KES", "TZS"}
 
+
+def _mt5_enabled(override=None):
+    if override is not None:
+        return bool(override)
+    try:
+        from jarvis_core.runtime_profile import active_runtime_profile
+        return bool(active_runtime_profile().mt5_enabled)
+    except Exception:
+        return True
+
 def _forex_symbols(mt5):
     result = []
     for info in mt5.symbols_get() or []:
@@ -75,8 +85,10 @@ def _currency_strength(mt5, pairs):
     _STRENGTH_CACHE.update({"expires": now + 900, "data": result})
     return result
 
-def get_forex_analysis(symbol=None):
+def get_forex_analysis(symbol=None, mt5_enabled=None):
     try:
+        if not _mt5_enabled(mt5_enabled):
+            return {"ok": False, "error": "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE", "pairs": []}
         import MetaTrader5 as mt5
         from mt5_connector import ensure_connection
         if not ensure_connection():
@@ -157,8 +169,11 @@ def get_forex_analysis(symbol=None):
     except Exception as exc:
         return {"ok": False, "error": str(exc), "pairs": []}
 
-def get_market_chart(symbol="XAUUSD", timeframe="M15"):
+def get_market_chart(symbol="XAUUSD", timeframe="M15", mt5_enabled=None):
     try:
+        if not _mt5_enabled(mt5_enabled):
+            return {"ok": False, "error": "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE",
+                    "symbol": symbol, "timeframe": timeframe}
         import MetaTrader5 as mt5
         from mt5_connector import ensure_connection
         if not ensure_connection():
@@ -273,9 +288,12 @@ def get_market_chart(symbol="XAUUSD", timeframe="M15"):
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-def get_market_tick(symbol="XAUUSD"):
+def get_market_tick(symbol="XAUUSD", mt5_enabled=None):
     """Retorna o tick bruto do MT5 sem depender do cache dos candles."""
     try:
+        if not _mt5_enabled(mt5_enabled):
+            return {"ok": False, "error": "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE",
+                    "symbol": symbol}
         import MetaTrader5 as mt5
         from mt5_connector import ensure_connection
         if not ensure_connection():
@@ -293,13 +311,34 @@ def get_market_tick(symbol="XAUUSD"):
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-def get_market_ai_context(symbol="XAUUSD"):
+def get_market_ai_context(symbol="XAUUSD", mt5_enabled=None):
     """Contexto verificável e multitemporal usado exclusivamente pela análise IA."""
     symbol = str(symbol or "XAUUSD")
+    mt5_allowed = _mt5_enabled(mt5_enabled)
+    if not mt5_allowed:
+        return {
+            "ok": False,
+            "status": "SOURCE_DISABLED",
+            "availability": "SOURCE_DISABLED",
+            "reason": "MT5_DISABLED_BY_PROFILE",
+            "symbol": symbol,
+            "multitimeframe": {},
+            "fundamentals": {
+                "status": "SOURCE_DISABLED",
+                "availability": "SOURCE_DISABLED",
+                "reason": "MT5_DISABLED_BY_PROFILE",
+                "events": [],
+                "pair_news": [],
+                "strength_ranking": "UNAVAILABLE",
+            },
+            "errors": ["MT5_DISABLED_BY_PROFILE"],
+            "source": "MT5",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
     timeframes = {}
     errors = []
     for timeframe in ("M5", "M15", "H1", "H4", "D1"):
-        chart = get_market_chart(symbol, timeframe)
+        chart = get_market_chart(symbol, timeframe, mt5_enabled=mt5_allowed)
         if not chart.get("ok"):
             errors.append(f"{timeframe}: {chart.get('error', 'sem dados')}")
             continue
@@ -322,7 +361,8 @@ def get_market_ai_context(symbol="XAUUSD"):
         }
     clean = re.sub(r"[^A-Z]", "", symbol.upper())
     is_forex = len(clean) == 6 and clean[:3] in _CURRENCIES and clean[3:] in _CURRENCIES
-    fundamentals = get_forex_analysis(symbol).get("analysis") if is_forex else None
+    fundamentals = (get_forex_analysis(symbol, mt5_enabled=mt5_allowed).get("analysis")
+                    if is_forex else None)
     if fundamentals:
         fundamentals = {key: fundamentals.get(key) for key in (
             "symbol", "base", "quote", "base_strength", "quote_strength", "advantage", "stronger",
@@ -427,7 +467,9 @@ def _macro_snapshot(assets):
     _MACRO_CACHE.update({"expires": now + 900, "data": result})
     return result
 
-def _mt5_snapshot():
+def _mt5_snapshot(mt5_enabled=None):
+    if not _mt5_enabled(mt5_enabled):
+        return [], "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE"
     try:
         import MetaTrader5 as mt5
         from mt5_connector import ensure_connection
@@ -465,8 +507,10 @@ def _coingecko_snapshot():
     except Exception as exc:
         return [], str(exc)
 
-def _gold_levels():
+def _gold_levels(mt5_enabled=None):
     """Classic daily pivot levels calculated from the previous closed XAUUSD candle."""
+    if not _mt5_enabled(mt5_enabled):
+        return None
     try:
         import MetaTrader5 as mt5
         from mt5_connector import ensure_connection
@@ -494,8 +538,10 @@ def _gold_levels():
     except Exception:
         return None
 
-def _gold_snapshot():
+def _gold_snapshot(mt5_enabled=None):
     """Current XAUUSD context calculated only from broker data."""
+    if not _mt5_enabled(mt5_enabled):
+        return None
     try:
         import MetaTrader5 as mt5
         from mt5_connector import ensure_connection
@@ -623,8 +669,8 @@ def _economic_calendar():
     except Exception as exc:
         return [], f"erro: {exc}"
 
-def get_market_overview():
-    mt5_rows, mt5_error = _mt5_snapshot()
+def get_market_overview(mt5_enabled=None):
+    mt5_rows, mt5_error = _mt5_snapshot(mt5_enabled=mt5_enabled)
     crypto_rows, crypto_error = _coingecko_snapshot()
     te_ready = bool(os.getenv("TRADING_ECONOMICS_KEY"))
     td_ready = bool(os.getenv("TWELVE_DATA_API_KEY"))
@@ -632,7 +678,8 @@ def get_market_overview():
     assets = mt5_rows + crypto_rows
     calendar, calendar_state = _economic_calendar()
     return {"ok": bool(assets), "updated_at": datetime.now(timezone.utc).isoformat(),
-            "assets": assets, "gold_levels": _gold_levels(), "gold": _gold_snapshot(), "macro": _macro_snapshot(assets), "news": news,
+            "assets": assets, "gold_levels": _gold_levels(mt5_enabled=mt5_enabled),
+            "gold": _gold_snapshot(mt5_enabled=mt5_enabled), "macro": _macro_snapshot(assets), "news": news,
             "news_source": news_source, "calendar": [],
             "economic_calendar": calendar, "calendar_state": calendar_state,
             "sources": [

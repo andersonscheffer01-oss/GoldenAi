@@ -10,6 +10,7 @@ import threading
 import uuid
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .audit import AuditLog
@@ -27,6 +28,8 @@ from .mcp_client import McpClientManager
 from .orchestrator import CentralOrchestrator, JarvisRuntimeCoordinator
 from .robot_catalog import RobotCatalogReadModel, default_catalog_store_path
 from .task_manager import TaskManager
+from .runtime_profile import (DEFAULT_PROFILE, resolve_runtime_profile,
+                               set_active_runtime_profile)
 
 
 class JarvisService:
@@ -144,10 +147,12 @@ class JarvisService:
         "golden ai": r"C:\GoldenAI",
     }
 
-    def __init__(self, base_dir, task_db_mode="compatibility"):
+    def __init__(self, base_dir, task_db_mode="compatibility", runtime_profile=None):
         self.started_at = time.time()
         self.state = AgentState.IDLE
         self.dry_run = os.getenv("GOLDEN_JARVIS_DRY_RUN", "0") == "1"
+        self.runtime_profile = set_active_runtime_profile(
+            runtime_profile or DEFAULT_PROFILE)
         self.registry = ToolRegistry()
         self.cancellation = CancellationToken()
         self.security = SecurityManager({
@@ -192,7 +197,8 @@ class JarvisService:
                          if Path(base_dir).resolve() == service_root
                          else Path(base_dir) / "robot_catalog.db")
         self.robot_catalog = RobotCatalogReadModel(storage_path=catalog_store)
-        self.golden_bridge = GoldenReadBridge(self.robot_catalog)
+        self.golden_bridge = GoldenReadBridge(
+            self.robot_catalog, runtime_profile=self.runtime_profile)
         self.mcp_clients = McpClientManager()
         self._register_tools()
         self.task_manager = TaskManager(
@@ -209,6 +215,29 @@ class JarvisService:
         self._ai_status_lock = threading.RLock()
         self._last_request_telemetry = {}
         self._conversation_histories = {}
+
+    def apply_runtime_profile(self, profile):
+        """Apply an explicit startup profile before accepting runtime traffic."""
+        selected = resolve_runtime_profile(profile)
+        self.runtime_profile = selected
+        set_active_runtime_profile(selected)
+        self.golden_bridge.set_runtime_profile(selected)
+        self.audit.add(
+            task_id="runtime:%s" % selected.name,
+            command="runtime_profile",
+            tool="startup",
+            risk=Risk.LOW.value,
+            status="profile_applied",
+            result=selected.status(),
+        )
+        return self.runtime_profile_status()
+
+    def runtime_profile_status(self):
+        return {
+            **self.runtime_profile.status(),
+            "service": "ENABLED",
+            "profile_source": "startup",
+        }
 
     def ai_core_status(self):
         """Return the canonical, secret-free status consumed by the UI."""
@@ -671,6 +700,12 @@ class JarvisService:
             Tool("robot_catalog_list", "Lista o catalogo local de robos ja descobertos.",
                  self.list_robot_catalog, Risk.LOW, timeout=10, category="robot_catalog",
                  llm_enabled=False, parameters={"status": str, "limit": int}),
+            Tool("robot_catalog_snapshot", "Observa o catalogo e evidencias sem iniciar discovery.",
+                 self.robot_catalog_snapshot, Risk.LOW, timeout=15, category="robot_catalog",
+                 llm_enabled=False, side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="robot_catalog",
+                 capability_name="golden.robot_catalog"),
             Tool("robot_catalog_detail", "Mostra identidade, evidencias e desconhecidos de um robo.",
                  self.robot_catalog_detail, Risk.LOW, timeout=10, category="robot_catalog",
                  llm_enabled=False, parameters={"robot_id": str}),
@@ -807,6 +842,115 @@ class JarvisService:
     def golden_market_context(self, symbol="XAUUSD", timeframe="M15"):
         return self.golden_bridge.market_context(str(symbol or "XAUUSD"),
                                                  str(timeframe or "M15"))
+
+    def market_context_snapshot(self, payload=None, symbol="XAUUSD", timeframe="M15"):
+        """Build one bounded MarketContext from existing Golden read models."""
+        requested = dict(payload or {}) if isinstance(payload, dict) else {}
+        symbol = str(requested.get("symbol") or symbol or "XAUUSD").strip()[:32]
+        timeframe = str(requested.get("timeframe") or timeframe or "M15").upper()[:8]
+        market = self.golden_market_context(symbol, timeframe)
+        scanner = self.golden_scanner_snapshot(symbol, 1)
+        market_data = market.get("data") if isinstance(market, dict) else {}
+        market_data = market_data if isinstance(market_data, dict) else {}
+        scanner_data = scanner.get("data") if isinstance(scanner, dict) else {}
+        scanner_data = scanner_data if isinstance(scanner_data, dict) else {}
+        results = scanner_data.get("results") or scanner_data.get("normalized_results") or []
+        selected = results[0] if results and isinstance(results[0], dict) else {}
+        timeframes = market_data.get("multitimeframe") or {}
+        technical = timeframes.get(timeframe) if isinstance(timeframes, dict) else None
+        technical = technical if isinstance(technical, dict) else {}
+        provenance = {}
+        if isinstance(market.get("provenance"), dict):
+            provenance["market"] = market["provenance"]
+        if isinstance(scanner.get("provenance"), dict):
+            provenance["scanner"] = scanner["provenance"]
+        context = {
+            "surface": "market",
+            "selected_asset": symbol,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "context_timestamp": datetime.now(timezone.utc).isoformat(),
+            "market_regime": selected.get("market_regime", "UNKNOWN"),
+            "technical_state": technical,
+            "price_state": {key: technical.get(key) for key in
+                            ("price", "change_pct", "structure") if key in technical},
+            "volatility": selected.get("volatility", technical.get("atr", "UNKNOWN")),
+            "spread": selected.get("spread", "UNKNOWN"),
+            "currency_strength": (market_data.get("fundamentals") or {}).get(
+                "strength_ranking", "UNKNOWN"),
+            "scanner_state": selected,
+            "selected_opportunity": selected.get("selected_setup", selected.get("best_setup")),
+            "macro_context": market_data.get("fundamentals", "UNKNOWN"),
+            "economic_events": (market_data.get("fundamentals") or {}).get("events", []),
+            "relevant_news": (market_data.get("fundamentals") or {}).get("pair_news", []),
+            "freshness": market.get("freshness", "UNKNOWN"),
+            "provenance": provenance,
+            "source_timestamps": {
+                "market": market.get("observed_at") or market_data.get("updated_at"),
+                "scanner": scanner.get("observed_at"),
+            },
+            "availability": "AVAILABLE" if market.get("ok") else "UNAVAILABLE",
+        }
+        return {"ok": bool(market.get("ok")), "read_only": True,
+                "security_state": "READ_ONLY_NO_SIDE_EFFECT",
+                "context": context, "market": market, "scanner": scanner}
+
+    def generate_response(self, message, surface="main", conversation_id="",
+                          market_context=None, source="text"):
+        """Canonical no-tool response boundary for contextual AI surfaces."""
+        from .brain import get_brain
+
+        started = time.perf_counter()
+        request_id = uuid.uuid4().hex
+        surface = str(surface or "main").strip().lower()[:40] or "main"
+        conversation_id = str(conversation_id or f"{surface}-default").strip()[:160]
+        message = str(message or "").strip()
+        if not message:
+            return {"ok": False, "error": "Texto vazio", "surface": surface,
+                    "conversation_id": conversation_id}
+        history = self._conversation_snapshot(conversation_id)
+        self.orchestrator.last_decision = None
+        brain = get_brain(self.registry, self.legacy_memory,
+                          orchestrator=self.orchestrator,
+                          memory_v2=getattr(self, "memory_v2", None),
+                          project_memory=getattr(self, "project_memory", None))
+        result = brain.generate_response(
+            message, source=source, conversation_history=history,
+            market_context=market_context)
+        llm = getattr(brain, "last_llm", {}) or {}
+        response = result.get("response") or result.get("error") or "Sem resposta."
+        canonical = self._attach_research_telemetry(
+            {**result, "message": response, "provider": llm.get("provider", result.get("provider", "")),
+             "model": llm.get("model", result.get("model", ""))},
+            request_id, conversation_id, started)
+        audit_status = "ok" if result.get("ok") else "erro"
+        self.audit.add(
+            task_id=conversation_id, command="canonical_ai_response",
+            tool="llm_conversation", risk=Risk.LOW.value, status=audit_status,
+            arguments={"surface": surface, "conversation_id": conversation_id,
+                       "request_id": request_id,
+                       "context_timestamp": (market_context or {}).get("context_timestamp", "")
+                       if isinstance(market_context, dict) else ""},
+            result={"provider": canonical.get("provider", ""),
+                    "model": canonical.get("model", ""), "ok": bool(result.get("ok"))})
+        self._record_conversation_turn(conversation_id, message, canonical)
+        return {
+            "ok": bool(result.get("ok")),
+            "response": response,
+            "message": response,
+            "surface": surface,
+            "conversation_id": conversation_id,
+            "provider": canonical.get("provider", ""),
+            "model": canonical.get("model", ""),
+            "profile": result.get("profile", llm.get("profile", "")),
+            "market_context": {"available": bool(market_context),
+                               "context_timestamp": (market_context or {}).get("context_timestamp", "")
+                               if isinstance(market_context, dict) else "",
+                               "freshness": (market_context or {}).get("freshness", "UNKNOWN")
+                               if isinstance(market_context, dict) else "UNKNOWN"},
+            "routing_metadata": canonical.get("routing_metadata", {}),
+            "response_id": canonical.get("response_id", request_id),
+        }
 
     def golden_market_regime(self, symbol="XAUUSD"):
         return self.golden_bridge.market_regime(str(symbol or "XAUUSD"))
@@ -1725,6 +1869,12 @@ class JarvisService:
             self.audit.add(task_id=task_id, command=command, tool=str(name),
                            status="rejeitado", result="Ferramenta não cadastrada")
             return {"ok": False, "error": "Ferramenta não cadastrada."}
+        profile_error = self.runtime_profile.tool_disabled_reason(name)
+        if profile_error:
+            self.audit.add(task_id=task_id, command=command, tool=name,
+                           status="disabled_by_profile", result=profile_error)
+            return {"ok": False, "error": profile_error, "tool": name,
+                    "disabled_by_profile": True}
         arguments, effective_risk, force_confirmation, preparation_error = self._prepare_execution(tool, arguments)
         if preparation_error:
             self.state = AgentState.ERROR

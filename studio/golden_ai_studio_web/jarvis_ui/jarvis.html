@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="src/fonts.css">
-<link rel="stylesheet" href="src/styles.css?v=20260921-4">
+<link rel="stylesheet" href="src/styles.css?v=20260928-b3-runtime-reconcile">
 <link rel="stylesheet" href="lib/github-dark.min.css">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0a0a0f">
@@ -318,7 +318,7 @@
             <div id="gDiag" class="gList"></div>
             <button id="gReportBtn" class="gBtn" type="button">GERAR RELATÓRIO COMPLETO</button>
           </section>
-          <section class="gCard gSpan2">
+          <section id="gAiCoreSection" class="gCard gSpan2">
             <h4><span>MERCADO</span><i class="gSrc" id="gMktAt">SEM DADOS</i></h4>
             <div id="gMarket" class="gMarket"></div>
           </section>
@@ -334,17 +334,80 @@
 
       <div class="gView" data-view="controle" hidden>
         <div class="gViewGrid">
-          <section class="gCard">
+          <section id="gControlSystemSection" class="gCard">
             <h4><span>CONTROLE DO SISTEMA</span><i class="gSrc" id="gCtrlConn">LOCAL</i></h4>
             <div id="gControls" class="gControls"></div>
           </section>
-          <section class="gCard"><h4><span>MÓDULOS</span></h4><div id="gModulesSlot" class="gSlot"></div></section>
-          <section class="gCard gSpan2">
-            <h4><span>GOLDEN READ BRIDGE</span><i class="gSrc" id="gGoldenBridgeState">NÃO CONSULTADO</i></h4>
+          <section id="gModulesSection" class="gCard"><h4><span>MÓDULOS</span></h4><div id="gModulesSlot" class="gSlot"></div></section>
+          <section id="gB3OverviewSection" class="gCard gSpan2">
+            <h4><span>JARVIS TRADING / MARKET INTELLIGENCE</span><i class="gSrc" id="gGoldenBridgeState">NÃO CONSULTADO</i></h4>
+            <nav id="gB3Navigation" class="gB3Nav" aria-label="Superfícies B3">
+              <button class="gBtn sm gB3Jump" type="button" data-b3-target="gB3OverviewSection">TRADING OVERVIEW</button>
+              <button class="gBtn sm gB3Jump" type="button" data-b3-target="gB3MarketSection">MARKET INTELLIGENCE</button>
+              <button class="gBtn sm gB3Jump" type="button" data-b3-target="gB3ScannerSection">OPPORTUNITIES</button>
+              <button class="gBtn sm gB3Jump" type="button" data-b3-target="gB3RobotsSection">ROBOTS</button>
+              <button class="gBtn sm gB3Jump" type="button" data-b3-target="gB3EvidenceSection">EVIDENCE</button>
+              <button class="gBtn sm gB3Jump" type="button" data-b3-target="gB3MemorySection">SCIENTIFIC MEMORY</button>
+              <button class="gBtn sm gB3Jump" type="button" data-b3-target="gB3ProvenanceSection">PROVENANCE</button>
+            </nav>
+            <div class="gB3Toolbar">
+              <label>ATIVO <input id="gB3Symbol" value="XAUUSD" maxlength="20" autocomplete="off" spellcheck="false"></label>
+              <label>TIMEFRAME <select id="gB3Timeframe"><option>M15</option><option>M5</option><option>H1</option><option>H4</option></select></label>
+              <button id="gGoldenBridgeRefresh" class="gBtn sm" type="button">ATUALIZAR LEITURA</button>
+              <span id="gB3Safety" class="gB3Safety">READ-ONLY · NO TRADING</span>
+            </div>
             <div id="gGoldenBridgeSummary" class="gAiCoreSummary"></div>
-            <div id="gGoldenRadarDetail" class="gAiCoreSummary"></div>
-            <div id="gScientificMemorySummary" class="gAiCoreSummary"></div>
-            <button id="gGoldenBridgeRefresh" class="gBtn sm" type="button">ATUALIZAR LEITURA</button>
+            <div id="gB3Overview" class="gB3MetricGrid"></div>
+          </section>
+          <section id="gB3MarketSection" class="gCard gSpan2">
+            <h4><span>MARKET INTELLIGENCE / RADAR</span><i id="gB3MarketState" class="gSrc">UNKNOWN</i></h4>
+            <div class="gB3MarketToolbar" aria-label="Filtros do market read model">
+              <label>GRUPO <select id="gB3MarketGroup"><option value="ALL">TODOS OS ATIVOS</option></select></label>
+              <span class="gB3MarketToolbarNote">PERÍODO: READ MODEL · SEM ORDENS</span>
+            </div>
+            <div id="gB3MarketSummary" class="gB3Summary"></div>
+            <div id="gB3MarketKpis" class="gB3MarketKpis"></div>
+            <div class="gB3MarketDashboard">
+              <div class="gB3MarketChartPanel">
+                <div class="gB3MarketPanelHead"><strong>GRÁFICO DO ÍNDICE</strong><span id="gB3MarketChartState">UNKNOWN</span></div>
+                <div class="gB3MarketChartCanvas"><canvas id="gB3MarketChart" aria-label="Gráfico de candles do read model"></canvas></div>
+              </div>
+              <div class="gB3MarketHeatmapPanel">
+                <div class="gB3MarketPanelHead"><strong>MAPA DE CALOR · ATIVOS</strong><span>READ MODEL</span></div>
+                <div id="gB3MarketHeatmap" class="gB3MarketHeatmap"></div>
+              </div>
+            </div>
+            <div class="gB3MarketBottom">
+              <section class="gB3MarketSubpanel"><div class="gB3MarketPanelHead"><strong>FLUXO DE CAPITAIS</strong><span>OBSERVED</span></div><div id="gB3MarketFlow"></div></section>
+              <section class="gB3MarketSubpanel"><div class="gB3MarketPanelHead"><strong>TOP ATIVOS · VARIAÇÃO</strong><span>OBSERVED</span></div><div id="gB3MarketTop"></div></section>
+              <section class="gB3MarketSubpanel"><div class="gB3MarketPanelHead"><strong>NOTÍCIAS RELEVANTES</strong><span>OBSERVED</span></div><div id="gB3MarketNews"></div></section>
+            </div>
+            <div id="gB3MarketAssets" class="gB3TableWrap"></div>
+            <div id="gB3MarketDetail" class="gB3Detail"></div>
+          </section>
+          <section id="gB3ScannerSection" class="gCard gSpan2">
+            <h4><span>SCANNER / OPPORTUNITIES</span><i id="gB3ScannerState" class="gSrc">UNKNOWN</i></h4>
+            <div id="gB3Scanner" class="gB3TableWrap"></div>
+            <div id="gB3OpportunityDetail" class="gB3Detail"></div>
+          </section>
+          <section id="gB3RobotsSection" class="gCard">
+            <h4><span>ROBOT CATALOG</span><i id="gB3RobotState" class="gSrc">UNKNOWN</i></h4>
+            <div id="gB3Robots" class="gB3TableWrap"></div>
+            <div id="gB3Unresolved" class="gB3Note"></div>
+            <div id="gB3RobotDetail" class="gB3Detail"></div>
+          </section>
+          <section id="gB3EvidenceSection" class="gCard">
+            <h4><span>VALIDATION / EVIDENCE</span><i id="gB3EvidenceState" class="gSrc">UNKNOWN</i></h4>
+            <div id="gB3Evidence" class="gB3TableWrap"></div>
+          </section>
+          <section id="gB3MemorySection" class="gCard">
+            <h4><span>SCIENTIFIC MEMORY</span><i id="gB3MemoryState" class="gSrc">UNKNOWN</i></h4>
+            <div id="gScientificMemorySummary" class="gB3Summary"></div>
+            <div id="gB3MemoryRelations" class="gB3TableWrap"></div>
+          </section>
+          <section id="gB3ProvenanceSection" class="gCard">
+            <h4><span>PROVENANCE / SOURCE INTEGRITY</span><i id="gB3ProvenanceState" class="gSrc">UNKNOWN</i></h4>
+            <div id="gB3Provenance" class="gB3TableWrap"></div>
           </section>
           <section class="gCard gSpan2">
             <h4><span>NÚCLEO DE IA</span><i class="gSrc" id="gFlowState">EM ESPERA</i></h4>
@@ -368,6 +431,7 @@
               <button id="gMemClear" class="gMini danger" type="button">LIMPAR MEMÓRIA</button>
             </div>
             <p class="gHint">Tudo fica salvo apenas neste navegador (localStorage). O arquivo exportado leva anotações, buscas, preferências e objetivo — o token do backend fica de fora.</p>
+            <button id="gOpenScientificMemory" class="gBtn sm gB3Jump" type="button" data-b3-target="gB3MemorySection">ABRIR SCIENTIFIC MEMORY</button>
           </section>
           <section class="gCard">
             <h4><span>ANOTAÇÕES SALVAS</span></h4>
@@ -499,6 +563,6 @@
 <script src="src/telemetry-adapter.js"></script>
 
 <!-- Application (modified: uses new adapters, no brain.js direct actions) -->
-<script type="module" src="src/app.js?v=20260921-4"></script>
+<script type="module" src="src/app.js?v=20260928-b3-runtime-reconcile"></script>
 </body>
 </html>
