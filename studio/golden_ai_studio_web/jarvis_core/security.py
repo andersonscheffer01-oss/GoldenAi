@@ -1,3 +1,5 @@
+import copy
+import hmac
 import json
 import ipaddress
 import secrets
@@ -75,15 +77,74 @@ class SecurityManager:
 
     def create_confirmation(self, tool, arguments, command, risk=None):
         token = secrets.token_urlsafe(24)
-        self.pending[token] = {"tool": tool.name, "arguments": arguments, "command": command,
+        stored_arguments = copy.deepcopy(arguments)
+        self.pending[token] = {"tool": tool.name, "arguments": stored_arguments, "command": command,
                                "created_at": time.time(), "risk": (risk or tool.risk).value,
-                               "signature": json.dumps([tool.name, arguments], sort_keys=True),
+                               "signature": self._confirmation_signature(
+                                   tool.name, stored_arguments, command),
                                "expires": time.time() + self.confirmation_ttl}
         return token
 
-    def consume(self, token):
-        item = self.pending.pop(str(token or ""), None)
-        return item if item and item["expires"] >= time.time() else None
+    @staticmethod
+    def _is_sensitive_key(key):
+        lowered = str(key or "").casefold().replace("-", "_")
+        return any(marker in lowered for marker in (
+            "password", "passwd", "secret", "token", "api_key", "apikey",
+            "authorization", "cookie", "credential", "private_key",
+        ))
+
+    @classmethod
+    def _canonicalize(cls, value, key=""):
+        if cls._is_sensitive_key(key):
+            return "[REDACTED]"
+        if isinstance(value, dict):
+            return {str(name): cls._canonicalize(item, name)
+                    for name, item in sorted(value.items(), key=lambda pair: str(pair[0]))}
+        if isinstance(value, (list, tuple)):
+            return [cls._canonicalize(item) for item in value]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
+
+    @classmethod
+    def _confirmation_signature(cls, tool_name, arguments, command):
+        return json.dumps(
+            [str(tool_name), cls._canonicalize(arguments), str(command or "")],
+            ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+        )
+
+    def consume(self, token, *, expected_tool=None, expected_arguments=None,
+                expected_command=None):
+        """Consume a valid, bound confirmation exactly once.
+
+        A caller-supplied action/target mismatch is rejected without consuming
+        the original approval. Expired, invalid, or tampered tokens are
+        removed so they cannot be retried.
+        """
+        token_key = str(token or "")
+        item = self.pending.get(token_key)
+        if item is None:
+            return None
+        if item.get("expires", 0) < time.time():
+            self.pending.pop(token_key, None)
+            return None
+
+        expected_signature = self._confirmation_signature(
+            item.get("tool", ""), item.get("arguments", {}), item.get("command", ""))
+        if not hmac.compare_digest(str(item.get("signature", "")), expected_signature):
+            self.pending.pop(token_key, None)
+            return None
+        if expected_tool is not None and str(expected_tool) != str(item.get("tool", "")):
+            return None
+        if (expected_arguments is not None and
+                self._canonicalize(expected_arguments) !=
+                self._canonicalize(item.get("arguments", {}))):
+            return None
+        if (expected_command is not None and
+                str(expected_command) != str(item.get("command", ""))):
+            return None
+        self.pending.pop(token_key, None)
+        return item
 
     def prune(self):
         now = time.time()

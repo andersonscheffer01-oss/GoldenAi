@@ -1,6 +1,6 @@
 # JARVIS B4.1 W1 - Semantic Parity
 
-Status: CHARACTERIZATION_ONLY / no convergence implemented
+Status: HISTORICAL CHARACTERIZATION / Wave 2 convergence applied to safe scope
 Baseline: `c033b61dbbe684ee0943854e650f471bfd87a31b`
 
 ## Method inventories
@@ -52,12 +52,12 @@ and pre-save mission scopes are special allow paths.
 | Critical action block | Risk `CRITICAL` confirmation/deny | `CANONICAL_STRONGER` when tool is registered | Keep root critical block until coverage is proven |
 | Fixed app/folder/external-read allowlists | Tool-specific security requirements | `LEGACY_UNIQUE` | Preserve as compatibility policy or port deliberately |
 | Unknown capability block | `capability_exists=False` block | `EXACT` | Characterization test is a gate |
-| Approval target/action operation key | Token signature is stored but not revalidated by `consume` | `SEMANTIC_MISMATCH` | Add explicit binding in future adapter, not in W1 |
+| Approval target/action operation key | Token signature is recomputed and optional expected context is compared by `consume` | `ADAPTED` | Canonical binding for migrated scope; mismatch does not consume |
 | Root JSONL audit | Canonical SQLite `AuditLog` | `SEMANTIC_MISMATCH` | Wave 3 field/event mapping |
 
-Any `LEGACY_UNIQUE` or `SEMANTIC_MISMATCH` row blocks direct substitution in
-Wave 2. The characterization tests intentionally preserve observed behavior,
-including behavior that is not the desired final policy.
+Any remaining `LEGACY_UNIQUE` or `SEMANTIC_MISMATCH` row blocks direct
+substitution outside the bounded Wave 2 scope. The characterization tests
+remain a baseline for behavior that is not the desired final policy.
 
 ## Approval compatibility contract
 
@@ -78,8 +78,8 @@ Current facts:
   check in the observed repository.
 - SecurityManager tokens have expiry and single-use removal, but no explicit
   user, mission, session, or task binding.
-- SecurityManager stores a signature, but `consume(token)` does not recompute
-  or validate a changed target/action against a caller-supplied request.
+- SecurityManager recomputes its signature and validates changed target/action
+  when caller context is supplied; tampered state is invalidated.
 
 ## Fail-closed characterization
 
@@ -90,12 +90,12 @@ Current facts:
 | Expired approval | No native expiry field observed | `None` | Canonical fail closed; legacy expiry unknown/not applicable |
 | Already consumed | One-time grant no longer matches | Token removed; `None` | Fail closed |
 | Unknown action | Can create approval if capability exists; no action registry in service | Decision requires a Tool object | Legacy semantic gap |
-| Target changed | Operation key changes for root approvals; token consumer has no target argument | Stored token can be consumed without revalidation | `SEMANTIC_MISMATCH` |
+| Target changed | Operation key changes for root approvals; canonical consume compares expected arguments | Mismatch is denied without consuming the original token | `ADAPTED` |
 | Security component unavailable | Root service can still exist independently | Canonical callers should block; bridge has explicit fail-closed behavior | Contract required |
 | Executor unavailable | ExecutionService only authorizes/records; dispatch is outside it | Tool service reports execution result | Responsibility boundary |
 
 ## Wave 2 gate
 
-Wave 2 may not remove root authority until every mismatch above has an explicit
-adapter rule and a test proving the compatibility response. This document does
-not authorize Wave 2.
+Wave 2 records the explicit adapter rule in
+`JARVIS_B4_1_W2_APPROVAL_ADAPTER.md`; high-risk mismatches remain frozen for a
+later wave.

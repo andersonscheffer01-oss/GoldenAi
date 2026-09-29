@@ -280,8 +280,10 @@ class TaskManager:
         arguments = {"task_id": str(task.task_id), "run_id": str(run["run_id"]),
                      "action": action, "actor": str(actor)}
         if confirmation_token:
-            item = self.security.consume(confirmation_token)
-            if not item or item.get("tool") != tool.name or item.get("arguments") != arguments:
+            item = self.security.consume(
+                confirmation_token, expected_tool=tool.name,
+                expected_arguments=arguments)
+            if not item:
                 return {"success": False, "code": "INVALID_CONFIRMATION"}
         else:
             decision = self.security.decision(tool, risk=risk,
@@ -431,8 +433,10 @@ class TaskManager:
                     parameters={"task_id": str})
         arguments = {"task_id": task_id, "action": action, "actor": str(actor)}
         if confirmation_token:
-            item = self.security.consume(confirmation_token)
-            if not item or item.get("tool") != tool.name or item.get("arguments") != arguments:
+            item = self.security.consume(
+                confirmation_token, expected_tool=tool.name,
+                expected_arguments=arguments)
+            if not item:
                 return {"success": False, "code": "INVALID_CONFIRMATION",
                         "task_id": task_id, "requested_action": action}
         else:
@@ -511,8 +515,10 @@ class TaskManager:
             "action": str(action), "actor": str(actor),
         }
         if confirmation_token:
-            item = self.security.consume(confirmation_token)
-            if not item or item.get("tool") != tool.name or item.get("arguments") != arguments:
+            item = self.security.consume(
+                confirmation_token, expected_tool=tool.name,
+                expected_arguments=arguments)
+            if not item:
                 return {"success": False, "code": "INVALID_CONFIRMATION"}
         else:
             decision = self.security.decision(

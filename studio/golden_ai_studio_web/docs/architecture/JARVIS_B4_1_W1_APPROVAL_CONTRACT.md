@@ -1,6 +1,6 @@
 # JARVIS B4.1 W1 - Approval Compatibility Contract
 
-Status: CHARACTERIZATION_ONLY / contract design, no adapter
+Status: HISTORICAL CHARACTERIZATION / corrected by Wave 2 adapter
 
 ## Current approval owners
 
@@ -8,7 +8,7 @@ Status: CHARACTERIZATION_ONLY / contract design, no adapter
 |---|---|---|---|---|---|
 | `PermissionManager` | implicit caller plus fixed task ID for delegated writes | path/action through ExecutionService | inherited from ExecutionService | root execution DB | indirect via returned decision |
 | `ExecutionService` | `task_id` + operation key | `ONCE` or `TASK`; operation key includes permission/tool/action/target | no expiry field observed | `data/golden_ai.db` under selected root | `ONCE` marks consumed; `TASK` remains reusable |
-| `SecurityManager` | opaque token; tool/arguments/command in memory | token and stored signature | `confirmation_ttl`, default 60 seconds | process memory only | `consume` pops before returning |
+| `SecurityManager` | opaque token; copied tool/arguments/command in memory | token, validated signature, and optional expected caller context | `confirmation_ttl`, default 60 seconds | process memory only | valid consume pops; mismatch remains pending; tamper/expiry invalidates |
 
 ## Required comparison
 
@@ -22,22 +22,23 @@ adapter must not fabricate those fields.
 ### Scope
 
 Root scope binds the grant to task and operation key. The canonical token binds
-the stored request to the tool and arguments, but the current consumer accepts
-the token without a caller-supplied target/action to compare.
+the stored request to the tool and arguments; Wave 2 callers may provide
+expected action/target context for explicit comparison.
 
 ### Lifetime and single use
 
 Root `ONCE` is persisted and consumed after authorization; `TASK` remains
 reusable until its row is changed. No root expiry was observed. Canonical
-tokens expire and are removed on consume, including failed/expired consumption.
+tokens expire; valid consume is single-use, mismatches remain pending, and
+tampered/expired tokens are invalidated.
 
 ### Target/action binding
 
 Root operation keys include permission level, tool name, action, and target.
-Changing target or task prevents reuse of the same grant. Canonical tokens
-store a signature of tool plus arguments, but this signature is not validated
-by `consume` in the current implementation. This is a hard
-`SEMANTIC_MISMATCH` and blocks direct substitution.
+Changing target or task prevents reuse of the same grant. Wave 2 canonical
+tokens store and validate a signature of tool, arguments, and command. Callers
+may supply expected tool/arguments/command; mismatches fail closed without
+consuming the original approval. This is the implemented adapter rule.
 
 ### Revocation and denial
 
@@ -68,7 +69,8 @@ Required properties:
    decision.
 3. Expiry is explicit. A root approval without expiry cannot silently become a
    canonical timed token without a documented compatibility choice.
-4. One-time approvals are consumed atomically and cannot be replayed.
+4. One-time approvals are consumed atomically and cannot be replayed; a caller
+   context mismatch does not consume the original approval.
 5. Task-scoped approvals retain task binding; they must not become global.
 6. Missing SecurityManager or unmapped dangerous actions fail closed.
 7. Denied and expired approvals remain auditable without exposing token values.

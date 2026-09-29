@@ -39,6 +39,13 @@ class PermissionManager:
     def can_read(self, path: str | Path) -> PermissionDecision:
         resolved = self._resolve(path)
         if self._is_under(resolved, self.settings.allowed_paths) or self.is_protected_dir(resolved):
+            if self.execution.security_facade is not None:
+                decision = self.execution.authorize_action(
+                    task_id="permission-manager", permission_level="READ",
+                    action="read_file", target=str(resolved),
+                    reason="Leitura requer decisão do SecurityManager canônico.",
+                    risk_level=RiskLevel.LOW, capability_exists=True)
+                return PermissionDecision(decision.allowed, decision.reason)
             return PermissionDecision(True, "read allowed by configured path policy")
         return PermissionDecision(False, "path is outside allowed/protected project areas")
 

@@ -23,6 +23,7 @@ class ExecutionService:
         self.root = Path(root)
         self.repo = ExecutionRepository(self.root / "data" / "golden_ai.db")
         self.audit = AuditLogger(self.root / "logs")
+        self.security_facade = None
 
     def get_mode(self) -> PermissionMode:
         raw = self.repo.get_mode()
@@ -91,6 +92,42 @@ class ExecutionService:
         if risk == RiskLevel.CRITICAL:
             self._blocked(task_id, permission_level, action, target, risk.value, "CRITICAL continua bloqueado nesta fase")
             return AuthorizationResult(False, "CRITICAL continua bloqueado nesta fase", mode.value, ExecutionStatus.BLOCKED.value, risk_level=risk.value)
+
+        if permission_level == "READ" and self.security_facade is not None:
+            if risk != RiskLevel.LOW or not capability_exists:
+                reason = "Escopo READ não seguro para o adaptador canônico."
+                self._blocked(task_id, permission_level, action, target, risk.value, reason)
+                return AuthorizationResult(False, reason, mode.value,
+                                           ExecutionStatus.BLOCKED.value,
+                                           risk_level=risk.value)
+            try:
+                delegated = self.security_facade.authorize(
+                    action=action, target=target, task_id=task_id, reason=reason)
+            except Exception:
+                delegated = None
+            if not isinstance(delegated, dict):
+                delegated = {
+                    "allowed": False,
+                    "status": ExecutionStatus.BLOCKED.value,
+                    "reason": "Adaptador SecurityManager indisponível; ação bloqueada.",
+                }
+            allowed = bool(delegated.get("allowed"))
+            status = str(delegated.get("status") or ExecutionStatus.BLOCKED.value)
+            delegated_reason = str(delegated.get("reason") or "Decisão canônica indisponível.")
+            if allowed:
+                self._allowed(task_id, permission_level, action, target,
+                              risk.value, delegated_reason)
+            elif status == ExecutionStatus.WAITING_APPROVAL.value:
+                self._audit("ACTION_WAITING_APPROVAL", status, target, delegated_reason)
+                self.record_event(
+                    task_id=task_id, category="PERMISSION", action="ACTION_WAITING_APPROVAL",
+                    status=status, summary=delegated_reason, target=target,
+                    permission_level=permission_level, risk_level=risk.value)
+            else:
+                self._blocked(task_id, permission_level, action, target,
+                              risk.value, delegated_reason)
+            return AuthorizationResult(allowed, delegated_reason, mode.value,
+                                       status, risk_level=risk.value)
 
         if permission_level == "READ":
             self._allowed(task_id, permission_level, action, target, risk.value, "Leitura permitida")

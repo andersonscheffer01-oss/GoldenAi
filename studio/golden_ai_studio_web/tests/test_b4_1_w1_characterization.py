@@ -160,8 +160,7 @@ def test_security_manager_approval_shape_and_single_use():
     assert "session_id" not in item
     item["arguments"] = {"target": "changed-after-request"}
     consumed = security.consume(token)
-    assert consumed is not None
-    assert consumed["arguments"]["target"] == "changed-after-request"
+    assert consumed is None
     assert security.consume(token) is None
 
 

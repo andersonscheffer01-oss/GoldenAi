@@ -10,6 +10,72 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from .models import Risk, Tool
+
+
+class ExecutionSecurityFacade:
+    """Small read-only compatibility facade owned by canonical SecurityManager.
+
+    This adapter makes no execution decision of its own and never dispatches a
+    handler. It is intentionally limited to deterministic low-risk reads.
+    """
+
+    READ_TOOL_NAMES = {
+        "read": "legacy_read",
+        "read_file": "legacy_read",
+        "internet_search": "legacy_internet_search",
+        "internet_fetch": "legacy_internet_fetch",
+    }
+
+    def __init__(self, security_manager):
+        self.security = security_manager
+
+    def authorize(self, *, action, target="", task_id="", reason=""):
+        tool_name = self.READ_TOOL_NAMES.get(str(action or "").casefold())
+        if not tool_name:
+            return {
+                "allowed": False,
+                "status": "BLOCKED",
+                "reason": "Ação fora do escopo seguro do adaptador canônico.",
+            }
+        tool = Tool(
+            tool_name,
+            f"Legacy read compatibility: {action}",
+            lambda **_: {"ok": True},
+            risk=Risk.LOW,
+            confirmation=False,
+            parameters={"target": str},
+            side_effect_class="READ_ONLY",
+            provenance="legacy_compatibility",
+            capability_name=tool_name,
+        )
+        try:
+            decision = self.security.decision(tool, risk=Risk.LOW,
+                                              requires_confirmation=False)
+        except Exception:
+            return {
+                "allowed": False,
+                "status": "BLOCKED",
+                "reason": "Canonical SecurityManager indisponível; leitura bloqueada.",
+            }
+        if decision == "allow":
+            return {
+                "allowed": True,
+                "status": "COMPLETED",
+                "reason": "Leitura autorizada pelo SecurityManager canônico.",
+            }
+        if decision == "confirm":
+            return {
+                "allowed": False,
+                "status": "WAITING_APPROVAL",
+                "reason": "SecurityManager canônico exige aprovação para esta leitura.",
+            }
+        return {
+            "allowed": False,
+            "status": "BLOCKED",
+            "reason": "Leitura bloqueada pelo SecurityManager canônico.",
+        }
+
 
 class LegacySecurityBridge:
     """Route a small, proven legacy subset through JarvisService."""
@@ -64,4 +130,4 @@ class LegacySecurityBridge:
         return result
 
 
-__all__ = ["LegacySecurityBridge"]
+__all__ = ["ExecutionSecurityFacade", "LegacySecurityBridge"]
