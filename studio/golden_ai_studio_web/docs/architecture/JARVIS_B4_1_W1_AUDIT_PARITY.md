@@ -1,7 +1,7 @@
 # JARVIS B4.1 W1 - Audit Parity
 
-Status: CHARACTERIZATION_ONLY / no audit adapter implemented
-Baseline: `c033b61dbbe684ee0943854e650f471bfd87a31b`
+Status: HISTORICAL CHARACTERIZATION / Wave 3 convergence applied
+Baseline: `c033b61dbbe684ee0943854e650f471bfd87a31b` (W1)
 
 ## Current schemas
 
@@ -82,3 +82,25 @@ write a dual log.
 
 The first convergence wave must not introduce a competing ID scheme. It should
 only prove where existing IDs are created, propagated, and dropped.
+
+## Wave 3 applied state
+
+`jarvis_core.audit.AuditLog` is now the canonical authority for the migrated
+Jarvis safe-read, SecurityManager decision, and approval lifecycle scope. The
+existing SQLite table is unchanged: the structured envelope is stored inside
+the bounded, sanitized `result` payload under `_audit_envelope`, and `recent()`
+projects it as `audit_envelope` for readers. This is an additive adapter, not a
+schema migration.
+
+The effective envelope contains the requested event, request, correlation,
+session, conversation, task, mission, run, approval, surface, operation,
+action, target, tool, provider, model, risk, security decision, status, result,
+error, elapsed time, runtime profile, and sanitized metadata fields. Legacy
+`agent`, `files_changed`, and `commands_executed` remain metadata when a
+migrated caller supplies them.
+
+`core.audit.AuditLogger` remains a compatibility/telemetry sink for unmigrated
+execution paths. The migrated safe-read branch does not emit an authoritative
+JSONL decision when the canonical facade has an AuditLog sink. Existing
+`data/market_ai_audit.jsonl` remains market telemetry and is explicitly not the
+canonical audit authority.

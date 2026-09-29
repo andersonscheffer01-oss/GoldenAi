@@ -30,6 +30,10 @@ class ExecutionSecurityFacade:
     def __init__(self, security_manager):
         self.security = security_manager
 
+    @property
+    def audit(self):
+        return getattr(self.security, "audit", None)
+
     def authorize(self, *, action, target="", task_id="", reason=""):
         tool_name = self.READ_TOOL_NAMES.get(str(action or "").casefold())
         if not tool_name:
@@ -50,8 +54,19 @@ class ExecutionSecurityFacade:
             capability_name=tool_name,
         )
         try:
+            audit_context = {
+                "request_id": f"legacy:{task_id or 'default'}",
+                "correlation_id": f"legacy:{task_id or 'default'}:{tool_name}",
+                "task_id": str(task_id or "default"),
+                "surface": "legacy_execution",
+                "operation": "safe_read",
+                "action": str(action or ""),
+                "target": str(target or ""),
+                "metadata": {"compatibility_bridge": True, "reason": str(reason or "")},
+            }
             decision = self.security.decision(tool, risk=Risk.LOW,
-                                              requires_confirmation=False)
+                                              requires_confirmation=False,
+                                              audit_context=audit_context)
         except Exception:
             return {
                 "allowed": False,

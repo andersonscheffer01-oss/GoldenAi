@@ -242,7 +242,7 @@ def test_correlations_are_mapped_without_introducing_a_new_scheme():
     assert "action_id" in combined
     assert "run_id" in combined
     assert "mission_id" in combined
-    assert "correlation_id" not in audit
+    assert "correlation_id" in audit
     assert "response_id" not in audit
 
 

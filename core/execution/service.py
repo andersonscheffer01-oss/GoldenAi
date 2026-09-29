@@ -114,18 +114,22 @@ class ExecutionService:
             allowed = bool(delegated.get("allowed"))
             status = str(delegated.get("status") or ExecutionStatus.BLOCKED.value)
             delegated_reason = str(delegated.get("reason") or "Decisão canônica indisponível.")
-            if allowed:
-                self._allowed(task_id, permission_level, action, target,
-                              risk.value, delegated_reason)
-            elif status == ExecutionStatus.WAITING_APPROVAL.value:
-                self._audit("ACTION_WAITING_APPROVAL", status, target, delegated_reason)
-                self.record_event(
-                    task_id=task_id, category="PERMISSION", action="ACTION_WAITING_APPROVAL",
-                    status=status, summary=delegated_reason, target=target,
-                    permission_level=permission_level, risk_level=risk.value)
-            else:
-                self._blocked(task_id, permission_level, action, target,
-                              risk.value, delegated_reason)
+            # Once the canonical facade is wired, SecurityManager/AuditLog own
+            # the migrated decision. Keep the old records only for isolated
+            # compatibility callers that have no canonical audit sink.
+            if getattr(self.security_facade, "audit", None) is None:
+                if allowed:
+                    self._allowed(task_id, permission_level, action, target,
+                                  risk.value, delegated_reason)
+                elif status == ExecutionStatus.WAITING_APPROVAL.value:
+                    self._audit("ACTION_WAITING_APPROVAL", status, target, delegated_reason)
+                    self.record_event(
+                        task_id=task_id, category="PERMISSION", action="ACTION_WAITING_APPROVAL",
+                        status=status, summary=delegated_reason, target=target,
+                        permission_level=permission_level, risk_level=risk.value)
+                else:
+                    self._blocked(task_id, permission_level, action, target,
+                                  risk.value, delegated_reason)
             return AuthorizationResult(allowed, delegated_reason, mode.value,
                                        status, risk_level=risk.value)
 

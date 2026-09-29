@@ -162,6 +162,7 @@ class JarvisService:
             "kill_process": "confirm",
         })
         self.audit = AuditLog(Path(base_dir) / "golden_runtime.db")
+        self.security.set_audit_log(self.audit)
         self.legacy_memory = GoldenMemoryManager(base_dir)
         self.memory = self.legacy_memory  # compatibilidade da API existente
         self.legacy_memory.start_session({"component": "jarvis_service"})
@@ -1405,13 +1406,26 @@ class JarvisService:
         request_started = time.perf_counter()
         request_id = uuid.uuid4().hex
         command = str(command or "").strip()
-        history = self._conversation_snapshot(task_id)
-        self.orchestrator.last_decision = None
-        result = self._execute_command_once(command, task_id, history)
-        result = self._attach_research_telemetry(
-            result, request_id, str(task_id or "desktop"), request_started)
-        self._record_conversation_turn(task_id, command, result)
-        return result
+        previous_context = getattr(self, "_active_audit_context", None)
+        self._active_audit_context = {
+            "request_id": request_id,
+            "correlation_id": request_id,
+            "session_id": str(task_id or "desktop"),
+            "conversation_id": str(task_id or "desktop"),
+            "task_id": str(task_id or "desktop"),
+            "surface": "jarvis_service",
+            "operation": "command_execution",
+        }
+        try:
+            history = self._conversation_snapshot(task_id)
+            self.orchestrator.last_decision = None
+            result = self._execute_command_once(command, task_id, history)
+            result = self._attach_research_telemetry(
+                result, request_id, str(task_id or "desktop"), request_started)
+            self._record_conversation_turn(task_id, command, result)
+            return result
+        finally:
+            self._active_audit_context = previous_context
 
     def _attach_research_telemetry(self, result, request_id, session_id, started):
         result = dict(result or {})
@@ -1865,6 +1879,15 @@ class JarvisService:
                      authorization_scope="", target_url="",
                      allowed_hosts=(), page_barrier=""):
         tool = self.registry.get(name)
+        audit_context = dict(getattr(self, "_active_audit_context", {}) or {})
+        audit_context.update({
+            "task_id": str(task_id or "desktop"),
+            "surface": audit_context.get("surface", "jarvis_service"),
+            "operation": "tool_execution",
+            "action": str(name or ""),
+            "target": self.security._audit_target(arguments),
+            "approval_id": getattr(self, "_active_approval_id", ""),
+        })
         if not tool:
             self.audit.add(task_id=task_id, command=command, tool=str(name),
                            status="rejeitado", result="Ferramenta não cadastrada")
@@ -1902,18 +1925,24 @@ class JarvisService:
             authorization_scope=authorization_scope,
             target_url=target_url,
             allowed_hosts=allowed_hosts,
-            page_barrier=page_barrier)
+            page_barrier=page_barrier, audit_context=audit_context)
         if decision == "deny":
             self.state = AgentState.IDLE
             return {"ok": False,
                     "error": "Ferramenta bloqueada pela política de segurança."}
         if decision == "confirm" and not confirmed:
-            token = self.security.create_confirmation(tool, arguments, command, effective_risk)
+            token = self.security.create_confirmation(
+                tool, arguments, command, effective_risk,
+                audit_context=audit_context)
             self.state = AgentState.WAITING_CONFIRMATION
             self.audit.add(task_id=task_id, command=command, tool=name,
                            arguments=arguments, risk=effective_risk.value,
                            status="aguardando_confirmacao",
-                           result="Expira em 60 segundos")
+                           result="Expira em 60 segundos",
+                           envelope={**audit_context,
+                                     "action": "APPROVAL_WAITING",
+                                     "status": "APPROVAL_REQUIRED",
+                                     "security_decision": "APPROVAL_REQUIRED"})
             return {"ok": True, "confirmation_required": True, "token": token,
                     "action": name, "risk": effective_risk.value,
                     "message": f"Confirmação {effective_risk.value} obrigatória. "
@@ -1949,7 +1978,13 @@ class JarvisService:
                     "response_policy": result.get("response_policy"),
                     "success": result.get("success"), "verified": result.get("verified"),
                     "verification": result.get("verification")},
-            elapsed_ms=int((time.time() - started) * 1000))
+            elapsed_ms=int((time.time() - started) * 1000),
+            envelope={**audit_context,
+                      "action": "TOOL_RESULT",
+                      "status": "EXECUTION_SUCCEEDED" if result.get("ok")
+                      else "EXECUTION_FAILED",
+                      "security_decision": "ALLOW" if result.get("ok") else "DENY",
+                      "error": result.get("error", "")})
         result.update({"tool": name, "risk": effective_risk.value,
                         "state": self.state.value})
         return result
@@ -2015,21 +2050,40 @@ class JarvisService:
             return False
 
     def confirm(self, token, task_id="desktop"):
-        item = self.security.consume(token)
+        context = {
+            **(getattr(self, "_active_audit_context", {}) or {}),
+            "task_id": str(task_id or "desktop"), "surface": "jarvis_service",
+            "operation": "approval", "action": "confirm",
+        }
+        item = self.security.consume(token, audit_context=context)
         if not item:
             return {"ok": False,
                     "error": "Confirmação inválida ou expirada."}
-        return self.execute_tool(item["tool"], item["arguments"],
-                                 item["command"], task_id, confirmed=True)
+        previous_approval = getattr(self, "_active_approval_id", "")
+        self._active_approval_id = item.get("approval_id", "")
+        try:
+            return self.execute_tool(item["tool"], item["arguments"],
+                                     item["command"], task_id, confirmed=True)
+        finally:
+            self._active_approval_id = previous_approval
 
     def deny_confirmation(self, token, task_id="desktop"):
         """Consume a confirmation token without executing. Fail-closed."""
-        item = self.security.consume(token)
+        context = {
+            **(getattr(self, "_active_audit_context", {}) or {}),
+            "task_id": str(task_id or "desktop"), "surface": "jarvis_service",
+            "operation": "approval", "action": "deny",
+        }
+        item = self.security.consume(token, audit_context=context)
         if item:
             self.audit.add(task_id=task_id, command=item.get("command", ""),
                            tool=item.get("tool", ""), risk=item.get("risk", "unknown"),
                            status="cancelado_pelo_operador",
-                           result="Confirmação negada pelo operador")
+                           result="Confirmação negada pelo operador",
+                           envelope={**context, "approval_id": item.get("approval_id", ""),
+                                     "action": "APPROVAL_DENIED",
+                                     "status": "DENIED",
+                                     "security_decision": "DENY"})
         return {"ok": True, "denied": True,
                 "message": "Ação cancelada pelo operador."}
 

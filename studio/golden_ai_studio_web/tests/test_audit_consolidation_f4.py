@@ -22,8 +22,11 @@ def test_migrated_legacy_action_has_one_canonical_receipt(tmp_path):
 
         assert result["ok"] is True
         assert calls == ["read-only.txt"]
-        assert len(receipts) == 1
-        assert receipts[0]["status"] == "executado"
+        execution_receipts = [row for row in receipts if row["status"] == "executado"]
+        assert len(execution_receipts) == 1
+        assert execution_receipts[0]["status"] == "executado"
+        assert any(row.get("audit_envelope", {}).get("status") == "ALLOW"
+                   for row in receipts)
     finally:
         service.close()
 

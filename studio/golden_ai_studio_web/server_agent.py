@@ -45,6 +45,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from jarvis_core.runtime_profile import DEFAULT_PROFILE, resolve_runtime_profile
+from jarvis_core.audit import AuditLog
 from jarvis_core.security import SecurityManager
 from jarvis_core.security_compatibility import ExecutionSecurityFacade
 
@@ -72,7 +73,8 @@ try:
     from core.permissions import PermissionManager
     from core.config import load_settings
     _settings = load_settings()
-    _canonical_security = SecurityManager()
+    _canonical_audit = AuditLog(ROOT / "golden_runtime.db")
+    _canonical_security = SecurityManager(audit_log=_canonical_audit)
     PERMISSION_MANAGER = PermissionManager(_settings)
     PERMISSION_MANAGER.execution.security_facade = ExecutionSecurityFacade(
         _canonical_security)

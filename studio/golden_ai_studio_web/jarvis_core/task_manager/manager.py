@@ -279,21 +279,30 @@ class TaskManager:
                     parameters={"task_id": str, "run_id": str, "action": str})
         arguments = {"task_id": str(task.task_id), "run_id": str(run["run_id"]),
                      "action": action, "actor": str(actor)}
+        audit_context = {
+            "request_id": f"task:{task.task_id}:{action}",
+            "correlation_id": f"task:{task.task_id}:{run['run_id']}",
+            "task_id": str(task.task_id), "run_id": str(run["run_id"]),
+            "surface": "task_manager", "operation": "background_retry",
+            "action": action, "target": str(run["run_id"]),
+        }
         if confirmation_token:
             item = self.security.consume(
                 confirmation_token, expected_tool=tool.name,
-                expected_arguments=arguments)
+                expected_arguments=arguments, audit_context=audit_context)
             if not item:
                 return {"success": False, "code": "INVALID_CONFIRMATION"}
         else:
             decision = self.security.decision(tool, risk=risk,
-                                              requires_confirmation=tool.confirmation)
+                                              requires_confirmation=tool.confirmation,
+                                              audit_context=audit_context)
             if decision == "deny":
                 return {"success": False, "code": "SECURITY_DENIED"}
             if decision == "confirm":
                 return {"success": False, "confirmation_required": True,
                         "token": self.security.create_confirmation(
-                            tool, arguments, action, risk), "code": "CONFIRMATION_REQUIRED"}
+                            tool, arguments, action, risk,
+                            audit_context=audit_context), "code": "CONFIRMATION_REQUIRED"}
         return {"success": True}
 
     def retry_background_run(self, run_id, confirmation_token=None,
@@ -432,22 +441,31 @@ class TaskManager:
                     lambda **_kwargs: {}, risk=risk, confirmation=(action == "cancel"),
                     parameters={"task_id": str})
         arguments = {"task_id": task_id, "action": action, "actor": str(actor)}
+        audit_context = {
+            "request_id": f"task:{task_id}:{action}",
+            "correlation_id": f"task:{task_id}:{action}",
+            "task_id": task_id, "surface": "task_manager",
+            "operation": "background_control", "action": action,
+            "target": task_id,
+        }
         if confirmation_token:
             item = self.security.consume(
                 confirmation_token, expected_tool=tool.name,
-                expected_arguments=arguments)
+                expected_arguments=arguments, audit_context=audit_context)
             if not item:
                 return {"success": False, "code": "INVALID_CONFIRMATION",
                         "task_id": task_id, "requested_action": action}
         else:
             decision = self.security.decision(tool, risk=risk,
-                                              requires_confirmation=tool.confirmation)
+                                              requires_confirmation=tool.confirmation,
+                                              audit_context=audit_context)
             if decision == "deny":
                 self._audit(task_id, "BACKGROUND_TASK_CONTROL_DENIED", arguments)
                 return {"success": False, "code": "SECURITY_DENIED",
                         "task_id": task_id, "requested_action": action}
             if decision == "confirm":
-                token = self.security.create_confirmation(tool, arguments, action, risk)
+                token = self.security.create_confirmation(
+                    tool, arguments, action, risk, audit_context=audit_context)
                 return {"success": False, "confirmation_required": True, "token": token,
                         "task_id": task_id, "requested_action": action,
                         "code": "CONFIRMATION_REQUIRED"}
@@ -514,22 +532,33 @@ class TaskManager:
             "task_id": str(approval.get("task_id")),
             "action": str(action), "actor": str(actor),
         }
+        audit_context = {
+            "request_id": f"approval:{approval.get('approval_id')}",
+            "correlation_id": f"approval:{approval.get('approval_id')}",
+            "task_id": str(approval.get("task_id")),
+            "run_id": str(approval.get("run_id") or ""),
+            "approval_id": str(approval.get("approval_id")),
+            "surface": "task_manager", "operation": "approval_decision",
+            "action": str(action), "target": str(approval.get("approval_id")),
+        }
         if confirmation_token:
             item = self.security.consume(
                 confirmation_token, expected_tool=tool.name,
-                expected_arguments=arguments)
+                expected_arguments=arguments, audit_context=audit_context)
             if not item:
                 return {"success": False, "code": "INVALID_CONFIRMATION"}
         else:
             decision = self.security.decision(
-                tool, risk=risk, requires_confirmation=tool.confirmation)
+                tool, risk=risk, requires_confirmation=tool.confirmation,
+                audit_context=audit_context)
             if decision == "deny":
                 return {"success": False, "code": "SECURITY_DENIED"}
             if decision == "confirm":
                 return {
                     "success": False, "confirmation_required": True,
                     "token": self.security.create_confirmation(
-                        tool, arguments, action, risk),
+                        tool, arguments, action, risk,
+                        audit_context=audit_context),
                     "code": "CONFIRMATION_REQUIRED",
                 }
         return {"success": True}
