@@ -126,13 +126,17 @@ class Gateway:
     """
 
     def __init__(self, service, host: str = "127.0.0.1", port: int = 8766,
-                 extra_hosts: Optional[list] = None, ssl_context=None):
+                 extra_hosts: Optional[list] = None, ssl_context=None,
+                 auth_manager: Optional[AuthManager] = None):
         self.service = service
         self.host = host
         self.port = port
         self.extra_hosts = extra_hosts or []  # Additional bind addresses (e.g., LAN IP)
         self.ssl_context = ssl_context  # ssl.SSLContext for WSS
-        self.auth = AuthManager()
+        # HTTP and WebSocket inbound identity share this manager when the
+        # canonical server supplies it; standalone Gateway callers retain the
+        # historical default.
+        self.auth = auth_manager or AuthManager()
         self.sessions = SessionManager()
         self.idempotency = IdempotencyCache()
         self._device_pairing = None

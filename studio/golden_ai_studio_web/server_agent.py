@@ -48,8 +48,16 @@ from jarvis_core.runtime_profile import DEFAULT_PROFILE, resolve_runtime_profile
 from jarvis_core.audit import AuditLog
 from jarvis_core.security import SecurityManager
 from jarvis_core.security_compatibility import ExecutionSecurityFacade
+from jarvis_core.gateway.auth import AuthManager
+from jarvis_core.http_perimeter import HttpPerimeter
 
 ACTIVE_RUNTIME_PROFILE = DEFAULT_PROFILE
+
+_canonical_audit = AuditLog(ROOT / "golden_runtime.db")
+_canonical_security = SecurityManager(audit_log=_canonical_audit)
+HTTP_AUTH_MANAGER = AuthManager()
+HTTP_PERIMETER = HttpPerimeter(
+    auth_manager=HTTP_AUTH_MANAGER, audit_log=_canonical_audit)
 
 # Import Ollama
 try:
@@ -73,8 +81,6 @@ try:
     from core.permissions import PermissionManager
     from core.config import load_settings
     _settings = load_settings()
-    _canonical_audit = AuditLog(ROOT / "golden_runtime.db")
-    _canonical_security = SecurityManager(audit_log=_canonical_audit)
     PERMISSION_MANAGER = PermissionManager(_settings)
     PERMISSION_MANAGER.execution.security_facade = ExecutionSecurityFacade(
         _canonical_security)
@@ -496,29 +502,71 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
         web_dir = str(Path(__file__).parent.resolve())
         super().__init__(*args, directory=web_dir, **kwargs)
 
+    def _request_path(self):
+        return HTTP_PERIMETER.path_only(self.path)
+
+    def _source_ip(self):
+        try:
+            return str(self.client_address[0])
+        except Exception:
+            return "unknown"
+
+    def _send_json(self, payload, status_code=200):
+        response_bytes = json.dumps(payload, ensure_ascii=False,
+                                    cls=_NumpyEncoder).encode('utf-8')
+        self.send_response(int(status_code))
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(response_bytes)))
+        for key, value in HTTP_PERIMETER.cors_headers(
+                self.headers.get('Origin', '')).items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(response_bytes)
+
+    def _authorize_http(self, method, path):
+        decision = HTTP_PERIMETER.authorize(
+            method, path, self.headers, source_ip=self._source_ip())
+        if not decision.allowed:
+            self._send_json({"ok": False, "error": decision.reason,
+                             "code": decision.code,
+                             "request_id": decision.context.get("request_id", "")},
+                            decision.status_code)
+            return None
+        return decision
+
     def do_GET(self):
         if self.path in ("/", ""):
             self.path = "/studio_v7.html"
-        if self.path.startswith("/api/"):
+        path = self._request_path()
+        if path == "/health":
+            if self._authorize_http("GET", path) is None:
+                return
+            self._send_json({"ok": True, "service": "golden-ai",
+                             "runtime_profile": ACTIVE_RUNTIME_PROFILE.name}, 200)
+        elif path.startswith("/api/"):
             self.handle_api()
-        elif self.path.startswith("/stream/"):
+        elif path.startswith("/stream/"):
             self.handle_stream()
         else:
             super().do_GET()
 
     def do_POST(self):
-        if self.path.startswith("/api/"):
+        if self._request_path().startswith("/api/"):
             self.handle_api()
-        elif self.path.startswith("/stream/"):
+        elif self._request_path().startswith("/stream/"):
             self.handle_stream()
         else:
             super().do_POST()
 
     def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        decision = HTTP_PERIMETER.preflight(self.headers)
+        self.send_response(decision.status_code)
+        for key, value in HTTP_PERIMETER.cors_headers(
+                self.headers.get('Origin', '')).items():
+            self.send_header(key, value)
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers',
+                         'Content-Type, Authorization, X-Request-ID, X-Correlation-ID')
         self.end_headers()
 
     def log_message(self, format, *args):
@@ -526,6 +574,10 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
 
     def handle_api(self):
         try:
+            path = self._request_path()
+            decision = self._authorize_http(self.command, path)
+            if decision is None:
+                return
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length) if content_length else b'{}'
             try:
@@ -533,7 +585,9 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
             except:
                 data = {}
             try:
-                response = self.route_api(self.path, data)
+                data = dict(data or {})
+                data["_http_context"] = decision.context
+                response = self.route_api(path, data)
             except Exception as e:
                 response = {"ok": False, "error": str(e)}
             # Ensure response is always serializable
@@ -542,23 +596,14 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
             except (TypeError, ValueError) as e:
                 response = {"ok": False, "error": f"Resposta nao serializavel: {str(e)}"}
                 response_bytes = json.dumps(response, ensure_ascii=False, cls=_NumpyEncoder).encode('utf-8')
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Content-Length', str(len(response_bytes)))
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(response_bytes)
+            response_status = int(response.pop("_http_status", 200)) if isinstance(response, dict) else 200
+            self._send_json(response, response_status)
         except (BrokenPipeError, ConnectionResetError):
             pass  # Client disconnected, nothing to do
         except Exception as e:
             try:
                 err_resp = json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode('utf-8')
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Content-Length', str(len(err_resp)))
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(err_resp)
+                self._send_json({"ok": False, "error": str(e)}, 500)
             except:
                 pass
 
@@ -567,12 +612,17 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
     # ═══════════════════════════════════════════════════════════════
 
     def handle_stream(self):
+        decision = self._authorize_http(self.command, self._request_path())
+        if decision is None:
+            return
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length) if content_length else b'{}'
         try:
             data = json.loads(body) if body else {}
         except:
             data = {}
+        data = dict(data or {})
+        data["_http_context"] = decision.context
 
         message = data.get("message", "")
         session_id = data.get("session_id", "default")
@@ -583,7 +633,9 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('Connection', 'close')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        for key, value in HTTP_PERIMETER.cors_headers(
+                self.headers.get('Origin', '')).items():
+            self.send_header(key, value)
         self.end_headers()
 
         try:
@@ -5642,7 +5694,8 @@ void OnTick()
             "/api/rag/search": lambda d: self._api_rag_search(d.get('query', '')),
         }
         handler = routes.get(path)
-        return handler(data) if handler else {"error": "Not found"}
+        return handler(data) if handler else {"ok": False, "error": "Not found",
+                                              "_http_status": 404}
 
     def api_status(self, data):
         # System
@@ -6017,7 +6070,8 @@ void OnTick()
                     str(payload.get("text") or payload.get("message") or "").strip(),
                     surface="market", conversation_id=payload.get("conversation_id") or
                     payload.get("session_id") or "market-default",
-                    market_context=context, source="market")
+                    market_context=context, source="market",
+                    audit_context=payload.get("_http_context"))
                 result["market_context_status"] = "AVAILABLE" if context_result.get("ok") else "UNAVAILABLE"
                 return result
             request_started = time.perf_counter()
@@ -6934,7 +6988,8 @@ void OnTick()
             message, surface="market_deep_analysis",
             conversation_id=payload.get("conversation_id") or
             f"market-analysis:{symbol}:{timeframe}",
-            market_context=context, source="market")
+            market_context=context, source="market",
+            audit_context=payload.get("_http_context"))
         timestamp = datetime.now().isoformat()
         response = result.get("response") or result.get("error") or "Sem resposta."
         snapshot = dict(payload.get("snapshot") or {})
@@ -7099,6 +7154,7 @@ def start_server(port=8765, runtime_profile=None):
     # LAN mode configuration
     from jarvis_core.lan_config import get_lan_config
     _lan = get_lan_config()
+    HTTP_PERIMETER.set_lan_config(_lan)
     _http_host = _lan.bind_address
     _gateway_host = _lan.bind_address
 
@@ -7240,6 +7296,7 @@ def start_server(port=8765, runtime_profile=None):
             port=_gw_port,
             extra_hosts=_gw_extra_hosts,
             ssl_context=_ssl_context,  # None if SSL disabled
+            auth_manager=HTTP_AUTH_MANAGER,
         )
 
         # Connect device pairing

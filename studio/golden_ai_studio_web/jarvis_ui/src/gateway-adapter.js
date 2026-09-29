@@ -338,7 +338,10 @@
 
     async httpGet(path) {
       try {
-        const res = await fetch(this.httpUrl + path);
+        const headers = {};
+        const token = this.getToken();
+        if (token) headers.Authorization = 'Bearer ' + token;
+        const res = await fetch(this.httpUrl + path, { headers });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return await res.json();
       } catch (err) {
@@ -349,9 +352,12 @@
 
     async httpPost(path, data) {
       try {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = this.getToken();
+        if (token) headers.Authorization = 'Bearer ' + token;
         const res = await fetch(this.httpUrl + path, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify(data || {}),
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);

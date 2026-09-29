@@ -284,12 +284,13 @@ def test_http_gateway_sse_and_route_reachability_are_source_characterized():
     assert "hello" in gateway and "auth" in gateway
     assert "8766" in gateway_start and "/ws" in gateway_start
     assert "text/event-stream" in server
-    assert "Access-Control-Allow-Origin', '*'" in server
+    assert "Access-Control-Allow-Origin', '*'" not in server
+    assert "HttpPerimeter" in server
 
     options = server[server.index("    def do_OPTIONS"):server.index("    def log_message")]
     handle_api = server[server.index("    def handle_api"):server.index("    def handle_stream")]
-    assert "Authorization" not in options
-    assert "Authorization" not in handle_api
+    assert "Authorization" in options
+    assert "_authorize_http" in handle_api
 
 
 def test_provider_bypass_and_memory_task_current_boundaries_are_static_findings():

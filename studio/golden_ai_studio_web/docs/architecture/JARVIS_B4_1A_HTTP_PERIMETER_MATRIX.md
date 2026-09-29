@@ -1,32 +1,47 @@
 # JARVIS B4.1A - HTTP Perimeter Matrix
 
-Status: STATIC INVENTORY / READ-ONLY
-Baseline: `c033b61dbbe684ee0943854e650f471bfd87a31b`
+Status: WAVE 4 IMPLEMENTED / FOCUSED-VALIDATED
+Baseline: `ad7d04e3bb41a844ebc8680f5ac5d33961f1905f`
 
 ## Evidence boundary
 
-This matrix records source-visible routes and call paths. It does not claim a
-route is safe merely because it is reachable, and it does not infer inbound
-authentication from outbound provider headers. No HTTP server, provider, MT5,
-or browser action was executed for this inventory.
+This matrix records source-visible routes and call paths. Wave 4 adds an
+explicit inbound perimeter before route execution; it does not claim a route
+is safe merely because it is authenticated. No HTTP server, provider, MT5, or
+browser action was executed for this focused validation.
 
 ## Current perimeter observations
 
-`server_agent.py` dispatches `do_GET` and `do_POST` requests to `handle_api`
-and then `route_api`. `do_OPTIONS` advertises `GET, POST, OPTIONS` and
-`Content-Type`. The observed CORS response uses `Access-Control-Allow-Origin:
-*`.
+`server_agent.py` dispatches `do_GET` and `do_POST` requests through the
+shared `HttpPerimeter` before `handle_api`, `handle_stream`, and `route_api`.
+`do_OPTIONS` is preflight-only and advertises `GET, POST, OPTIONS` plus the
+bounded identity/correlation headers. CORS is origin-bound through the
+existing Gateway allowlist; wildcard CORS is no longer emitted.
 
-No shared inbound `Authorization` validation was proven in the inspected
-`handle_api`/`route_api` path. `Authorization` occurrences observed in the
-server are primarily outbound headers for provider calls. Therefore:
+The Wave 4 path now validates `Authorization: Bearer` with the same
+`AuthManager` used by Gateway `:8766/ws`. Provider authorization headers are
+not used as inbound identity. Therefore:
 
 ```text
-HTTP_AUTH_CURRENT_STATE = PARTIAL/UNKNOWN
+HTTP_AUTH_CURRENT_STATE = EXPLICIT_SHARED_GATE
 HTTP_AUTH_TARGET_STATE = explicit inbound auth before route execution
 ```
 
-This is a design finding, not permission to add auth in this checkpoint.
+The target is implemented for the extracted API and SSE routes.
+
+## Wave 4 measured state
+
+| Metric | Result |
+|---|---|
+| Extracted API routes | 139 |
+| `AUTHENTICATED` API routes | 65 |
+| `AUTHENTICATED_AND_AUTHORIZED` API routes | 74 |
+| Additional protected stream | `/stream/chat` |
+| Public local route | `GET /health` |
+| Public preflight | `OPTIONS` only; no dispatch |
+| Unknown API route | Authenticated first, then `404` |
+| Bind | Existing `LanConfig.bind_address`, default `127.0.0.1:8765` |
+| Identity authority | Shared Gateway `AuthManager` |
 
 ## Route classes
 

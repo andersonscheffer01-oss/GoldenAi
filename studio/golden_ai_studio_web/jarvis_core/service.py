@@ -897,12 +897,13 @@ class JarvisService:
                 "context": context, "market": market, "scanner": scanner}
 
     def generate_response(self, message, surface="main", conversation_id="",
-                          market_context=None, source="text"):
+                          market_context=None, source="text", audit_context=None):
         """Canonical no-tool response boundary for contextual AI surfaces."""
         from .brain import get_brain
 
         started = time.perf_counter()
-        request_id = uuid.uuid4().hex
+        audit_context = dict(audit_context or {})
+        request_id = str(audit_context.get("request_id") or uuid.uuid4().hex)
         surface = str(surface or "main").strip().lower()[:40] or "main"
         conversation_id = str(conversation_id or f"{surface}-default").strip()[:160]
         message = str(message or "").strip()
@@ -933,7 +934,12 @@ class JarvisService:
                        "context_timestamp": (market_context or {}).get("context_timestamp", "")
                        if isinstance(market_context, dict) else ""},
             result={"provider": canonical.get("provider", ""),
-                    "model": canonical.get("model", ""), "ok": bool(result.get("ok"))})
+                    "model": canonical.get("model", ""), "ok": bool(result.get("ok"))},
+            envelope={**audit_context, "request_id": request_id,
+                      "correlation_id": audit_context.get("correlation_id", request_id),
+                      "conversation_id": conversation_id,
+                      "surface": surface, "operation": "canonical_ai_response",
+                      "action": "CANONICAL_AI_RESPONSE", "status": audit_status})
         self._record_conversation_turn(conversation_id, message, canonical)
         return {
             "ok": bool(result.get("ok")),
