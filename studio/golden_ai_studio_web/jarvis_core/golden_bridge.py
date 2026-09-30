@@ -126,13 +126,15 @@ def _availability(payload: Any) -> tuple[str, str, bool]:
 
 
 def _envelope(capability_id: str, payload: Any, source_module: str,
-              evidence_class: str = "CALCULATED") -> dict[str, Any]:
+              evidence_class: str = "CALCULATED",
+              correlation_id: str = "") -> dict[str, Any]:
     data = _json(payload)
     availability, health, stale = _availability(data)
     provenance = provenance_for_payload(
         data, source_module, source_type="GOLDEN_LEGACY",
         evidence_class=evidence_class,
         capability=capability_id.rsplit(".", 1)[-1],
+        correlation_id=correlation_id,
     ).to_dict()
     provenance.update({"source_module": source_module,
                        "calculation_origin": provenance.get("calculation_origin")
@@ -160,16 +162,18 @@ def _envelope(capability_id: str, payload: Any, source_module: str,
 
 
 def _safe(capability_id: str, source_module: str, operation: Callable[[], Any],
-          evidence_class: str = "CALCULATED") -> dict[str, Any]:
+          evidence_class: str = "CALCULATED",
+          correlation_id: str = "") -> dict[str, Any]:
     try:
-        return _envelope(capability_id, operation(), source_module, evidence_class)
+        return _envelope(capability_id, operation(), source_module, evidence_class,
+                         correlation_id=correlation_id)
     except Exception as exc:
         return _envelope(capability_id, {
             "ok": False,
             "status": UNAVAILABLE,
             "error_code": type(exc).__name__,
             "reason": str(exc)[:240],
-        }, source_module, evidence_class)
+        }, source_module, evidence_class, correlation_id=correlation_id)
 
 
 def _normalize_scan(raw: Any) -> dict[str, Any]:
@@ -325,6 +329,37 @@ class GoldenReadBridge:
                 "source": "market_data.py",
             }
         return _safe("golden.radar", "market_data.py", read)
+
+    def market_intelligence_snapshot(self, symbol: str = "XAUUSD",
+                                     timeframe: str = "M15",
+                                     correlation_id: str = "") -> dict[str, Any]:
+        """Build the single coherent, read-only B4.2 market projection."""
+        from .market_read_models import build_market_intelligence_snapshot
+
+        symbol = str(symbol or "XAUUSD").strip()[:32]
+        timeframe = str(timeframe or "M15").upper().strip()[:8]
+        correlation_id = str(correlation_id or _now())[:120]
+
+        def read():
+            overview = self._market_overview()
+            chart = (self._market_chart(symbol, timeframe)
+                     if symbol else {"ok": False, "status": "NOT_REQUESTED"})
+            scanner = self.scanner_snapshot(symbol, limit=30)
+            risk = self.risk_detail()
+            validation = self.validation_detail(limit=30)
+            return build_market_intelligence_snapshot(
+                overview=overview, chart=chart, scanner=scanner, risk=risk,
+                validation=validation, symbol=symbol, timeframe=timeframe,
+                correlation_id=correlation_id)
+
+        result = _safe("golden.market_intelligence", "market_read_models.py", read,
+                       correlation_id=correlation_id)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        result["snapshot_id"] = data.get("snapshot_id", "")
+        result["correlation_id"] = correlation_id
+        result["status"] = data.get("status", result.get("availability", UNKNOWN))
+        result["freshness"] = data.get("freshness", result.get("freshness", UNKNOWN))
+        return result
 
     def market_context(self, symbol: str = "XAUUSD", timeframe: str = "M15") -> dict[str, Any]:
         def read():

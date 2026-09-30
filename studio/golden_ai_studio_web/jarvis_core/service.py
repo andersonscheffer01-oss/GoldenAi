@@ -651,6 +651,15 @@ class JarvisService:
                  security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
                  provider="jarvis_core", provenance="golden_bridge",
                  capability_name="golden.radar.detail"),
+            Tool("golden_market_intelligence_snapshot",
+                 "Lê um snapshot coerente do Radar, Scanner, risco, validação e performance.",
+                 self.golden_market_intelligence_snapshot, Risk.LOW, timeout=90,
+                 parameters={"symbol": str, "timeframe": str, "correlation_id": str},
+                 category="golden_b4_2", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="market_read_models",
+                 capability_name="golden.market_intelligence.snapshot"),
             Tool("golden_risk_detail", "Lê cálculos e contexto de risco sem autorizar ação.",
                  self.golden_risk_detail, Risk.LOW, timeout=35,
                  category="golden_b2", llm_enabled=False,
@@ -1150,6 +1159,12 @@ class JarvisService:
         return self.golden_bridge.radar_detail(str(symbol or ""),
                                                str(timeframe or "M15"),
                                                str(correlation_id or ""))
+
+    def golden_market_intelligence_snapshot(self, symbol="XAUUSD", timeframe="M15",
+                                            correlation_id=""):
+        return self.golden_bridge.market_intelligence_snapshot(
+            str(symbol or "XAUUSD"), str(timeframe or "M15"),
+            str(correlation_id or ""))
 
     def golden_risk_detail(self):
         return self.golden_bridge.risk_detail()

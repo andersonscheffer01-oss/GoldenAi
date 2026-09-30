@@ -1326,6 +1326,8 @@ const b3State = {
   selectedRobot: null, marketAssets: [], marketGroup: "ALL", marketResponse: null,
   responses: {}, busy: false,
 };
+const B3_MARKET_INTELLIGENCE_ENDPOINT = "/api/jarvis/golden/market-intelligence";
+const B3_MARKET_COMPATIBILITY_ENDPOINTS = ["/api/jarvis/golden/radar", "/api/jarvis/golden/scanner"];
 
 function b3Payload(response) {
   return response?.data && typeof response.data === "object" ? response.data : (response || {});
@@ -1514,6 +1516,32 @@ function b3RenderMarket(response) {
     ["SESSÕES", data.market_sessions], ["CALENDÁRIO", data.economic_calendar?.length ?? "UNKNOWN"],
     ["INTEGRIDADE", data.source_integrity], ["REPLAY", data.replay_metadata],
   ]);
+  const risk = data.risk || {};
+  const validation = data.validation || {};
+  const performance = data.performance || {};
+  const sources = data.source_availability || {};
+  $("#gB3MarketRisk").innerHTML = b3Detail([
+    ["STATUS", sources.risk?.status || risk.status || "UNKNOWN"],
+    ["MERCADO", risk.market_risk || risk.risk_state || "UNKNOWN"],
+    ["SETUP", risk.setup_risk || "UNKNOWN"],
+    ["PORTFÓLIO", risk.portfolio_risk || risk.exposure || "UNKNOWN"],
+    ["EVENTO", risk.event_risk || "UNKNOWN"],
+    ["EXECUÇÃO", "NÃO AUTORIZA TRADE"],
+  ]);
+  $("#gB3MarketValidation").innerHTML = b3Detail([
+    ["STATUS", sources.validation?.status || validation.status || "UNKNOWN"],
+    ["ESTÁGIOS", validation.stages?.length ?? "UNKNOWN"],
+    ["EVIDÊNCIAS", validation.history?.length ?? "UNKNOWN"],
+    ["UNKNOWN", "NÃO É FAIL"],
+    ["FONTE", sources.validation?.source || "UNKNOWN"],
+  ]);
+  $("#gB3MarketPerformance").innerHTML = b3Detail([
+    ["STATUS", performance.status || "UNKNOWN"],
+    ["AMOSTRA", performance.sample_count ?? "UNKNOWN"],
+    ["TIPOS", performance.evidence_type_counts || "UNKNOWN"],
+    ["MÉTRICAS", Object.keys(performance.metrics || {}).length || "UNKNOWN"],
+    ["LIMITAÇÕES", performance.limitations || "UNKNOWN"],
+  ]);
 }
 function b3RenderScanner(response) {
   const data = b3Payload(response);
@@ -1587,17 +1615,25 @@ async function refreshGoldenBridge() {
   try {
     const post = window.Gateway?.httpPost;
     if (!post) throw new Error("Gateway indisponível");
-    const [overview, market, scanner, robots, evidence, memory] = await Promise.all([
+    const [overview, market, robots, evidence, memory] = await Promise.all([
       post.call(window.Gateway, "/api/jarvis/golden/overview", { include_live: false }),
-      post.call(window.Gateway, "/api/jarvis/golden/radar", { symbol: b3State.symbol, timeframe: b3State.timeframe }),
-      post.call(window.Gateway, "/api/jarvis/golden/scanner", { symbol: b3State.symbol, limit: 30 }),
+      post.call(window.Gateway, B3_MARKET_INTELLIGENCE_ENDPOINT, { symbol: b3State.symbol, timeframe: b3State.timeframe }),
       post.call(window.Gateway, "/api/jarvis/golden/robots", {}),
       post.call(window.Gateway, "/api/jarvis/golden/evidence", { limit: 30 }),
       post.call(window.Gateway, "/api/jarvis/memory/scientific", {}),
     ]);
+    // The scanner projection is part of the same correlated snapshot.
+    const scanner = market?.scanner ? {
+      ...market.scanner,
+      ok: market.ok,
+      status: market.scanner.status || market.status,
+      snapshot_id: market.snapshot_id,
+      correlation_id: market.correlation_id,
+      provenance: market.provenance,
+    } : { ok: false, status: "UNAVAILABLE", normalized_results: [] };
     b3State.responses = { overview, market, scanner, robots, evidence, memory };
     const failures = Object.values(b3State.responses).filter((item) => !item || item.ok === false).length;
-    state.textContent = failures ? (failures === 6 ? "UNAVAILABLE" : "PARTIAL") : "READ-ONLY";
+    state.textContent = failures ? (failures === 5 ? "UNAVAILABLE" : "PARTIAL") : "READ-ONLY";
     ["gB3MarketState", "gB3ScannerState", "gB3RobotState", "gB3EvidenceState", "gB3MemoryState"].forEach((id, index) => b3RenderStatus(id, [market, scanner, robots, evidence, memory][index]));
     b3Overview(overview || {}, market, scanner, robots, evidence || {}, memory || {});
     b3RenderMarket(market || {});
@@ -1610,7 +1646,7 @@ async function refreshGoldenBridge() {
   } catch (error) {
     state.textContent = "UNAVAILABLE";
     $("#gGoldenBridgeSummary").innerHTML = b3Empty(error?.message || "Read models indisponíveis.");
-    ["gB3MarketSummary", "gB3MarketAssets", "gB3MarketHeatmap", "gB3MarketFlow", "gB3MarketTop", "gB3MarketNews", "gB3MarketDetail"].forEach((id) => {
+    ["gB3MarketSummary", "gB3MarketAssets", "gB3MarketHeatmap", "gB3MarketFlow", "gB3MarketTop", "gB3MarketNews", "gB3MarketDetail", "gB3MarketRisk", "gB3MarketValidation", "gB3MarketPerformance"].forEach((id) => {
       const el = $(`#${id}`); if (el) el.innerHTML = b3Empty("Read model indisponível; nenhum valor foi substituído.");
     });
     ["gB3MarketState", "gB3ScannerState", "gB3RobotState", "gB3EvidenceState", "gB3MemoryState", "gB3ProvenanceState"].forEach((id) => { const el = $(`#${id}`); if (el) el.textContent = "UNAVAILABLE"; });

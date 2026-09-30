@@ -5300,6 +5300,7 @@ void OnTick()
             "/api/jarvis/chat": lambda d: self._api_jarvis_chat(d),
             "/api/jarvis/golden/overview": lambda d: self._api_jarvis_golden_overview(d),
             "/api/jarvis/golden/radar": lambda d: self._api_jarvis_golden_radar(d),
+            "/api/jarvis/golden/market-intelligence": lambda d: self._api_jarvis_golden_market_intelligence(d),
             "/api/jarvis/golden/scanner": lambda d: self._api_jarvis_golden_scanner(d),
             "/api/jarvis/golden/robots": lambda d: self._api_jarvis_golden_robots(d),
             "/api/jarvis/golden/robot": lambda d: self._api_jarvis_golden_robot(d),
@@ -6027,15 +6028,30 @@ void OnTick()
             return {"ok": False, "status": "UNAVAILABLE",
                     "error": type(exc).__name__}
 
-    def _execute_jarvis_read(self, tool_name, arguments=None):
+    def _execute_jarvis_read(self, tool_name, arguments=None, audit_context=None):
         try:
             from desktop_center import DESKTOP_CENTER
-            return DESKTOP_CENTER.service.execute_tool(
-                tool_name, arguments or {}, command="control_center_golden_b2_read",
-                task_id="control_center",
-            )
+            service = DESKTOP_CENTER.service
+            previous_context = getattr(service, "_active_audit_context", None)
+            service._active_audit_context = dict(audit_context or {})
+            try:
+                return service.execute_tool(
+                    tool_name, arguments or {}, command="control_center_golden_read",
+                    task_id="control_center",
+                )
+            finally:
+                service._active_audit_context = previous_context
         except Exception as exc:
             return {"ok": False, "status": "UNAVAILABLE", "error": type(exc).__name__}
+
+    def _api_jarvis_golden_market_intelligence(self, data):
+        payload = data or {}
+        context = self._legacy_audit_context(payload, "control_center", "market_intelligence")
+        return self._execute_jarvis_read("golden_market_intelligence_snapshot", {
+            "symbol": str(payload.get("symbol") or "XAUUSD"),
+            "timeframe": str(payload.get("timeframe") or "M15"),
+            "correlation_id": context["correlation_id"],
+        }, audit_context=context)
 
     def _api_jarvis_golden_radar(self, data):
         payload = data or {}
