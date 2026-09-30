@@ -612,6 +612,12 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
     # ═══════════════════════════════════════════════════════════════
 
     def handle_stream(self):
+        """Legacy SSE compatibility path, frozen until canonical streaming exists.
+
+        The canonical ModelRouter is deliberately non-streaming today. Keeping
+        this route intact preserves the Studio contract without pretending that
+        direct provider streaming is already a Jarvis-owned capability.
+        """
         decision = self._authorize_http(self.command, self._request_path())
         if decision is None:
             return
@@ -5902,13 +5908,53 @@ void OnTick()
             'mode': result.mode, 'risk_level': result.risk_level, 'error': result.reason,
         }
 
+    def _legacy_service(self):
+        """Return the one canonical JarvisService used by legacy adapters."""
+        from desktop_center import DESKTOP_CENTER
+        return DESKTOP_CENTER.service
+
+    def _legacy_audit_context(self, data, session_id, surface):
+        http_context = dict((data or {}).get("_http_context") or {})
+        request_id = str(http_context.get("request_id") or uuid.uuid4().hex)
+        return {
+            **http_context,
+            "request_id": request_id,
+            "correlation_id": str(http_context.get("correlation_id") or request_id),
+            "session_id": str(session_id or "default")[:120],
+            "conversation_id": str(session_id or "default")[:120],
+            "surface": surface,
+        }
+
     def api_agent(self, data):
-        """Direct tool execution from frontend"""
-        tool_call = data.get("tool_call", {})
-        if not tool_call:
+        """Compatibility tool route delegated to JarvisService."""
+        payload = data or {}
+        tool_call = payload.get("tool_call", {})
+        if not isinstance(tool_call, dict) or not tool_call:
             return {"ok": False, "error": "No tool_call provided"}
-        result = self._execute_tool(tool_call, data.get("session_id", "default"))
-        return {"ok": True, "result": result}
+
+        tool_name = str(tool_call.get("tool") or "").strip()
+        if not tool_name:
+            return {"ok": False, "error": "No tool provided"}
+        session_id = str(payload.get("session_id") or "default")[:120]
+        arguments = {key: value for key, value in tool_call.items() if key != "tool"}
+        service = self._legacy_service()
+        previous_context = getattr(service, "_active_audit_context", None)
+        service._active_audit_context = self._legacy_audit_context(
+            payload, session_id, "legacy_agent")
+        try:
+            result = service.execute_tool(
+                tool_name, arguments, command=f"legacy:{tool_name}",
+                task_id=session_id)
+        finally:
+            service._active_audit_context = previous_context
+
+        result = dict(result or {})
+        result.update({
+            "compatibility_bridge": True,
+            "security_owner": "jarvis_core.security.SecurityManager",
+            "audit_owner": "jarvis_core.audit.AuditLog",
+        })
+        return {"ok": bool(result.get("ok")), "result": result}
 
     def _api_desktop_status(self, data):
         from desktop_center import DESKTOP_CENTER
@@ -7021,50 +7067,28 @@ void OnTick()
         return {"ok": True, "result": self._tool_web_search({"query": query})}
 
     def api_chat(self, data):
-        """Non-streaming chat fallback with tool-calling"""
-        message = data.get("message", "")
-        session_id = data.get("session_id", "default")
-        if not message.strip():
+        """Compatibility chat route delegated to the canonical model boundary."""
+        payload = data or {}
+        message = str(payload.get("message") or payload.get("text") or "").strip()
+        session_id = str(payload.get("session_id") or "default")[:120]
+        if not message:
             return {"ok": False, "error": "Empty"}
-        if not OLLAMA_AVAILABLE:
-            return {"ok": False, "error": "IA local desligada. Inicie o Ollama para usar o aprofundamento; a análise técnica do Radar continua ativa."}
 
-        with CONVERSATIONS_LOCK:
-            history = CONVERSATIONS.get(session_id, [])
-
-        history.append({"role": "user", "content": message})
-        if len(history) > 30:
-            history = history[-30:]
-
-        messages = [{"role": "system", "content": TOOL_DEFINITIONS}]
-        for h in history[-15:]:
-            messages.append(h)
-
-        # Tool-calling loop (max 3 iterations)
-        full_response = ""
-        for iteration in range(3):
-            response = ollama_chat(model="qwen2.5-coder:14b", messages=messages)
-            content = response["message"]["content"]
-
-            tool_call = self._parse_tool_call(content)
-            if tool_call:
-                tool_result = self._execute_tool(tool_call, session_id)
-                messages.append({"role": "assistant", "content": content})
-                messages.append({"role": "user", "content": f"Resultado da ferramenta:\n\n{tool_result[:20000]}\n\nAgora responda ao usuario com base neste resultado. Use Markdown para formatar sua resposta."})
-                continue
-            else:
-                full_response = content
-                break
-
-        with CONVERSATIONS_LOCK:
-            if session_id not in CONVERSATIONS:
-                CONVERSATIONS[session_id] = []
-            CONVERSATIONS[session_id].append({"role": "user", "content": message})
-            CONVERSATIONS[session_id].append({"role": "assistant", "content": full_response})
-            if len(CONVERSATIONS[session_id]) > 50:
-                CONVERSATIONS[session_id] = CONVERSATIONS[session_id][-50:]
-
-        return {"ok": True, "response": full_response, "timestamp": datetime.now().isoformat()}
+        service = self._legacy_service()
+        result = service.generate_response(
+            message,
+            surface="legacy_main",
+            conversation_id=session_id,
+            source="legacy_chat",
+            audit_context=self._legacy_audit_context(
+                payload, session_id, "legacy_chat"),
+        )
+        result = dict(result or {})
+        result["timestamp"] = datetime.now().isoformat()
+        result["compatibility_bridge"] = True
+        result["security_owner"] = "jarvis_core.security.SecurityManager"
+        result["audit_owner"] = "jarvis_core.audit.AuditLog"
+        return result
 
     # ── MULTIMEDIA ────────────────────────────────────────────
 

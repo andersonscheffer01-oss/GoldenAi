@@ -27,9 +27,9 @@ provider adapters:
 
 | Bypass | Reachability | Current behavior | Risk | Decision |
 |---|---|---|---|---|
-| `/api/chat` legacy chat | Route exposed; legacy callers present | Can use direct provider helpers | Context, auth, audit divergence | `FREEZE_FIRST` |
-| `/api/agent` legacy agent | Route exposed | Legacy orchestration/provider path | Tool and approval divergence | `FREEZE_FIRST` |
-| `/stream/chat` | Streaming handler and SSE content type observed | Direct/legacy streaming provider path | Auth before stream and audit correlation gap | `DELEGATE_FIRST` |
+| `/api/chat` legacy chat | Route exposed; legacy callers present | Compatibility adapter now calls `JarvisService.generate_response` | Legacy response compatibility remains; canonical history/audit path is used | `DELEGATED_W5` |
+| `/api/agent` legacy agent | Route exposed | Compatibility adapter now calls `JarvisService.execute_tool` | Legacy payload remains; canonical SecurityManager/AuditLog own execution | `DELEGATED_W5` |
+| `/stream/chat` | Streaming handler and SSE content type observed | Direct/legacy streaming provider path, explicitly frozen | Canonical ModelRouter has no streaming equivalent yet | `FROZEN_W5` |
 | Gemini/Groq/Ollama/Cline/OpenRouter/Claude helpers | Imported/called by legacy server paths | Provider calls outside one proven policy gate | Provider and secret-boundary divergence | `DELEGATE_FIRST` |
 | Canonical model router | Jarvis orchestrator path | Intended canonical route | Provider policy still future scope | `KEEP_READ_ONLY` |
 
