@@ -27,7 +27,9 @@ journal evidence and remains unchanged.
 
 ## Providers
 
-`NativeTesterLogProvider` reads only bounded terminal tester logs.
+`NativeTesterLogProvider` reads only bounded terminal tester logs. The current
+provider contract is `jarvis-tester-result-bridge-v2`; the earlier v1 contract
+remains preserved for the completed Run 1 evidence record.
 `FixtureJsonResultProvider` preserves the proven B4.4 fixture JSON contract.
 Both produce `NormalizedTesterResult` and `ProviderOutcome`; no provider has
 execution authority.
@@ -36,10 +38,14 @@ execution authority.
 
 Observed and normalized fields include initial deposit, final balance, custom
 `OnTester` result, ticks, bars, history quality when present, tester model,
-terminal build, identity, and artifact provenance. Missing values remain
-missing. Total trades, detailed drawdown, commission, spread, and other fields
-not exposed by the native journal are recorded as limitations rather than
-inferred.
+terminal build, identity, and artifact provenance. The v2 parser recognizes
+the observed native phrase `generating based on real ticks` and preserves the
+EA-defined `ROBUSTO` fields as explicitly custom metrics: score, complete
+positions, wins, losses, net result, profit factor, drawdown, expectancy,
+concentration, and approval. Missing values remain missing. `total_trades`
+is still not exposed by the provider; complete positions are not substituted
+for it. Detailed drawdown outside the EA-defined field, commission, spread,
+and other absent fields remain limitations rather than inferred values.
 
 ## Safety boundary
 
@@ -52,7 +58,8 @@ reconciliation, and conflict handling.
 
 ## Gate result
 
-The existing campaign remains unchanged. B4.5A dry-run coverage binds all
-three existing production plans to the provider contract without executing
-them. The previous B4.5 approval becomes `STALE_BY_CONTRACT_CHANGE`; a fresh
-approval is required before any future controlled campaign run.
+The existing campaign design remains unchanged. B4.5A dry-run coverage binds
+all three existing production plans to the provider contract without
+executing them. The v2 parser change makes the previous B4.5 approval
+`STALE_BY_CONTRACT_CHANGE`; a fresh approval bound to the v2 execution
+contract is required before Runs 2 and 3.

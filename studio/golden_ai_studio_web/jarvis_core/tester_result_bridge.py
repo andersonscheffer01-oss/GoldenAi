@@ -17,7 +17,7 @@ from typing import Any, Mapping, Protocol
 from .mql5_evidence import GoldenTestRunManifest, parse_result_json, reconcile_result
 
 
-BRIDGE_VERSION = "jarvis-tester-result-bridge-v1"
+BRIDGE_VERSION = "jarvis-tester-result-bridge-v2"
 MAX_NATIVE_LOG_BYTES = 8 * 1024 * 1024
 NATIVE_LOG_KIND = "NATIVE_LOG"
 FIXTURE_JSON_KIND = "EA_CUSTOM_ARTIFACT"
@@ -215,8 +215,21 @@ _BARS_RE = re.compile(
     re.IGNORECASE,
 )
 _QUALITY_RE = re.compile(r"quality of analyzed history is\s+(?P<value>\d+(?:\.\d+)?)%", re.IGNORECASE)
-_MODEL_REAL_TICKS_RE = re.compile(r"every tick.*real ticks", re.IGNORECASE)
+_MODEL_REAL_TICKS_RE = re.compile(
+    r"(?:every tick.*real ticks|generating based on real ticks)", re.IGNORECASE,
+)
 _MODEL_OHLC_RE = re.compile(r"minutes\s+OHLC\s+ticks generating", re.IGNORECASE)
+_ROBUSTO_RE = re.compile(
+    r"ROBUSTO\s*\|\s*score=(?P<score>-?\d+(?:\.\d+)?)\s+"
+    r"aprovado=(?P<approved>SIM|NAO)\s+posicoes=(?P<positions>\d+)\s+"
+    r"vitorias=(?P<wins>\d+)\s+derrotas=(?P<losses>\d+)\s+"
+    r"lucro=(?P<net_result>-?\d+(?:\.\d+)?)\s+"
+    r"PF=(?P<profit_factor>-?\d+(?:\.\d+)?)\s+"
+    r"DD=(?P<drawdown>-?\d+(?:\.\d+)?)%\s+"
+    r"expectativa=(?P<expectancy>-?\d+(?:\.\d+)?)\s+"
+    r"concentracao=(?P<concentration>-?\d+(?:\.\d+)?)%",
+    re.IGNORECASE,
+)
 def _metric(source: str, provider: str, raw_field: str, raw_value: Any,
             normalized: Any, unit: str = "", status: str = "OBSERVED") -> MetricProvenance:
     return MetricProvenance(raw_field, raw_value, normalized, unit, source, provider,
@@ -383,6 +396,29 @@ class NativeTesterLogProvider:
         if quality:
             add("history_quality", "quality of analyzed history", float(quality.group("value")),
                 float(quality.group("value")), "%")
+        robusto = _ROBUSTO_RE.search(body)
+        if robusto:
+            values = robusto.groupdict()
+            add("custom_on_tester_score", "ROBUSTO score", float(values["score"]),
+                float(values["score"]))
+            add("custom_complete_positions", "ROBUSTO posicoes", int(values["positions"]),
+                int(values["positions"]), "count")
+            add("custom_wins", "ROBUSTO vitorias", int(values["wins"]),
+                int(values["wins"]), "count")
+            add("custom_losses", "ROBUSTO derrotas", int(values["losses"]),
+                int(values["losses"]), "count")
+            add("custom_net_result", "ROBUSTO lucro", float(values["net_result"]),
+                float(values["net_result"]))
+            add("custom_profit_factor", "ROBUSTO PF", float(values["profit_factor"]),
+                float(values["profit_factor"]))
+            add("custom_drawdown_percent", "ROBUSTO DD", float(values["drawdown"]),
+                float(values["drawdown"]), "%")
+            add("custom_expectancy", "ROBUSTO expectativa", float(values["expectancy"]),
+                float(values["expectancy"]))
+            add("custom_concentration_percent", "ROBUSTO concentracao",
+                float(values["concentration"]), float(values["concentration"]), "%")
+            add("custom_approved", "ROBUSTO aprovado", values["approved"],
+                values["approved"].casefold() == "sim")
         model = "REAL TICKS" if _MODEL_REAL_TICKS_RE.search(context) else \
             "OHLC" if _MODEL_OHLC_RE.search(context) else "UNKNOWN"
         build = _BUILD_RE.search(context)

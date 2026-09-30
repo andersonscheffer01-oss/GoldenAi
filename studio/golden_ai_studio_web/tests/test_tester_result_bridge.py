@@ -40,11 +40,11 @@ def _plan(**overrides):
     return plan
 
 
-def _log(plan, *, model="OHLC", include_metrics=True, duplicate=False):
+def _log(plan, *, model="OHLC", include_metrics=True, include_robusto=False, duplicate=False):
     model_line = (
         "Tester EURUSD,M1: 1 minutes OHLC ticks generating"
         if model == "OHLC"
-        else "Tester EURUSD,M1: every tick based on real ticks generating"
+        else "Tester XAUUSD,M1: generating based on real ticks"
         if model == "REAL TICKS"
         else "Tester EURUSD,M1: localized model description"
     )
@@ -54,11 +54,13 @@ Tester final balance 100125.50 USD
 Tester OnTester result 42.5
 Tester XAUUSD,M1: 321 ticks, 87 bars generated
 Tester quality of analyzed history is 100%
-""" if include_metrics else ""
+    """ if include_metrics else ""
+    robusto = """Tester ROBUSTO | score=-999999.6226 aprovado=NAO posicoes=12 vitorias=6 derrotas=6 lucro=747.18 PF=1.46 DD=0.99% expectativa=62.27 concentracao=100.00%
+""" if include_robusto else ""
     block = f"""MetaTester 5 build 6230, 25 Sep 2026
 {model_line}
 Tester {plan['symbol']},{plan['timeframe']} (Broker): testing of Experts\\{plan['expert_relative_path']} from {plan['date_from']} 00:00 to {plan['date_to']} 00:00 started
-{metrics}Tester test passed
+{metrics}{robusto}Tester test passed
 """
     return block + (block if duplicate else "")
 
@@ -112,6 +114,22 @@ def test_native_log_can_classify_real_ticks_and_unknown_model(tmp_path):
     assert outcome.status == "RECONCILED"
     assert outcome.normalized.tester_model == "UNKNOWN"
     assert "TESTER_MODEL_NOT_OBSERVED_IN_LOG" in outcome.normalized.limitations
+
+
+def test_native_log_preserves_ea_defined_robusto_metrics_without_calling_them_total_trades(tmp_path):
+    provider, plan, contract = _provider_contract(tmp_path)
+    path = _write_log(tmp_path, plan, include_robusto=True)
+
+    outcome = provider.read(path, contract)
+
+    assert outcome.status == "RECONCILED"
+    assert outcome.normalized.metrics["custom_complete_positions"] == 12
+    assert outcome.normalized.metrics["custom_wins"] == 6
+    assert outcome.normalized.metrics["custom_losses"] == 6
+    assert outcome.normalized.metrics["custom_net_result"] == 747.18
+    assert outcome.normalized.metrics["custom_on_tester_score"] == -999999.6226
+    assert outcome.normalized.metrics["custom_approved"] is False
+    assert "total_trades" not in outcome.normalized.metrics
 
 
 def test_native_log_rejects_wrong_identity_and_path_escape(tmp_path):

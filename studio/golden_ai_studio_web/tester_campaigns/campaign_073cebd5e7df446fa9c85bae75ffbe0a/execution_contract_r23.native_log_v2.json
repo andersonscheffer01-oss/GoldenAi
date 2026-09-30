@@ -1,0 +1,94 @@
+{
+  "schema": "jarvis-b45-execution-contract-v1",
+  "contract_revision": "B4.5R23_NATIVE_LOG_V2",
+  "contract_fingerprint": "6ff23fe71d3ec3be4a7c47bc883c4d3875ed627cedeba98cbea05a8e413fb6bb",
+  "campaign_id": "campaign_073cebd5e7df446fa9c85bae75ffbe0a",
+  "test_run_ids": [
+    "run_a8180c7c559746da9b7a6863f6796292",
+    "run_c078697fe9ce4892bc9665e6f276be58"
+  ],
+  "original_campaign_manifest_hash": "c0a9bd50f7d3d873c7c6efee059860e308ab91a9d3c258d6bada38c7457792ed",
+  "plans": {
+    "run_a8180c7c559746da9b7a6863f6796292": {
+      "plan_manifest_hash": "cd93921b5b35c40057a0567589033b4d6c4d9ad93a3d8603c69b3eca31889f51",
+      "config_hash": "0baf24122a07fc2f8b4861b4dd87188327c416848a920b4103caa859662693ab",
+      "date_from": "2026.09.01",
+      "date_to": "2026.09.05"
+    },
+    "run_c078697fe9ce4892bc9665e6f276be58": {
+      "plan_manifest_hash": "5c34383a6008ef5752065ab83630ba5231f68b8bfab12f963b3dc5707bd7a036",
+      "config_hash": "a6252e8674a87e7aca7d4ce2d5153054184fc6ef8b2a0b99c1cb2a92fdc4d410",
+      "date_from": "2026.09.08",
+      "date_to": "2026.09.12"
+    }
+  },
+  "robot_id": "EA_Canal_Pullback_MT5",
+  "source_hash": "0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4",
+  "compiled_hash": "e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc",
+  "parameter_fingerprint": "7953a3fa4ca05b223411fca3",
+  "symbol": "XAUUSD",
+  "timeframe": "M1",
+  "tester_model": "REAL TICKS",
+  "terminal": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
+  "terminal_version": "5.0.0.6230",
+  "terminal_hash": "f163b8069e3f34f5cb4556e02e06ba69b65816d6990e7dc360b01a9501616072",
+  "data_root": "C:\\Users\\Anderson\\AppData\\Roaming\\MetaQuotes\\Terminal\\D0E8209F77C8CF37AD8BF550E51FF075",
+  "expert_relative_path": "EA_Canal_Pullback_MT5\\EA_Canal_Pullback_MT5.ex5",
+  "result_provider": "NativeTesterLogProvider",
+  "provider_version": "jarvis-tester-result-bridge-v2",
+  "artifact_kind": "NATIVE_LOG",
+  "log_directory": "C:\\Users\\Anderson\\AppData\\Roaming\\MetaQuotes\\Terminal\\D0E8209F77C8CF37AD8BF550E51FF075\\Tester\\logs",
+  "log_filename_pattern": "YYYYMMDD.log",
+  "max_native_log_bytes": 8388608,
+  "ownership_contract": [
+    "exact_testing_block",
+    "bounded_log_directory",
+    "run_window",
+    "campaign_id",
+    "test_run_id",
+    "config_hash",
+    "robot_id",
+    "source_hash",
+    "compiled_hash",
+    "parameter_fingerprint",
+    "symbol",
+    "timeframe",
+    "date_from",
+    "date_to",
+    "terminal_version"
+  ],
+  "parser_contract": {
+    "real_ticks_phrase": "generating based on real ticks",
+    "custom_robusto_metrics": [
+      "custom_on_tester_score",
+      "custom_complete_positions",
+      "custom_wins",
+      "custom_losses",
+      "custom_net_result",
+      "custom_profit_factor",
+      "custom_drawdown_percent",
+      "custom_expectancy",
+      "custom_concentration_percent",
+      "custom_approved"
+    ],
+    "total_trades": "NOT_EXPOSED_BY_PROVIDER",
+    "on_tester_semantics": "EA_DEFINED_ROBUSTO_SCORE_NOT_PNL"
+  },
+  "safety": {
+    "optimization": 0,
+    "use_remote": 0,
+    "use_cloud": 0,
+    "allow_live_trading": 0,
+    "allow_dll_import": 0,
+    "single_run": true,
+    "automatic_retry": 0,
+    "provider_calls": false,
+    "live_orders": false,
+    "broker_mutation": false,
+    "active_repertoire_mutation": false,
+    "database_migration": false,
+    "device_registry_modified": false
+  },
+  "execution_authority": "StrategyTesterAdapter",
+  "scientific_design_changed": false
+}

@@ -27,10 +27,17 @@ providers are compared without choosing a winner:
 
 ## Implemented providers
 
-`NativeTesterLogProvider` is the B4.5A production-log provider.
+`NativeTesterLogProvider` is the B4.5A production-log provider. Its current
+parser contract is `jarvis-tester-result-bridge-v2`; v1 remains the recorded
+provider version for the completed Run 1 evidence.
 `FixtureJsonResultProvider` is the B4.4 compatibility provider and delegates
 identity checks to the existing `parse_result_json` and `reconcile_result`
 contracts.
+
+The native v2 provider recognizes the observed real-ticks log phrase and
+preserves `ROBUSTO` values emitted by the EA as custom metric fields with
+metric provenance. Those fields do not establish a generic trade count:
+`total_trades` remains absent when the native log does not expose it.
 
 ## Audit vocabulary
 
