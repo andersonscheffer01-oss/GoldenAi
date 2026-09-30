@@ -17,7 +17,7 @@ from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from datetime import datetime
-from threading import Lock
+from threading import Event, Lock
 
 import numpy as _np
 
@@ -52,6 +52,25 @@ from jarvis_core.gateway.auth import AuthManager
 from jarvis_core.http_perimeter import HttpPerimeter
 
 ACTIVE_RUNTIME_PROFILE = DEFAULT_PROFILE
+
+# Legacy operational families remain available for compatibility, but are
+# frozen at the authenticated dispatcher until their canonical read/mutation
+# contracts are migrated one by one.  Pure catalog/read endpoints are not in
+# this list and continue through their existing read-only compatibility path.
+LEGACY_ROUTE_FREEZE_EXACT = frozenset({
+    "/api/mt5/compile", "/api/mt5/backtest", "/api/mt5/real_backtest",
+    "/api/mt5/import_history", "/api/mt5/auto_trade",
+    "/api/mt5/close_position", "/api/strategy_catalog",
+    "/api/strategy_audit", "/api/portfolio_backtest", "/api/meta_strategy",
+    "/api/walk_forward", "/api/risk/config", "/api/validation/real",
+    "/api/validation/all_real", "/api/monitor/toggle",
+    "/api/strategy_manager/toggle", "/api/strategy_manager/toggle_mode",
+    "/api/strategy_manager/preset", "/api/strategy_manager/auto_rank",
+})
+LEGACY_ROUTE_FREEZE_PREFIXES = (
+    "/api/scanner/", "/api/risk/", "/api/validation/", "/api/chart_",
+    "/api/position/", "/api/monitor/", "/api/journal/",
+)
 
 _canonical_audit = AuditLog(ROOT / "golden_runtime.db")
 _canonical_security = SecurityManager(audit_log=_canonical_audit)
@@ -534,6 +553,39 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
             return None
         return decision
 
+    @staticmethod
+    def _legacy_route_frozen(path):
+        path = HTTP_PERIMETER.path_only(path)
+        return (path in LEGACY_ROUTE_FREEZE_EXACT or
+                any(path.startswith(prefix) for prefix in LEGACY_ROUTE_FREEZE_PREFIXES))
+
+    def _audit_route_boundary(self, data, path, status, reason):
+        context = dict((data or {}).get("_http_context") or {})
+        request_id = str(context.get("request_id") or uuid.uuid4().hex)
+        correlation_id = str(context.get("correlation_id") or request_id)
+        envelope = {
+            **context,
+            "request_id": request_id,
+            "correlation_id": correlation_id,
+            "route": path,
+            "surface": context.get("surface", "http"),
+            "operation": "%s %s" % (self.command, path),
+            "action": "LEGACY_ROUTE_%s" % status,
+            "status": status,
+            "runtime_profile": ACTIVE_RUNTIME_PROFILE.name,
+            "target": path,
+        }
+        try:
+            _canonical_audit.add(
+                task_id=request_id, command="legacy_route_boundary",
+                tool="http_route_boundary", risk="HIGH", status=status,
+                arguments={"route": path, "method": self.command},
+                result={"ok": False, "reason": reason}, envelope=envelope)
+        except Exception:
+            # The denial itself stays fail-closed if audit storage is degraded.
+            pass
+        return request_id, correlation_id
+
     def do_GET(self):
         if self.path in ("/", ""):
             self.path = "/studio_v7.html"
@@ -612,447 +664,82 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
     # ═══════════════════════════════════════════════════════════════
 
     def handle_stream(self):
-        """Legacy SSE compatibility path, frozen until canonical streaming exists.
-
-        The canonical ModelRouter is deliberately non-streaming today. Keeping
-        this route intact preserves the Studio contract without pretending that
-        direct provider streaming is already a Jarvis-owned capability.
-        """
+        """Canonical SSE compatibility route owned by JarvisService."""
         decision = self._authorize_http(self.command, self._request_path())
         if decision is None:
             return
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length) if content_length else b'{}'
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length else b"{}"
         try:
-            data = json.loads(body) if body else {}
-        except:
+            data = dict(json.loads(body) if body else {})
+        except (TypeError, ValueError):
             data = {}
-        data = dict(data or {})
-        data["_http_context"] = decision.context
-
         message = data.get("message", "")
-        session_id = data.get("session_id", "default")
-        images = data.get("images", [])
-        files = data.get("files", [])
+        session_id = str(data.get("session_id") or "default")[:120]
+        cancel_event = Event()
 
         self.send_response(200)
-        self.send_header('Content-Type', 'text/event-stream')
-        self.send_header('Cache-Control', 'no-cache')
-        self.send_header('Connection', 'close')
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
         for key, value in HTTP_PERIMETER.cors_headers(
-                self.headers.get('Origin', '')).items():
+                self.headers.get("Origin", "")).items():
             self.send_header(key, value)
         self.end_headers()
 
+        payload_context = self._legacy_audit_context(
+            data, session_id, "legacy_stream")
         try:
-            # Get conversation history
-            with CONVERSATIONS_LOCK:
-                history = CONVERSATIONS.get(session_id, [])
-
-            history.append({"role": "user", "content": message})
-            if len(history) > 20:
-                history = history[-20:]
-
-            # Build messages for Ollama
-            has_images = len(images) > 0
-            
-            # Verificar modelo selecionado
-            selected_model = data.get('model', '') if isinstance(data, dict) else ''
-            
-            # Mapear modelos
-            MODEL_MAP = {
-                'qwen2.5-coder:14b': 'qwen2.5-coder:14b',
-                'qwen2.5vl:7b': 'qwen2.5vl:7b',
-                'cohere-code': 'cohere-code',
-                'nvidia-lightning': 'nvidia-lightning',
-                'openrouter-free': 'openrouter-free',
-                'openrouter-deepseek-r1-free': 'openrouter:z-ai/glm-5.2:free',
-                'openrouter-qwen-coder-free': 'openrouter:cohere/north-mini-code:free',
-                'openrouter-gemma-free': 'openrouter:google/gemma-4-26b-a4b-it:free',
-                'gemini-flash': 'gemini-flash',
-                'gemini-pro': 'gemini-pro',
-                'groq-fast': 'groq-fast',
-                'groq-reasoning': 'groq-reasoning',
-                'groq-llama': 'groq-llama',
-                'codex-bridge': 'codex-bridge',
-                'codex-market': 'codex-market',
-                'claude-sonnet': 'claude-sonnet',
-                'claude-haiku': 'claude-haiku',
-                # ClinePass models
-                'cline-deepseek-v4': 'cline-deepseek-v4',
-                'cline-deepseek-flash': 'cline-deepseek-flash',
-                'cline-qwen38': 'cline-qwen38',
-                'cline-qwen37': 'cline-qwen37',
-                'cline-mimo': 'cline-mimo',
-                'cline-glm': 'cline-glm',
-                'cline-kimi': 'cline-kimi',
-                'cline-minimax': 'cline-minimax',
-            }
-            
-            if selected_model and selected_model in MODEL_MAP:
-                model = MODEL_MAP[selected_model]
-                if has_images and model != 'qwen2.5vl:7b' and not model.startswith('gemini-') and not model.startswith('codex-bridge'):
-                    model = 'qwen2.5vl:7b'  # Forcar modelo de visao
-            elif selected_model:
-                model = selected_model
-                if has_images and model != 'qwen2.5vl:7b' and not model.startswith('gemini-') and not model.startswith('codex-bridge'):
-                    model = 'qwen2.5vl:7b'
-            else:
-                model = 'qwen2.5vl:7b' if has_images else 'cohere-code'
-            
-            # Verificar se e modelo API (OpenRouter ou Cline)
-            is_cline_model = model.startswith('cline-')
-            is_openrouter_dynamic = model.startswith('openrouter:')
-            is_gemini_model = model.startswith('gemini-')
-            is_groq_model = model.startswith('groq-')
-            is_codex_model = model.startswith('codex-bridge')
-            openrouter_models = [
-                'cohere-code', 'nvidia-lightning', 'openrouter-free',
-                'codex-market', 'claude-sonnet', 'claude-haiku',
-            ]
-            is_api_model = model in openrouter_models or is_openrouter_dynamic or is_cline_model or is_gemini_model or is_groq_model or is_codex_model
-            
-            if has_images:
-                self._send_sse({"tool_progress": f"Usando modelo: {model}"})
-            messages = [{"role": "system", "content": TOOL_DEFINITIONS}]
-            for h in history[-8:]:
-                messages.append(h)
-            if has_images:
-                img_b64 = [img.get('data', '') for img in images if img.get('data')]
-                messages[-1] = {"role": "user", "content": message, "images": img_b64}
-
-            # Process uploaded files (documents, code, etc)
-            if files:
-                file_context = "\n\n## Arquivos anexados:\n"
-                for f in files:
-                    fname = f.get('name', 'unknown')
-                    fdata = f.get('data', '')
-                    ftype = f.get('type', '')
-                    # Decode base64 content
-                    try:
-                        import base64 as b64
-                        ext = Path(fname).suffix.lower()
-                        raw = b64.b64decode(fdata, validate=False)
-                        # Multimidia precisa passar pelos servicos proprios; decodificar
-                        # video/audio como UTF-8 produzia apenas lixo no contexto do modelo.
-                        if ext in {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.m4v', '.ts'}:
-                            video_path = self._save_upload(fdata, fname)
-                            from core.video import VideoService
-                            result = VideoService(ROOT).analyze(video_path)
-                            if result.status == 'COMPLETED':
-                                file_context += f"\n### {fname} (analise de video):\n{result.text[:50000]}\n"
-                            else:
-                                file_context += f"\n### {fname} (video; falha na analise): {result.status} - {result.error}\n"
-                            continue
-                        if ext in {'.mp3', '.wav', '.m4a', '.ogg', '.flac', '.aac', '.opus'}:
-                            audio_path = self._save_upload(fdata, fname)
-                            from core.audio import AudioService
-                            result = AudioService(ROOT).transcribe(audio_path)
-                            if result.status == 'COMPLETED':
-                                file_context += f"\n### {fname} (transcricao de audio):\n{result.text[:30000]}\n"
-                            else:
-                                file_context += f"\n### {fname} (audio; falha na transcricao): {result.status} - {result.error}\n"
-                            continue
-                        content = raw.decode('utf-8', errors='replace')
-                        # For code files, include full content (ate 50k chars)
-                        if ext in ['.mq5', '.mq4', '.mqh', '.py', '.js', '.ts', '.cpp', '.c', '.h', '.java', '.cs', '.go', '.rs']:
-                            truncation_note = f"\n[...truncado em {len(content.splitlines())} linhas]" if len(content) > 50000 else ""
-                            language = 'mql5' if ext in {'.mq5', '.mq4', '.mqh'} else ext.lstrip('.')
-                            specialist = " Analise como especialista em MQL5: compilacao, logica de entrada/saida, risco, repaint e possiveis erros." if language == 'mql5' else ""
-                            action_path = ''
-                            if ext == '.mq5':
-                                action_path = self._save_upload(fdata, fname)
-                                file_context += f"\nCaminho temporario para acao controlada: {action_path}\n"
-                            file_context += f"\n### {fname} (codigo {language}, {len(content.splitlines())} linhas):{specialist}\n```{language}\n{content[:50000]}{truncation_note}\n```\n"
-                        # For text files
-                        elif ext in ['.txt', '.csv', '.json', '.yaml', '.yml', '.xml', '.md', '.log']:
-                            truncation_note = f"\n[...truncado]" if len(content) > 30000 else ""
-                            file_context += f"\n### {fname} (texto):\n```\n{content[:30000]}{truncation_note}\n```\n"
-                        # For other files, show metadata
-                        else:
-                            file_context += f"\n### {fname} (tipo: {ftype}, {len(content)} bytes)\n"
-                    except:
-                        file_context += f"\n### {fname} (tipo: {ftype})\n"
-                # Add file context to user message
-                message = message + file_context
-                if len(messages) > 0:
-                    updated_message = {"role": "user", "content": message}
-                    if has_images:
-                        updated_message["images"] = [img.get('data', '') for img in images if img.get('data')]
-                    messages[-1] = updated_message
-                self._send_sse({"tool_progress": f"Arquivos anexados: {len(files)}"})
-
-            # TOOL-CALLING LOOP (max 5 iterations)
-            full_response = ""
-            last_tool_result = ""
-            try:
-                import signal
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("Ollama timeout")
-            except:
-                pass
-
-            for iteration in range(5):
-                self._send_sse({"tool_progress": f"Iteracao {iteration+1}/5"})
-
-                # Verificar se é modelo API (OpenRouter ou Cline)
-                if is_api_model:
-                    if is_codex_model:
-                        token_buffer = ""
-                        try:
-                            from codex_provider import get_codex_provider
-                            codex_prov = get_codex_provider()
-                            result = codex_prov.chat(messages)
-                            if isinstance(result, dict) and "error" in result:
-                                error_text = str(result["error"])
-                                # Limite da conta, timeout ou indisponibilidade nao devem
-                                # interromper a analise quando existe outro provedor pronto.
-                                self._send_sse({"tool_progress": "Codex indisponivel. Procurando um modelo alternativo configurado..."})
-                                fallback_messages = [{"role": "system", "content": TOOL_DEFINITIONS}] + messages[1:]
-                                fallback_text = ""
-                                fallback_model = ""
-                                try:
-                                    from claude_provider import get_claude_provider, MQL5_SYSTEM_PROMPT
-                                    openrouter = get_claude_provider()
-                                    if openrouter.api_key:
-                                        fallback_messages[0]["content"] += "\n\n" + MQL5_SYSTEM_PROMPT
-                                        fallback = openrouter.chat(fallback_messages, model="openrouter/free")
-                                        choices = fallback.get("choices") or [] if isinstance(fallback, dict) else []
-                                        if choices:
-                                            fallback_text = str((choices[0].get("message") or {}).get("content") or "")
-                                        fallback_model = "openrouter-free"
-                                except Exception:
-                                    fallback_text = ""
-                                if not fallback_text:
-                                    candidate = self._call_groq_model(fallback_messages, "groq-reasoning")
-                                    if candidate and not str(candidate).startswith("Erro Groq:"):
-                                        fallback_text = str(candidate)
-                                        fallback_model = "groq-reasoning"
-                                if fallback_text.strip():
-                                    self._send_sse({"model_fallback": fallback_model, "tool_progress": "Modelo alternativo ativado."})
-                                    token_buffer = fallback_text
-                                else:
-                                    self._send_sse({"token": "O Codex atingiu o limite de uso e nenhum modelo alternativo configurado respondeu. Selecione um modelo grátis em IA e modelos, como OpenRouter Free ou Groq.", "done": True})
-                                    return
-                            if not token_buffer:
-                                token_buffer = str(result.get("content") or "") if isinstance(result, dict) else str(result or "")
-                            if not token_buffer.strip():
-                                self._send_sse({"token": "O Codex retornou uma resposta vazia. Selecione um modelo alternativo em IA e modelos.", "done": True})
-                                return
-                            self._send_sse({"token": token_buffer, "done": False})
-                        except Exception as e:
-                            self._send_sse({"token": "O Codex ficou indisponível nesta solicitação. Selecione um modelo grátis em IA e modelos e tente novamente.", "done": True})
-                            return
-                    # Cline models - usar API do Cline
-                    elif is_cline_model:
-                        try:
-                            from cline_provider import get_cline_provider, CLINE_MODELS
-                            from claude_provider import MQL5_SYSTEM_PROMPT
-                            cline_prov = get_cline_provider()
-                            
-                            if not cline_prov.api_key:
-                                self._send_sse({"token": "API key do Cline não configurada. Use: configure_cline_key SUA_KEY", "done": True})
-                                return
-                            
-                            cline_model_map = {
-                                'cline-deepseek-v4': 'cline-pass/deepseek-v4-pro',
-                                'cline-deepseek-flash': 'cline-pass/deepseek-v4-flash',
-                                'cline-qwen38': 'cline-pass/qwen3.8-max',
-                                'cline-qwen37': 'cline-pass/qwen3.7-max',
-                                'cline-mimo': 'cline-pass/mimo-v2.5',
-                                'cline-glm': 'cline-pass/glm-5.2',
-                                'cline-kimi': 'cline-pass/kimi-k3',
-                                'cline-minimax': 'cline-pass/minimax-m3',
-                            }
-                            api_model = cline_model_map.get(model, 'cline-pass/deepseek-v4-pro')
-                            
-                            api_messages = [{"role": "system", "content": TOOL_DEFINITIONS + "\n\n" + MQL5_SYSTEM_PROMPT}]
-                            for m in messages[1:]:
-                                api_messages.append(m)
-                            
-                            token_buffer = ""
-                            result = cline_prov.chat(api_messages, model=api_model)
-                            if isinstance(result, dict) and "error" in result:
-                                self._send_sse({"token": "Erro Cline: %s" % result["error"], "done": True})
-                                return
-                            if isinstance(result, dict):
-                                choices = result.get("choices") or []
-                                if choices:
-                                    message_obj = choices[0].get("message") or {}
-                                    token_buffer = str(message_obj.get("content") or "")
-                                elif "content" in result:
-                                    token_buffer = str(result.get("content") or "")
-                            elif result is not None:
-                                token_buffer = str(result)
-                            if not token_buffer.strip():
-                                self._send_sse({"token": "Erro Cline: o modelo retornou uma resposta vazia. Tente o DeepSeek V4 Flash ou Ollama Local.", "done": True})
-                                return
-                            if token_buffer:
-                                self._send_sse({"token": token_buffer, "done": False})
-                            # O resultado passa pelo parser comum abaixo para que
-                            # chamadas de ferramenta do Cline tambem sejam executadas.
-                        except Exception as e:
-                            self._send_sse({"token": "Erro Cline: %s" % str(e), "done": True})
-                            return
-                    elif is_gemini_model:
-                        try:
-                            token_buffer = self._call_gemini_model(api_messages=messages, model_key=model)
-                            if token_buffer.startswith("Erro Gemini:"):
-                                self._send_sse({"token": token_buffer, "done": True})
-                                return
-                            if token_buffer:
-                                self._send_sse({"token": token_buffer, "done": False})
-                        except Exception as e:
-                            self._send_sse({"token": "Erro Gemini: %s" % str(e), "done": True})
-                            return
-                    elif is_groq_model:
-                        try:
-                            token_buffer = self._call_groq_model(api_messages=messages, model_key=model)
-                            if token_buffer.startswith("Erro Groq:"):
-                                self._send_sse({"token": token_buffer, "done": True})
-                                return
-                            if token_buffer:
-                                self._send_sse({"token": token_buffer, "done": False})
-                        except Exception as e:
-                            self._send_sse({"token": "Erro Groq: %s" % str(e), "done": True})
-                            return
-                    else:
-                        # OpenRouter models
-                        # Usar Claude/MiMo via OpenRouter
-                        try:
-                            from claude_provider import get_claude_provider, CLAUDE_MODELS, MQL5_SYSTEM_PROMPT
-                            provider = get_claude_provider()
-                            
-                            if not provider.api_key:
-                                self._send_sse({"token": "API key não configurada. Use: configure_api_key SUA_KEY", "done": True})
-                                return
-                            
-                            # Mapear modelo API
-                            api_model_map = {
-                                'cohere-code': 'cohere/north-mini-code:free',
-                                'nvidia-lightning': 'nvidia/nemotron-3.5-lightning:free',
-                                'openrouter-free': 'openrouter/free',
-                                'codex-market': 'openai/gpt-5.3-codex',
-                                'claude-sonnet': 'anthropic/claude-sonnet-4',
-                                'claude-haiku': 'anthropic/claude-3.5-haiku',
-                            }
-                            api_model = model.split(':', 1)[1] if model.startswith('openrouter:') else api_model_map.get(model, 'cohere/north-mini-code:free')
-                            
-                            # Adicionar system prompt do MQL5
-                            api_messages = [{"role": "system", "content": TOOL_DEFINITIONS + "\n\n" + MQL5_SYSTEM_PROMPT}]
-                            for m in messages[1:]:  # Pular system message do Ollama
-                                api_messages.append(m)
-                            
-                            # Chamar API com Streaming em tempo real
-                            token_buffer = ""
-                            for chunk in provider.chat_stream(api_messages, model=api_model):
-                                if "error" in chunk:
-                                    # FALLBACK AUTOMATICO: se modelo pago falhar, tentar gratuito
-                                    error_msg = chunk.get('error', '')
-                                    if '402' in str(error_msg) or 'Payment' in str(error_msg) or '429' in str(error_msg) or '404' in str(error_msg):
-                                        self._send_sse({"tool_progress": f"Modelo {api_model} indisponivel agora. Tentando roteador gratuito..."})
-                                        fallback_model = 'cohere/north-mini-code:free'
-                                        if model.startswith('openrouter:') or model == 'openrouter-free':
-                                            fallback_model = 'openrouter/free'
-                                        for fb_chunk in provider.chat_stream(api_messages, model=fallback_model):
-                                            if "error" in fb_chunk:
-                                                self._send_sse({"token": f"Erro: {fb_chunk['error']}", "done": True})
-                                                return
-                                            if "token" in fb_chunk:
-                                                t = fb_chunk["token"]
-                                                token_buffer += t
-                                                self._send_sse({"token": t, "done": False})
-                                    else:
-                                        self._send_sse({"token": f"Erro API: {error_msg}", "done": True})
-                                        return
-                                if "token" in chunk:
-                                    t = chunk["token"]
-                                    token_buffer += t
-                                    self._send_sse({"token": t, "done": False})
-                        except Exception as e:
-                            if not token_buffer:
-                                self._send_sse({"token": f"Erro API: {str(e)}", "done": True})
-                                return
+            service = self._legacy_service()
+            events = service.stream_response(
+                message,
+                surface="legacy_stream",
+                conversation_id=session_id,
+                source="legacy_stream",
+                audit_context=payload_context,
+                cancel_event=cancel_event,
+                images=data.get("images") or [],
+                files=data.get("files") or [],
+            )
+            for event in events:
+                kind = event.get("type")
+                if kind == "chunk":
+                    outgoing = {"token": event.get("text", ""), "done": False}
+                elif kind == "done":
+                    outgoing = {
+                        "done": True,
+                        "full_response": event.get("full_response", ""),
+                        "request_id": event.get("request_id", ""),
+                        "correlation_id": event.get("correlation_id", ""),
+                    }
+                elif kind == "provider_selected":
+                    outgoing = {"stream_event": "STREAM_PROVIDER_SELECTED",
+                                "provider": event.get("provider", ""),
+                                "model": event.get("model", "")}
+                elif kind == "cancelled":
+                    outgoing = {"error": "stream_cancelled", "done": True}
+                elif kind == "error":
+                    outgoing = {"error": event.get("error", "stream_failed"),
+                                "done": True}
                 else:
-                    # Usar Ollama local
-                    try:
-                        stream = ollama_chat(
-                            model=model,
-                            messages=messages,
-                            stream=True
-                        )
-                    except Exception as e:
-                        self._send_sse({"token": f"Erro ao conectar com IA: {str(e)}", "done": True})
-                        return
-
-                    token_buffer = ""
-                    try:
-                        for chunk in stream:
-                            if 'message' in chunk and 'content' in chunk['message']:
-                                token = chunk['message']['content']
-                                token_buffer += token
-                                self._send_sse({"token": token, "done": False})
-                    except Exception as e:
-                        if not token_buffer:
-                            self._send_sse({"token": f"Erro no streaming: {str(e)}", "done": True})
-                            return
-
-                if not token_buffer:
-                    fallback_response = last_tool_result.strip()
-                    if not fallback_response:
-                        fallback_response = "Erro: resposta vazia da IA"
-                    self._send_sse({"done": True, "full_response": fallback_response})
-                    return
-
-                # Check if AI wants to call a tool
-                tool_call = self._parse_tool_call(token_buffer)
-
-                if tool_call:
-                    tool_name = tool_call.get("tool", "")
-                    self._send_sse({"tool_start": tool_name, "iteration": iteration + 1})
-
-                    tool_result = self._execute_tool(tool_call, session_id)
-                    last_tool_result = tool_result
-
-                    messages.append({"role": "assistant", "content": token_buffer})
-                    messages.append({"role": "user", "content": f"Resultado da ferramenta {tool_name}:\n\n{tool_result[:20000]}\n\nAgora responda ao usuario com base neste resultado. Use Markdown para formatar sua resposta."})
-
-                    self._send_sse({"tool_result": tool_name, "result_preview": tool_result[:1000]})
                     continue
-
-                else:
-                    # Clean ALL tool call JSON from displayed response
-                    clean = token_buffer
-                    # Remove markdown code blocks with tool JSON
-                    clean = re.sub(r'```[a-zA-Z]*\s*\{[^}]*"tool"[^}]*\}\s*```', '', clean).strip()
-                    # Remove standalone tool JSON
-                    clean = re.sub(r'\{\s*"tool"\s*:\s*"[^"]+"[^}]*\}', '', clean).strip()
-                    # Remove triple backtick artifacts
-                    clean = re.sub(r'```\s*$', '', clean).strip()
-                    clean = re.sub(r'^\s*```', '', clean).strip()
-                    full_response = clean if clean else token_buffer
+                if not self._send_sse(outgoing):
+                    cancel_event.set()
                     break
-
-            # Save to history
-            with CONVERSATIONS_LOCK:
-                if session_id not in CONVERSATIONS:
-                    CONVERSATIONS[session_id] = []
-                CONVERSATIONS[session_id].append({"role": "user", "content": message})
-                CONVERSATIONS[session_id].append({"role": "assistant", "content": full_response})
-                if len(CONVERSATIONS[session_id]) > 50:
-                    CONVERSATIONS[session_id] = CONVERSATIONS[session_id][-50:]
-
-            self._send_sse({"done": True, "full_response": full_response})
-
-        except Exception as e:
-            self._send_sse({"token": f"Erro: {str(e)}", "done": True})
+        except (BrokenPipeError, ConnectionResetError):
+            cancel_event.set()
+        except Exception as exc:
+            cancel_event.set()
+            self._send_sse({"error": str(exc)[:300], "done": True})
 
     def _send_sse(self, data):
         try:
             self.wfile.write(f"data: {json.dumps(data, ensure_ascii=False, cls=_NumpyEncoder)}\n\n".encode())
             self.wfile.flush()
+            return True
         except:
-            pass
+            return False
 
     def _parse_tool_call(self, text):
         """Parse tool call from AI response"""
@@ -5546,11 +5233,30 @@ void OnTick()
     def route_api(self, path, data):
         profile_error = ACTIVE_RUNTIME_PROFILE.api_disabled_reason(path)
         if profile_error:
+            request_id, correlation_id = self._audit_route_boundary(
+                data, path, "BLOCKED_BY_PROFILE", profile_error)
             return {
                 "ok": False,
                 "error": profile_error,
                 "disabled_by_profile": True,
                 "runtime_profile": ACTIVE_RUNTIME_PROFILE.name,
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+            }
+        if self._legacy_route_frozen(path):
+            request_id, correlation_id = self._audit_route_boundary(
+                data, path, "FROZEN_LEGACY_ROUTE",
+                "legacy route frozen; canonical migration required")
+            return {
+                "ok": False,
+                "error": "LEGACY_ROUTE_FROZEN",
+                "message": "Operação legada congelada; migração canônica necessária.",
+                "route": path,
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+                "security_owner": "jarvis_core.security.SecurityManager",
+                "audit_owner": "jarvis_core.audit.AuditLog",
+                "_http_status": 409,
             }
         routes = {
             "/api/status": self.api_status,

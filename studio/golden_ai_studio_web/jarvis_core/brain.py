@@ -658,6 +658,81 @@ class JarvisBrain:
                 "fallback": result.get("fallback", False),
                 "latency_ms": result.get("latency_ms", 0)}
 
+    def stream_response(self, user_input, source="text", conversation_history=None,
+                        market_context=None, cancel_event=None):
+        """Stream a no-tool response through the existing canonical router."""
+        user_input = str(user_input or "").strip()
+        if not user_input:
+            yield {"type": "error", "error": "Comando vazio",
+                   "before_first_chunk": True}
+            return
+        self._reset_metrics()
+        self.state = BrainState.THINKING
+        self.last_command = user_input
+        self.last_llm = {}
+        decision = self.orchestrator.decide(user_input, source=source,
+                                            voice_capture=False)
+        self.last_metrics.update({"route": decision.route.value,
+                                  "intent": decision.intent,
+                                  "conceptual": decision.intent == "conceptual_question"})
+        memory_context = self._get_memory_context(
+            user_input, source=source,
+            profile=decision.preferred_model_profile)
+        previous_tools = self._allowed_tools
+        self._allowed_tools = set()
+        response_parts = []
+        try:
+            from .orchestrator.models import DataClassification as _DC
+            from .orchestrator.models import ModelProfile as _MP
+            from .orchestrator.providers import register_local_ollama_adapter
+            register_local_ollama_adapter(self.orchestrator.models)
+            messages = self.build_messages(
+                user_input, memory_context, source,
+                conversation_history=conversation_history,
+                profile=decision.preferred_model_profile,
+                market_context=market_context)
+            for event in self.orchestrator.models.stream(
+                    messages,
+                    profile=decision.preferred_model_profile or _MP.GENERAL,
+                    classification=decision.data_classification or _DC.INTERNAL,
+                    timeout=self.timeout, cancel_event=cancel_event):
+                event = dict(event or {})
+                if event.get("type") == "provider_selected":
+                    self.last_llm.update({
+                        "provider": event.get("provider", ""),
+                        "model": event.get("model", ""),
+                        "fallback": bool(event.get("fallback_used")),
+                        "profile": (decision.preferred_model_profile or _MP.GENERAL).value,
+                    })
+                    self.last_metrics.update({
+                        "provider_actual": event.get("provider", ""),
+                        "model_actual": event.get("model", ""),
+                        "fallback": bool(event.get("fallback_used")),
+                    })
+                elif event.get("type") == "chunk":
+                    response_parts.append(str(event.get("text") or ""))
+                    self.last_metrics["stream_chunks"] = len(response_parts)
+                elif event.get("type") == "done":
+                    self.last_llm.update({
+                        "provider": event.get("provider", self.last_llm.get("provider", "")),
+                        "model": event.get("model", self.last_llm.get("model", "")),
+                        "fallback": bool(event.get("fallback_used")),
+                        "latency_ms": event.get("elapsed_ms", 0),
+                    })
+                    self.last_metrics.update({
+                        "llm_result_type": "CONVERSATION_STREAM",
+                        "stream_elapsed_ms": event.get("elapsed_ms", 0),
+                        "stream_chunks": len(response_parts),
+                    })
+                    self.state = BrainState.IDLE
+                elif event.get("type") in {"error", "cancelled"}:
+                    self.state = BrainState.IDLE if event.get("cancelled") else BrainState.ERROR
+                    self.last_metrics["llm_result_type"] = (
+                        "STREAM_CANCELLED" if event.get("cancelled") else "LLM_ERROR")
+                yield event
+        finally:
+            self._allowed_tools = previous_tools
+
     def _parse_llm_response(self, response):
         cleaned = str(response or "").strip()
         # 1. Fenced code block: ```json ... ``` (anywhere in text)

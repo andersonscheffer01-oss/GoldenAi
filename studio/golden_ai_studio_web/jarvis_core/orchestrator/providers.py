@@ -49,6 +49,7 @@ class OmniRouteProvider:
             cloud=True,
             state=(ProviderState.AVAILABLE if self.configured
                    else ProviderState.AUTH_ERROR),
+            stream=self.stream,
         )
 
     def _request_json(self, method, path, payload=None, timeout=None):
@@ -134,11 +135,7 @@ class OmniRouteProvider:
         return {"text": text, "metadata": metadata}
 
     def stream(self, payload, model="auto", timeout=None, **options):
-        """Yield decoded SSE data for direct integration tests.
-
-        The canonical Jarvis router is non-streaming today, so this method is
-        deliberately not wired into ModelRouter.execute yet.
-        """
+        """Yield decoded SSE data for the canonical ModelRouter stream."""
         messages = payload.get("messages", []) if isinstance(payload, dict) else payload
         resolved_model = (self.default_model if self.default_model and
                           str(model).startswith("auto") else model)

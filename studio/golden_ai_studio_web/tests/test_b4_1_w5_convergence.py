@@ -44,11 +44,15 @@ def test_legacy_agent_delegates_tool_authority_to_jarvis_service():
     assert "EXECUTION_SERVICE" not in source
 
 
-def test_streaming_exception_is_explicitly_frozen_until_canonical_support():
+def test_streaming_route_delegates_to_canonical_service():
     source = _method_source("handle_stream")
-    assert "frozen until canonical streaming exists" in source
+    assert "stream_response" in source
+    assert "_legacy_service" in source
     assert "text/event-stream" in source
     assert "_authorize_http" in source
+    assert "ollama_chat" not in source
+    assert "_call_groq_model" not in source
+    assert "_call_gemini_model" not in source
 
 
 def test_legacy_routes_remain_protected_and_mapped():

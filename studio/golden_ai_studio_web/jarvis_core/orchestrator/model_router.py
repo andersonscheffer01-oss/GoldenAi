@@ -42,6 +42,7 @@ class ProviderAdapter:
     last_latency_ms: int = 0
     last_error_type: str = ""
     last_model: str = ""
+    stream: Optional[Callable[..., Any]] = None
 
     def usable(self, now=None):
         """Elegível para tentativa: AVAILABLE ou transitório com cooldown vencido."""
@@ -171,6 +172,116 @@ class ModelRouter:
                         break
         return ProviderResult(False, "", "", ProviderState.OFFLINE, error=last_error,
                               attempts=tuple(attempt_log))
+
+    def stream(self, payload, profile=ModelProfile.GENERAL,
+               classification=DataClassification.INTERNAL, timeout=None,
+               cancel_event=None):
+        """Yield the canonical text stream selected by this router.
+
+        Provider choice, fallback, timeout classification, and cancellation
+        stay here.  The HTTP layer only translates these events to SSE.  An
+        adapter without a native stream is deliberately exposed as one
+        canonical chunk, which keeps the authority boundary intact while the
+        provider-specific adapter evolves independently.
+        """
+        candidates = self.select(profile, classification)
+        if cancel_event is not None and cancel_event.is_set():
+            yield {"type": "cancelled", "cancelled": True,
+                   "error": "stream_cancelled_before_provider"}
+            return
+        if not candidates:
+            yield {"type": "error", "error": "nenhum provider disponível",
+                   "before_first_chunk": True}
+            return
+
+        last_error = "nenhum provider disponível"
+        for index, (adapter, model) in enumerate(candidates):
+            if cancel_event is not None and cancel_event.is_set():
+                yield {"type": "cancelled", "cancelled": True,
+                       "provider": adapter.name, "model": model}
+                return
+            started = time.perf_counter()
+            first_chunk = False
+            yield {"type": "provider_selected", "provider": adapter.name,
+                   "model": model, "fallback_used": index > 0}
+            try:
+                stream_factory = getattr(adapter, "stream", None)
+                if stream_factory is not None:
+                    iterator = stream_factory(payload=payload, model=model,
+                                              timeout=timeout)
+                else:
+                    # Complete-only adapters remain canonical, but produce one
+                    # chunk instead of bypassing the router at the HTTP layer.
+                    iterator = [adapter.invoke(payload=payload, model=model,
+                                               timeout=timeout)]
+                if isinstance(iterator, dict) or isinstance(iterator, str):
+                    iterator = [iterator]
+                for raw in iterator:
+                    if cancel_event is not None and cancel_event.is_set():
+                        yield {"type": "cancelled", "cancelled": True,
+                               "provider": adapter.name, "model": model,
+                               "chunks": int(first_chunk)}
+                        return
+                    text, metadata = self._stream_text(raw)
+                    if not text:
+                        continue
+                    first_chunk = True
+                    yield {"type": "chunk", "text": text,
+                           "provider": adapter.name, "model": model,
+                           "metadata": metadata}
+                if not first_chunk:
+                    raise RuntimeError("provider retornou stream vazio")
+                elapsed = int((time.perf_counter() - started) * 1000)
+                adapter.state = ProviderState.AVAILABLE
+                adapter.last_failure_at = 0.0
+                adapter.last_success = time.time()
+                adapter.last_error_type = ""
+                adapter.last_latency_ms = elapsed
+                adapter.last_model = model
+                self.last_health[adapter.name] = ProviderState.AVAILABLE
+                yield {"type": "done", "provider": adapter.name,
+                       "model": model, "fallback_used": index > 0,
+                       "elapsed_ms": elapsed, "chunks": int(first_chunk)}
+                return
+            except Exception as exc:
+                state = self._classify_error(exc)
+                adapter.state = state
+                adapter.last_failure_at = time.time()
+                adapter.last_error_type = state.value
+                self.last_health[adapter.name] = state
+                last_error = str(exc)[:500] or state.value
+                if first_chunk:
+                    yield {"type": "error", "error": last_error,
+                           "provider": adapter.name, "model": model,
+                           "after_first_chunk": True,
+                           "fallback_used": index > 0}
+                    return
+                # Deterministic fallback is allowed only before user-visible
+                # output.  The next provider gets a new provider_selected event.
+                continue
+        yield {"type": "error", "error": last_error,
+               "before_first_chunk": True}
+
+    @staticmethod
+    def _stream_text(raw):
+        """Normalize common provider stream payloads without provider logic."""
+        if raw is None:
+            return "", {}
+        if isinstance(raw, str):
+            return raw, {}
+        if isinstance(raw, dict):
+            if raw.get("error"):
+                raise RuntimeError(str(raw["error"]))
+            if isinstance(raw.get("text"), str):
+                return raw["text"], dict(raw.get("metadata") or {})
+            choices = raw.get("choices") or []
+            if choices and isinstance(choices[0], dict):
+                choice = choices[0]
+                delta = choice.get("delta") or {}
+                message = choice.get("message") or {}
+                value = delta.get("content") or message.get("content") or ""
+                return str(value or ""), dict(raw.get("metadata") or {})
+        return "", {}
 
     def status(self):
         now = time.time()

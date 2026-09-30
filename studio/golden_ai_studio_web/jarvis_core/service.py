@@ -959,6 +959,172 @@ class JarvisService:
             "response_id": canonical.get("response_id", request_id),
         }
 
+    def stream_response(self, message, surface="main", conversation_id="",
+                        market_context=None, source="text", audit_context=None,
+                        cancel_event=None, images=None, files=None):
+        """Canonical streaming boundary for text-only compatibility surfaces."""
+        from .brain import get_brain
+
+        started = time.perf_counter()
+        audit_context = dict(audit_context or {})
+        request_id = str(audit_context.get("request_id") or uuid.uuid4().hex)
+        correlation_id = str(audit_context.get("correlation_id") or request_id)
+        surface = str(surface or "main").strip().lower()[:40] or "main"
+        conversation_id = str(conversation_id or f"{surface}-default").strip()[:160]
+        message = str(message or "").strip()
+        if not message:
+            yield {"type": "error", "error": "Texto vazio",
+                   "before_first_chunk": True, "request_id": request_id}
+            return
+        if images or files:
+            # Attachments need the canonical artifact boundary; silently
+            # dropping them would corrupt the legacy Studio contract.
+            yield {"type": "error",
+                   "error": "STREAM_ATTACHMENTS_REQUIRE_CANONICAL_ARTIFACT_BOUNDARY",
+                   "before_first_chunk": True, "request_id": request_id}
+            return
+
+        history = self._conversation_snapshot(conversation_id)
+        self.orchestrator.last_decision = None
+        brain = get_brain(
+            self.registry, self.legacy_memory,
+            orchestrator=self.orchestrator,
+            memory_v2=getattr(self, "memory_v2", None),
+            project_memory=getattr(self, "project_memory", None))
+        base_envelope = {
+            **audit_context, "request_id": request_id,
+            "correlation_id": correlation_id,
+            "conversation_id": conversation_id,
+            "surface": surface,
+            "operation": "canonical_ai_stream",
+        }
+        self.audit.add(
+            task_id=conversation_id, command="canonical_ai_stream",
+            tool="llm_stream", risk=Risk.LOW.value, status="STREAM_REQUEST",
+            arguments={"surface": surface, "conversation_id": conversation_id,
+                       "request_id": request_id,
+                       "attachments": {"images": len(images or []),
+                                       "files": len(files or [])}},
+            result={"ok": True},
+            envelope={**base_envelope, "action": "STREAM_REQUEST",
+                      "status": "STREAM_REQUEST"})
+        response_parts = []
+        provider = ""
+        model = ""
+        first_chunk_at = None
+        completed = False
+        try:
+            self.audit.add(
+                task_id=conversation_id, command="canonical_ai_stream",
+                tool="llm_stream", risk=Risk.LOW.value, status="STREAM_STARTED",
+                result={"ok": True},
+                envelope={**base_envelope, "action": "STREAM_STARTED",
+                          "status": "STREAM_STARTED"})
+            for event in brain.stream_response(
+                    message, source=source, conversation_history=history,
+                    market_context=market_context, cancel_event=cancel_event):
+                event = dict(event or {})
+                kind = event.get("type")
+                provider = str(event.get("provider") or provider)
+                model = str(event.get("model") or model)
+                if kind == "provider_selected":
+                    self.audit.add(
+                        task_id=conversation_id, command="canonical_ai_stream",
+                        tool="llm_stream", risk=Risk.LOW.value,
+                        status="STREAM_PROVIDER_SELECTED",
+                        result={"provider": provider, "model": model,
+                                "fallback": bool(event.get("fallback_used"))},
+                        envelope={**base_envelope,
+                                  "action": "STREAM_PROVIDER_SELECTED",
+                                  "status": "STREAM_PROVIDER_SELECTED",
+                                  "provider": provider, "model": model})
+                elif kind == "chunk":
+                    text = str(event.get("text") or "")
+                    if text:
+                        response_parts.append(text)
+                        if first_chunk_at is None:
+                            first_chunk_at = time.perf_counter()
+                            self.audit.add(
+                                task_id=conversation_id, command="canonical_ai_stream",
+                                tool="llm_stream", risk=Risk.LOW.value,
+                                status="STREAM_FIRST_CHUNK",
+                                result={"provider": provider, "model": model},
+                                envelope={**base_envelope,
+                                          "action": "STREAM_FIRST_CHUNK",
+                                          "status": "STREAM_FIRST_CHUNK",
+                                          "provider": provider, "model": model})
+                elif kind == "done":
+                    completed = True
+                    response = "".join(response_parts)
+                    result = {"ok": True, "message": response,
+                              "response": response, "provider": provider,
+                              "model": model, "conversation_id": conversation_id,
+                              "surface": surface, "stream": True,
+                              "response_id": request_id}
+                    self._record_conversation_turn(conversation_id, message, result)
+                    elapsed = int((time.perf_counter() - started) * 1000)
+                    self.audit.add(
+                        task_id=conversation_id, command="canonical_ai_stream",
+                        tool="llm_stream", risk=Risk.LOW.value,
+                        status="STREAM_COMPLETED",
+                        result={"provider": provider, "model": model,
+                                "chunks": len(response_parts),
+                                "elapsed_ms": elapsed},
+                        envelope={**base_envelope, "action": "STREAM_COMPLETED",
+                                  "status": "STREAM_COMPLETED",
+                                  "provider": provider, "model": model,
+                                  "elapsed_ms": elapsed})
+                    yield {**event, "full_response": response,
+                           "request_id": request_id,
+                           "correlation_id": correlation_id,
+                           "conversation_id": conversation_id,
+                           "surface": surface}
+                    continue
+                elif kind == "cancelled":
+                    self.audit.add(
+                        task_id=conversation_id, command="canonical_ai_stream",
+                        tool="llm_stream", risk=Risk.LOW.value,
+                        status="STREAM_CANCELLED",
+                        result={"provider": provider, "model": model,
+                                "chunks": len(response_parts)},
+                        envelope={**base_envelope, "action": "STREAM_CANCELLED",
+                                  "status": "STREAM_CANCELLED",
+                                  "provider": provider, "model": model})
+                elif kind == "error":
+                    self.audit.add(
+                        task_id=conversation_id, command="canonical_ai_stream",
+                        tool="llm_stream", risk=Risk.LOW.value,
+                        status="STREAM_FAILED",
+                        result={"provider": provider, "model": model,
+                                "chunks": len(response_parts),
+                                "error": str(event.get("error") or "")[:300]},
+                        envelope={**base_envelope, "action": "STREAM_FAILED",
+                                  "status": "STREAM_FAILED",
+                                  "provider": provider, "model": model})
+                yield {**event, "request_id": request_id,
+                       "correlation_id": correlation_id,
+                       "conversation_id": conversation_id,
+                       "surface": surface}
+        except Exception as exc:
+            self.audit.add(
+                task_id=conversation_id, command="canonical_ai_stream",
+                tool="llm_stream", risk=Risk.LOW.value, status="STREAM_FAILED",
+                result={"provider": provider, "model": model,
+                        "chunks": len(response_parts), "error": str(exc)[:300]},
+                envelope={**base_envelope, "action": "STREAM_FAILED",
+                          "status": "STREAM_FAILED", "provider": provider,
+                          "model": model})
+            yield {"type": "error", "error": str(exc)[:300],
+                   "after_first_chunk": bool(response_parts),
+                   "request_id": request_id,
+                   "correlation_id": correlation_id,
+                   "conversation_id": conversation_id,
+                   "surface": surface}
+        finally:
+            # A closed generator must never finalize a partial conversation.
+            if not completed:
+                response_parts.clear()
+
     def golden_market_regime(self, symbol="XAUUSD"):
         return self.golden_bridge.market_regime(str(symbol or "XAUUSD"))
 
