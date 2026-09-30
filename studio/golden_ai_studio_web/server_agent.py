@@ -5304,6 +5304,7 @@ void OnTick()
             "/api/jarvis/golden/scanner": lambda d: self._api_jarvis_golden_scanner(d),
             "/api/jarvis/golden/robots": lambda d: self._api_jarvis_golden_robots(d),
             "/api/jarvis/golden/robot": lambda d: self._api_jarvis_golden_robot(d),
+            "/api/jarvis/golden/robot-intelligence": lambda d: self._api_jarvis_golden_robot_intelligence(d),
             "/api/jarvis/golden/evidence": lambda d: self._api_jarvis_golden_evidence(d),
             "/api/jarvis/golden/risk": lambda d: self._api_jarvis_golden_risk(d),
             "/api/jarvis/golden/validation": lambda d: self._api_jarvis_golden_validation(d),
@@ -6080,6 +6081,16 @@ void OnTick()
         return self._execute_jarvis_read("robot_catalog_detail", {
             "robot_id": robot_id,
         })
+
+    def _api_jarvis_golden_robot_intelligence(self, data):
+        payload = data or {}
+        context = self._legacy_audit_context(payload, "control_center", "robot_intelligence")
+        return self._execute_jarvis_read("robot_intelligence_snapshot", {
+            "symbol": str(payload.get("symbol") or "XAUUSD"),
+            "timeframe": str(payload.get("timeframe") or "M15"),
+            "robot_id": str(payload.get("robot_id") or ""),
+            "correlation_id": context["correlation_id"],
+        }, audit_context=context)
 
     def _api_jarvis_golden_evidence(self, data):
         payload = data or {}

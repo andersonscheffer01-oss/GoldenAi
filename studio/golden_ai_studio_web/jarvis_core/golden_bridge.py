@@ -517,6 +517,31 @@ class GoldenReadBridge:
         return _envelope("golden.mql5", self.robot_catalog.snapshot(), "robot_catalog.py",
                          evidence_class="VERIFIED_REAL_EVIDENCE")
 
+    def robot_intelligence_snapshot(self, symbol: str = "", timeframe: str = "M15",
+                                    robot_id: str = "", correlation_id: str = "") -> dict[str, Any]:
+        """Compose catalog evidence and market context without execution authority."""
+        from .robot_intelligence import build_robot_intelligence_snapshot
+
+        catalog = self.robot_catalog_summary()
+        if robot_id:
+            data = catalog.get("data") if isinstance(catalog.get("data"), dict) else {}
+            robots = [item for item in data.get("robots", [])
+                      if str(item.get("robot_id")) == str(robot_id)]
+            catalog = dict(catalog)
+            catalog["data"] = dict(data)
+            catalog["data"]["robots"] = robots
+        market = self.market_intelligence_snapshot(symbol or "XAUUSD", timeframe, correlation_id)
+        result = build_robot_intelligence_snapshot(
+            catalog, market, symbol=symbol or "XAUUSD", timeframe=timeframe,
+            correlation_id=correlation_id,
+        )
+        result["provenance"] = {
+            **result.get("provenance", {}),
+            "catalog_envelope": catalog.get("provenance", {}),
+            "market_snapshot_id": market.get("snapshot_id", "UNKNOWN"),
+        }
+        return result
+
     def tester_history(self) -> dict[str, Any]:
         catalog = self.robot_catalog_summary()
         data = catalog.get("data") or {}

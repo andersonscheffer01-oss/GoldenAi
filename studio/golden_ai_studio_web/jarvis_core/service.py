@@ -719,6 +719,16 @@ class JarvisService:
             Tool("robot_catalog_detail", "Mostra identidade, evidencias e desconhecidos de um robo.",
                  self.robot_catalog_detail, Risk.LOW, timeout=10, category="robot_catalog",
                  llm_enabled=False, parameters={"robot_id": str}),
+            Tool("robot_intelligence_snapshot",
+                 "Projeta catalogo, evidencia e suitability de robos sem autorizar trading.",
+                 self.robot_intelligence_snapshot, Risk.LOW, timeout=100,
+                 parameters={"symbol": str, "timeframe": str, "robot_id": str,
+                             "correlation_id": str},
+                 category="robot_intelligence", llm_enabled=False,
+                 side_effect_class=SideEffectClass.READ_ONLY,
+                 security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
+                 provider="jarvis_core", provenance="robot_intelligence",
+                 capability_name="jarvis.robot_intelligence"),
             Tool("web_research", "Pesquisa real na web e retorna fontes sem memorizar.",
                  self._web_research, Risk.LOW, timeout=45,
                  parameters={"query": str, "limit": int, "privacy": str},
@@ -1208,6 +1218,12 @@ class JarvisService:
 
     def robot_catalog_detail(self, robot_id):
         return self.robot_catalog.detail(robot_id)
+
+    def robot_intelligence_snapshot(self, symbol="XAUUSD", timeframe="M15",
+                                    robot_id="", correlation_id=""):
+        return self.golden_bridge.robot_intelligence_snapshot(
+            str(symbol or "XAUUSD"), str(timeframe or "M15"),
+            str(robot_id or ""), str(correlation_id or ""))
 
     def set_robot_catalog_status(self, robot_id, status, reason=""):
         """Apply an explicit repertoire decision; it never authorizes trading."""
