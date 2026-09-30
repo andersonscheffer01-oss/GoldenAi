@@ -5306,6 +5306,7 @@ void OnTick()
             "/api/jarvis/golden/robot": lambda d: self._api_jarvis_golden_robot(d),
             "/api/jarvis/golden/robot-intelligence": lambda d: self._api_jarvis_golden_robot_intelligence(d),
             "/api/jarvis/golden/evidence": lambda d: self._api_jarvis_golden_evidence(d),
+            "/api/jarvis/strategy-tester/status": lambda d: self._api_jarvis_strategy_tester_status(d),
             "/api/jarvis/golden/risk": lambda d: self._api_jarvis_golden_risk(d),
             "/api/jarvis/golden/validation": lambda d: self._api_jarvis_golden_validation(d),
             "/api/jarvis/golden/deep-analysis": lambda d: self._api_jarvis_golden_deep_analysis(d),
@@ -6113,6 +6114,10 @@ void OnTick()
                 "SYNTHETIC", "DEMO", "UNKNOWN",
             ],
         }
+
+    def _api_jarvis_strategy_tester_status(self, data):
+        """Return the canonical tester read model; never starts MT5."""
+        return self._execute_jarvis_read("strategy_tester_productization_status")
 
     def _api_jarvis_golden_risk(self, data):
         return self._execute_jarvis_read("golden_risk_detail")

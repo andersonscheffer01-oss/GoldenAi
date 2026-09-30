@@ -27,6 +27,7 @@ from .memory.models import MemoryCategory, MemorySource
 from .mcp_client import McpClientManager
 from .orchestrator import CentralOrchestrator, JarvisRuntimeCoordinator
 from .robot_catalog import RobotCatalogReadModel, default_catalog_store_path
+from .strategy_tester_productization import productization_snapshot
 from .task_manager import TaskManager
 from .runtime_profile import (DEFAULT_PROFILE, resolve_runtime_profile,
                                set_active_runtime_profile)
@@ -729,6 +730,10 @@ class JarvisService:
                  security_requirements=("READ_ONLY", "NO_SIDE_EFFECT", "NO_TRADING"),
                  provider="jarvis_core", provenance="robot_intelligence",
                  capability_name="jarvis.robot_intelligence"),
+            Tool("strategy_tester_productization_status",
+                 "Consulta o estado read-only do pipeline Strategy Tester.",
+                 self.strategy_tester_productization_status, Risk.LOW, timeout=30,
+                 category="strategy_tester", llm_enabled=False),
             Tool("web_research", "Pesquisa real na web e retorna fontes sem memorizar.",
                  self._web_research, Risk.LOW, timeout=45,
                  parameters={"query": str, "limit": int, "privacy": str},
@@ -1224,6 +1229,11 @@ class JarvisService:
         return self.golden_bridge.robot_intelligence_snapshot(
             str(symbol or "XAUUSD"), str(timeframe or "M15"),
             str(robot_id or ""), str(correlation_id or ""))
+
+    def strategy_tester_productization_status(self):
+        """Expose B4.4 status without creating a plan or starting a process."""
+        return {"ok": True, "read_only": True,
+                "productization": productization_snapshot()}
 
     def set_robot_catalog_status(self, robot_id, status, reason=""):
         """Apply an explicit repertoire decision; it never authorizes trading."""
