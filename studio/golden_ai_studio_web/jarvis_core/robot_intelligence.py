@@ -22,6 +22,7 @@ from .historical_market_evidence import (
     load_reconciled_post_window_outcomes,
     load_reconciled_temporal_contexts,
 )
+from .robot_artifact_identity import load_production_artifact_identity
 
 
 REPERTOIRE_STATES = (
@@ -292,6 +293,7 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
                 outcomes.append({**item, "robot_id": robot.get("robot_id", UNKNOWN)})
     temporal_evidence = (load_reconciled_post_window_outcomes() or
                          link_outcomes_after_context_freeze(temporal_contexts, outcomes))
+    artifact_identity = load_production_artifact_identity()
     market = market if isinstance(market, dict) else {"status": "SOURCE_DISABLED", "data": {}}
     suitability = build_suitability(profiles, market, symbol, timeframe)
     repertoire = Counter(item["repertoire_status"] for item in profiles)
@@ -302,6 +304,7 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
         "trading_authorization": "NOT_GRANTED", "evidence_dataset": dataset,
         "temporal_contexts": temporal_contexts,
         "temporal_evidence": temporal_evidence,
+        "artifact_identity": artifact_identity,
         "suitability": suitability,
         "temporal_evidence_contract": {
             "market_snapshot_link": suitability["market_context"].get("snapshot_id", "UNKNOWN"),

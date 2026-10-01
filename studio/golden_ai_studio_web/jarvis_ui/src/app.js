@@ -1580,6 +1580,9 @@ function b43RenderRobotIntelligence(response) {
   const data = response || {};
   const dataset = data.evidence_dataset || {};
   const suitability = data.suitability || {};
+  const identity = data.artifact_identity || {};
+  const historicalArtifact = identity.compiled_artifacts?.historical_tested || {};
+  const currentArtifact = identity.compiled_artifacts?.current_observed || {};
   const state = $("#gB43State");
   if (state) state.textContent = data.status || suitability.status || "UNKNOWN";
   const summary = b3Detail([
@@ -1589,10 +1592,14 @@ function b43RenderRobotIntelligence(response) {
     ["RÓTULOS", dataset.labeled_samples ?? "UNKNOWN"],
     ["MATCHING EMPÍRICO", suitability.empirical_matching || "NOT_IMPLEMENTED"],
     ["AUTORIZAÇÃO", "NOT_GRANTED"],
+    ["TESTED COMPILED", b3Short(historicalArtifact.sha256 || "UNKNOWN", 18)],
+    ["CURRENT COMPILED", b3Short(currentArtifact.sha256 || "UNKNOWN", 18)],
+    ["IDENTITY STATUS", identity.source_compiled_relationship?.compiled_identity_status || "UNKNOWN"],
   ]);
   const rows = Array.isArray(suitability.results) ? suitability.results : [];
   const table = rows.length ? `<table class="gB3Table"><thead><tr><th>ROBÔ</th><th>REPERTOIRE</th><th>SUITABILITY</th><th>EVIDÊNCIA</th><th>POR QUÊ</th></tr></thead><tbody>${rows.slice(0, 50).map((item) => `<tr><td>${esc(item.name || item.robot_id || "UNKNOWN")}</td><td>${b3StateTag(item.repertoire_status || "UNKNOWN")}</td><td>${b3StateTag(item.match_status || "UNKNOWN")}</td><td>${esc(item.evidence_strength || "UNKNOWN")}</td><td class="gB3Muted">${esc((item.explanation?.why || []).concat(item.explanation?.why_not || []).join("; ") || "UNKNOWN")}</td></tr>`).join("")}</tbody></table>` : b3Empty("Nenhuma suitability verificável disponível.");
-  $("#gB43RobotIntelligence").innerHTML = summary + table + `<p class="gB3Note">ANALYSIS ONLY · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
+  const identityNote = `<p class="gB3Note">TESTED ARTIFACT: ${esc(b3Short(historicalArtifact.sha256 || "UNKNOWN", 24))} · CURRENT ARTIFACT: ${esc(b3Short(currentArtifact.sha256 || "UNKNOWN", 24))} · HISTORICAL BYTES: ${esc(identity.historical_artifact_availability || "UNKNOWN")} · CURRENT ROBOT TESTED: NO</p>`;
+  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + `<p class="gB3Note">ANALYSIS ONLY · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
 }
 function b3RenderEvidence(response) {
   const validation = b3Payload(response?.validation);
