@@ -12,6 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .b2_contracts import content_fingerprint
+from .temporal_market_context import build_temporal_market_snapshot
 
 
 UNKNOWN = "UNKNOWN"
@@ -254,6 +255,13 @@ def build_market_intelligence_snapshot(*, overview: Any, chart: Any,
         "unknown_semantics": "UNKNOWN means insufficient or missing evidence; it is not FAIL",
         "status": sources["validation"]["status"],
     }
+    temporal_context = build_temporal_market_snapshot(
+        symbol=symbol, timeframe=timeframe, cutoff=captured_at,
+        observed_at=captured_at, available_at=captured_at, ingested_at=captured_at,
+        valid_from=captured_at, source_authority="B4.2_MARKET_READ_MODEL",
+        source_artifacts=tuple(item["source"] for item in sources.values()),
+        freshness_state="READ_MODEL_CAPTURE",
+    )
     risk_model = {
         **risk_data,
         "market_risk": risk_data.get("market_risk") or risk_data.get("spread_constraints", UNKNOWN),
@@ -336,6 +344,7 @@ def build_market_intelligence_snapshot(*, overview: Any, chart: Any,
                         "source_families": sources},
         "source_availability": sources,
         "robot_matcher_precursors": matcher_precursors,
+        "temporal_context": temporal_context,
         "matcher_authority": "NOT_IMPLEMENTED_IN_B4_2",
         "execution_authority": "NONE",
     }

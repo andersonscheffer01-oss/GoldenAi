@@ -13,6 +13,12 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
+from .temporal_market_context import (
+    UNKNOWN,
+    build_production_window_contexts,
+    link_outcomes_after_context_freeze,
+)
+
 
 REPERTOIRE_STATES = (
     "DISCOVERED", "CANDIDATE", "ACTIVE", "INACTIVE", "BLOCKED", "ARCHIVED"
@@ -134,12 +140,15 @@ def _label(item: dict[str, Any], key: str) -> dict[str, Any]:
     return {"value": _json(value), "status": status, "method": str(item.get(f"{key}_label_method") or "ARTIFACT")}
 
 
-def build_evidence_dataset(robots: list[dict[str, Any]]) -> dict[str, Any]:
+def build_evidence_dataset(robots: list[dict[str, Any]],
+                           temporal_contexts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Normalize stored evidence without manufacturing associations or metrics."""
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     duplicate_runs = 0
     unresolved = 0
+    contexts = {str(item.get("test_run_id")): item for item in (temporal_contexts or [])
+                if item.get("test_run_id")}
     for robot in robots:
         robot_id = str(robot.get("robot_id") or "UNKNOWN")
         items = list(robot.get("backtest_artifacts") or []) + list(robot.get("optimization_artifacts") or [])
@@ -168,6 +177,14 @@ def build_evidence_dataset(robots: list[dict[str, Any]]) -> dict[str, Any]:
                 "period": item.get("date_range") or item.get("period") or "UNKNOWN",
                 "metrics": dict(item.get("metrics") or {}),
                 "market_labels": {key: _label(item, key) for key in ("regime", "volatility", "session", "spread")},
+                "temporal_context": contexts.get(str(item.get("test_run_id") or
+                                                    item.get("run_id") or evidence_id), {
+                    "context_status": "UNKNOWN",
+                    "context_fingerprint": UNKNOWN,
+                    "labels": {},
+                }),
+                "post_window_outcome": dict(item.get("metrics") or {}),
+                "outcome_role": "POST_WINDOW_OUTCOME",
                 "provenance": list(item.get("provenance") or []),
                 "limitations": ["UNVERIFIED_ASSOCIATION"] if association not in {"VERIFIED", "HIGH_CONFIDENCE"} else [],
                 "fingerprint": fingerprint or _fingerprint(item),
@@ -186,7 +203,8 @@ def build_evidence_dataset(robots: list[dict[str, Any]]) -> dict[str, Any]:
         "labeled_samples": labeled,
         "unlabeled_samples": len(rows) - labeled,
         "temporal_split_ready": bool(rows),
-        "leakage_controls": ["FUTURE_OUTCOME_NOT_USED_AS_FEATURE", "EVIDENCE_TYPES_SEPARATED", "DUPLICATE_FINGERPRINT_EXCLUDED"],
+        "leakage_controls": ["FUTURE_OUTCOME_NOT_USED_AS_FEATURE", "EVIDENCE_TYPES_SEPARATED", "DUPLICATE_FINGERPRINT_EXCLUDED", "CONTEXT_FROZEN_BEFORE_OUTCOME_JOIN"],
+        "temporal_context_count": len(contexts),
         "limitations": ["NO_EMPIRICAL_MATCHER", "UNKNOWN_MARKET_LABELS_RETAINED"],
     }
 
@@ -261,7 +279,14 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
     catalog_data = _payload(catalog)
     raw_robots = [item for item in catalog_data.get("robots", []) if isinstance(item, dict)]
     profiles = [normalize_robot_profile(item) for item in raw_robots]
-    dataset = build_evidence_dataset(raw_robots)
+    temporal_contexts = build_production_window_contexts()
+    dataset = build_evidence_dataset(raw_robots, temporal_contexts)
+    outcomes = []
+    for robot in raw_robots:
+        for item in list(robot.get("backtest_artifacts") or []) + list(robot.get("test_runs") or []):
+            if isinstance(item, dict) and (item.get("test_run_id") or item.get("run_id")):
+                outcomes.append({**item, "robot_id": robot.get("robot_id", UNKNOWN)})
+    temporal_evidence = link_outcomes_after_context_freeze(temporal_contexts, outcomes)
     market = market if isinstance(market, dict) else {"status": "SOURCE_DISABLED", "data": {}}
     suitability = build_suitability(profiles, market, symbol, timeframe)
     repertoire = Counter(item["repertoire_status"] for item in profiles)
@@ -270,6 +295,8 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
         "correlation_id": correlation_id or "UNKNOWN", "captured_at": _now(),
         "robots": profiles, "robot_count": len(profiles), "repertoire": dict(repertoire),
         "trading_authorization": "NOT_GRANTED", "evidence_dataset": dataset,
+        "temporal_contexts": temporal_contexts,
+        "temporal_evidence": temporal_evidence,
         "suitability": suitability,
         "temporal_evidence_contract": {
             "market_snapshot_link": suitability["market_context"].get("snapshot_id", "UNKNOWN"),

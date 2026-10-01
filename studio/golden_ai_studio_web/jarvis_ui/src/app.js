@@ -1600,6 +1600,28 @@ function b3RenderEvidence(response) {
   const rows = [...(validation.history || []).map((item) => ({ ...item, kind: "VALIDATION" })), ...(tester.test_runs || []).map((item) => ({ ...item, kind: "TESTER" }))];
   $("#gB3Evidence").innerHTML = rows.length ? `<table class="gB3Table"><thead><tr><th>TIPO</th><th>IDENTIDADE</th><th>CLASSIFICAÇÃO</th><th>STATUS</th><th>FONTE</th></tr></thead><tbody>${rows.slice(0, 80).map((item) => `<tr><td>${esc(item.kind)}</td><td>${esc(item.run_id || item.test_run_id || item.id || "UNKNOWN")}</td><td>${esc(item.evidence_class || item.evidence_type || "UNKNOWN")}</td><td>${esc(item.status || "UNKNOWN")}</td><td class="gB3Muted">${esc(item.source || item.artifact || "UNKNOWN")}</td></tr>`).join("")}</tbody></table>` : b3Empty("Nenhuma evidência verificável disponível.");
 }
+function b46RenderTemporalContext(response, marketResponse) {
+  const el = $("#gB46TemporalContext");
+  if (!el) return;
+  const current = b3Payload(marketResponse).temporal_context || {};
+  const contexts = Array.isArray(response?.temporal_contexts) ? response.temporal_contexts : [];
+  const rows = contexts.map((item) => {
+    const labels = item.labels || {};
+    const label = (name) => labels[name]?.label || "UNKNOWN";
+    return `<tr><td>${esc(item.test_run_id || "UNKNOWN")}</td><td>${esc(`${item.window?.from || "UNKNOWN"} → ${item.window?.to || "UNKNOWN"}`)}</td><td>${esc(label("TREND_STATE"))}</td><td>${esc(label("VOLATILITY_STATE"))}</td><td>${esc(label("SESSION_STATE"))}</td><td>${esc(item.context_status || "UNKNOWN")}</td></tr>`;
+  }).join("");
+  const currentLabels = current.label_status || {};
+  const summary = b3Detail([
+    ["CURRENT CONTEXT", current.context_status || "UNKNOWN"],
+    ["POINT-IN-TIME", current.point_in_time_supported ? "STRUCTURAL" : "UNKNOWN"],
+    ["CONTEXT FINGERPRINT", current.context_fingerprint || "UNKNOWN"],
+    ["AVAILABLE_AT", current.available_at || "UNKNOWN"],
+    ["OUTCOME IN LABELING", "EXCLUDED"],
+    ["R1/R2/R3", contexts.length || "UNKNOWN"],
+  ]);
+  const table = rows ? `<div class="gB3TableWrap"><table class="gB3Table"><thead><tr><th>RUN</th><th>WINDOW</th><th>TREND</th><th>VOLATILITY</th><th>SESSION</th><th>STATUS</th></tr></thead><tbody>${rows}</tbody></table></div>` : b3Empty("Nenhum contexto histórico congelado disponível.");
+  el.innerHTML = summary + table + `<p class="gB3Note">Rótulos ausentes permanecem UNKNOWN. Contexto congelado antes do POST_WINDOW_OUTCOME. ${esc(Object.keys(currentLabels).length ? "READ MODEL" : "HISTORICAL ARTIFACT PENDENTE")}</p>`;
+}
 function b3RenderMemory(response) {
   const contract = response?.contract || {};
   const status = contract.status || "UNKNOWN";
@@ -1661,6 +1683,7 @@ async function refreshGoldenBridge() {
     b3RenderScanner(scanner || {});
     b3RenderRobots(robots || {});
     b43RenderRobotIntelligence(robotIntelligence || {});
+    b46RenderTemporalContext(robotIntelligence || {}, market || {});
     b3RenderEvidence(evidence || {});
     b3RenderMemory(memory || {});
     b3RenderProvenance(b3State.responses);
@@ -1668,7 +1691,7 @@ async function refreshGoldenBridge() {
   } catch (error) {
     state.textContent = "UNAVAILABLE";
     $("#gGoldenBridgeSummary").innerHTML = b3Empty(error?.message || "Read models indisponíveis.");
-    ["gB3MarketSummary", "gB3MarketAssets", "gB3MarketHeatmap", "gB3MarketFlow", "gB3MarketTop", "gB3MarketNews", "gB3MarketDetail", "gB3MarketRisk", "gB3MarketValidation", "gB3MarketPerformance", "gB43RobotIntelligence"].forEach((id) => {
+    ["gB3MarketSummary", "gB3MarketAssets", "gB3MarketHeatmap", "gB3MarketFlow", "gB3MarketTop", "gB3MarketNews", "gB3MarketDetail", "gB3MarketRisk", "gB3MarketValidation", "gB3MarketPerformance", "gB46TemporalContext", "gB43RobotIntelligence"].forEach((id) => {
       const el = $(`#${id}`); if (el) el.innerHTML = b3Empty("Read model indisponível; nenhum valor foi substituído.");
     });
     ["gB3MarketState", "gB3ScannerState", "gB3RobotState", "gB43State", "gB3EvidenceState", "gB3MemoryState", "gB3ProvenanceState"].forEach((id) => { const el = $(`#${id}`); if (el) el.textContent = "UNAVAILABLE"; });
