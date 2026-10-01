@@ -1608,7 +1608,8 @@ function b46RenderTemporalContext(response, marketResponse) {
   const rows = contexts.map((item) => {
     const labels = item.labels || {};
     const label = (name) => labels[name]?.label || "UNKNOWN";
-    return `<tr><td>${esc(item.test_run_id || "UNKNOWN")}</td><td>${esc(`${item.window?.from || "UNKNOWN"} → ${item.window?.to || "UNKNOWN"}`)}</td><td>${esc(label("TREND_STATE"))}</td><td>${esc(label("VOLATILITY_STATE"))}</td><td>${esc(label("SESSION_STATE"))}</td><td>${esc(item.context_status || "UNKNOWN")}</td></tr>`;
+    const artifact = item.historical_artifact || {};
+    return `<tr><td>${esc(item.test_run_id || "UNKNOWN")}</td><td>${esc(`${item.window?.from || "UNKNOWN"} → ${item.window?.to || "UNKNOWN"}`)}</td><td>${esc(label("TREND_STATE"))}</td><td>${esc(label("VOLATILITY_STATE"))}</td><td>${esc(label("SESSION_STATE"))}</td><td title="${esc(artifact.normalized_fingerprint || "UNKNOWN")}">${esc(b3Short(artifact.normalized_fingerprint || "UNKNOWN", 18))}</td><td>${esc(item.context_status || "UNKNOWN")}</td></tr>`;
   }).join("");
   const currentLabels = current.label_status || {};
   const summary = b3Detail([
@@ -1619,8 +1620,10 @@ function b46RenderTemporalContext(response, marketResponse) {
     ["OUTCOME IN LABELING", "EXCLUDED"],
     ["R1/R2/R3", contexts.length || "UNKNOWN"],
   ]);
-  const table = rows ? `<div class="gB3TableWrap"><table class="gB3Table"><thead><tr><th>RUN</th><th>WINDOW</th><th>TREND</th><th>VOLATILITY</th><th>SESSION</th><th>STATUS</th></tr></thead><tbody>${rows}</tbody></table></div>` : b3Empty("Nenhum contexto histórico congelado disponível.");
-  el.innerHTML = summary + table + `<p class="gB3Note">Rótulos ausentes permanecem UNKNOWN. Contexto congelado antes do POST_WINDOW_OUTCOME. ${esc(Object.keys(currentLabels).length ? "READ MODEL" : "HISTORICAL ARTIFACT PENDENTE")}</p>`;
+  const table = rows ? `<div class="gB3TableWrap"><table class="gB3Table"><thead><tr><th>RUN</th><th>WINDOW</th><th>TREND</th><th>VOLATILITY</th><th>SESSION</th><th>ARTIFACT</th><th>STATUS</th></tr></thead><tbody>${rows}</tbody></table></div>` : b3Empty("Nenhum contexto histórico congelado disponível.");
+  const outcomes = Array.isArray(response?.temporal_evidence?.rows) ? response.temporal_evidence.rows : [];
+  const outcomeTable = outcomes.length ? `<div class="gB3TableWrap"><table class="gB3Table"><thead><tr><th>POST_WINDOW_OUTCOME</th><th>ROBÔ</th><th>BALANCE CHANGE</th><th>CONTEXT FINGERPRINT</th></tr></thead><tbody>${outcomes.map((item) => `<tr><td>${esc(item.test_run_id || "UNKNOWN")}</td><td>${esc(item.robot_id || "UNKNOWN")}</td><td>${esc(item.post_window_outcome?.balance_change ?? "UNKNOWN")}</td><td class="gB3Muted">${esc(b3Short(item.context_fingerprint || "UNKNOWN", 24))}</td></tr>`).join("")}</tbody></table></div>` : "";
+  el.innerHTML = summary + table + outcomeTable + `<p class="gB3Note">Rótulos ausentes permanecem UNKNOWN. Contexto congelado antes do POST_WINDOW_OUTCOME. ${esc(Object.keys(currentLabels).length ? "READ MODEL" : "HISTORICAL ARTIFACT PENDENTE")}</p>`;
 }
 function b3RenderMemory(response) {
   const contract = response?.contract || {};

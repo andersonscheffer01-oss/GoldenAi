@@ -18,6 +18,10 @@ from .temporal_market_context import (
     build_production_window_contexts,
     link_outcomes_after_context_freeze,
 )
+from .historical_market_evidence import (
+    load_reconciled_post_window_outcomes,
+    load_reconciled_temporal_contexts,
+)
 
 
 REPERTOIRE_STATES = (
@@ -279,14 +283,15 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
     catalog_data = _payload(catalog)
     raw_robots = [item for item in catalog_data.get("robots", []) if isinstance(item, dict)]
     profiles = [normalize_robot_profile(item) for item in raw_robots]
-    temporal_contexts = build_production_window_contexts()
+    temporal_contexts = load_reconciled_temporal_contexts() or build_production_window_contexts()
     dataset = build_evidence_dataset(raw_robots, temporal_contexts)
     outcomes = []
     for robot in raw_robots:
         for item in list(robot.get("backtest_artifacts") or []) + list(robot.get("test_runs") or []):
             if isinstance(item, dict) and (item.get("test_run_id") or item.get("run_id")):
                 outcomes.append({**item, "robot_id": robot.get("robot_id", UNKNOWN)})
-    temporal_evidence = link_outcomes_after_context_freeze(temporal_contexts, outcomes)
+    temporal_evidence = (load_reconciled_post_window_outcomes() or
+                         link_outcomes_after_context_freeze(temporal_contexts, outcomes))
     market = market if isinstance(market, dict) else {"status": "SOURCE_DISABLED", "data": {}}
     suitability = build_suitability(profiles, market, symbol, timeframe)
     repertoire = Counter(item["repertoire_status"] for item in profiles)
