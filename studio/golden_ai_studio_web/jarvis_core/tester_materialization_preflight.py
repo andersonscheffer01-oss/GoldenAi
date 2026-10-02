@@ -8,6 +8,9 @@ import re
 from typing import Any, Mapping
 
 from .b2_contracts import content_fingerprint
+from .campaign_parameter_provenance import (
+    assert_run_parameter_binding, build_campaign_parameter_provenance,
+)
 from .robot_identity_recovery import PROPOSED_CAMPAIGN_PATH
 from .shared_temporal_campaign import (
     B4_10_CAMPAIGN_ID, B4_10_MANIFEST_HASH, build_shared_temporal_preflight,
@@ -121,10 +124,12 @@ def build_materialization_plan(*, root=None, clock=None) -> dict[str, Any]:
     """Render expected config bytes in memory; never writes or contacts providers."""
     now = (clock or (lambda: datetime.now(timezone.utc)))()
     temporal = build_shared_temporal_preflight(root=root, clock=lambda: now)
+    parameter_provenance = build_campaign_parameter_provenance(root=root)
     manifest = json.loads(PROPOSED_CAMPAIGN_PATH.read_text(encoding="utf-8"))
     if manifest["campaign_id"] != B4_10_CAMPAIGN_ID or temporal["campaign_manifest_hash"] != B4_10_MANIFEST_HASH:
         raise ValueError("CAMPAIGN_MANIFEST_IDENTITY_MISMATCH")
     windows = {w["window_id"]: w for w in temporal["market_windows"]}
+    provenance_by_robot = {item["robot_id"]: item for item in parameter_provenance["robots"]}
     materialized, routes, planned = [], [], []
     seen_paths: set[str] = set()
     for source, contextual in zip(manifest["manifest"]["planned_runs"], temporal["planned_runs"]):
@@ -136,6 +141,8 @@ def build_materialization_plan(*, root=None, clock=None) -> dict[str, Any]:
         run = {**contextual, **source, "market_window_id": window["window_id"],
                "market_window_fingerprint": window["window_fingerprint"]}
         robot_contract = _ROBOTS[run["robot_id"]]
+        provenance = provenance_by_robot[run["robot_id"]]
+        assert_run_parameter_binding(run, provenance)
         raw = _render(run, B4_10_CAMPAIGN_ID).encode("utf-8")
         text = raw.decode("utf-8")
         ini_scientific_fp = scientific_config_fingerprint(text)
@@ -166,8 +173,26 @@ def build_materialization_plan(*, root=None, clock=None) -> dict[str, Any]:
                         "parameter_artifact_contract": {
                             "mode": "VERIFIED_SET_FILE" if robot_contract["preset"] else "COMPILE_TIME_DEFAULTS",
                             "preset_name": robot_contract["preset"],
-                            "preset_sha256": robot_contract["preset_sha256"],
+                            "preset_sha256": provenance["parameter_artifact_sha256"],
+                            "installed_parameter_artifact_sha256": provenance["installed_parameter_artifact_sha256"],
+                            "effective_parameter_snapshot_sha256": provenance["effective_parameter_snapshot_sha256"],
+                            "effective_parameter_fingerprint": provenance["effective_parameter_fingerprint"],
+                            "parameter_source_sha256": provenance["parameter_source_sha256"],
+                            "source_sha256": provenance["source_sha256"],
                             "parameter_fingerprint": run["parameter_fingerprint"],
+                            "schema_status": provenance["schema_status"],
+                            "parameter_drift_status": provenance["parameter_drift_status"],
+                            "artifact_drift_status": provenance["artifact_drift_status"],
+                            "compiled_artifact_status": provenance["compiled_status"],
+                            "compiled_artifact_path": provenance["selected_compiled_path"],
+                            "installed_compiled_path": provenance["installed_compiled_path"],
+                            "installed_compiled_status": provenance["installed_compiled_status"],
+                            "runtime_install_status": provenance["runtime_install_status"],
+                            "source_compiled_relationship": provenance["source_compiled_relationship"],
+                            "robot_binding_evidence_sha256": (
+                                provenance["historical_binding_evidence"]["sha256"]
+                                if provenance["historical_binding_evidence"] else None
+                            ),
                             "revalidate_before_execution": True,
                         },
                         "report_relative_path": route["report_relative_path"],
@@ -184,6 +209,10 @@ def build_materialization_plan(*, root=None, clock=None) -> dict[str, Any]:
         "planned_runs": planned, "materialized_config_fingerprints": materialized,
         "output_routing_fingerprints": routes,
         "materialized_config_status": "DRY_RUN_MATERIALIZED_IN_MEMORY",
+        "parameter_provenance_version": parameter_provenance["version"],
+        "parameter_provenance_status": parameter_provenance["status"],
+        "parameter_provenance_robots": parameter_provenance["robots"],
+        "parameter_identity_status": "FINGERPRINTS_AND_SCHEMAS_RECONCILED; TREND_INSTALL_RECHECK_REQUIRED",
         "output_routing_status": "LOGICAL_ROUTES_UNIQUE_NOT_CREATED",
         "encoding": "UTF-8", "bom": False, "line_endings": "LF", "final_newline": True,
         "parameter_serialization": "ROBOT_BOUND_FINGERPRINT; CANAL VERIFIED .set NAME; TENDENCIA COMPILE-TIME DEFAULTS; NO .set GENERATED",
@@ -198,7 +227,9 @@ def build_materialization_plan(*, root=None, clock=None) -> dict[str, Any]:
         "execution_order": "WINDOW_COMPLETE -> PRE_WINDOW_CONTEXT_FROZEN -> POST_WINDOW_TECHNICAL_AND_MACRO_CONTEXT_FROZEN -> CONFIG_PREFLIGHT -> HUMAN_APPROVAL -> EXECUTION",
         "approval_contract": {
             "scope_fields": ["campaign_id", "manifest_hash", "bounded_run_ids", "robot_ids", "compiled_hashes",
-                             "parameter_fingerprints", "scientific_config_fingerprints", "materialized_config_fingerprints",
+                             "parameter_fingerprints", "parameter_artifact_hashes", "effective_parameter_snapshot_hashes",
+                             "parameter_source_hashes", "schema_statuses", "drift_statuses",
+                             "scientific_config_fingerprints", "materialized_config_fingerprints",
                              "output_routing_fingerprints", "window_ids", "tester_model", "terminal_path", "data_root",
                              "expires_at", "single_use"],
             "ttl_seconds": "CANONICAL_SECURITYMANAGER.confirmation_ttl", "use_policy": "SINGLE_USE",
@@ -228,9 +259,26 @@ def build_execution_preflight_receipt(plan: Mapping[str, Any], run_id: str,
         "parameters": observations.get("parameter_fingerprint") == run["parameter_fingerprint"],
         "parameter_artifact": (
             observations.get("preset_sha256") == run["parameter_artifact_contract"]["preset_sha256"]
+            and observations.get("installed_parameter_artifact_sha256") == run["parameter_artifact_contract"]["installed_parameter_artifact_sha256"]
             if run["parameter_artifact_contract"]["mode"] == "VERIFIED_SET_FILE"
             else observations.get("defaults_source_hash") == run["source_hash"]
         ),
+        "parameter_source": observations.get("parameter_source_sha256") == run["parameter_artifact_contract"]["parameter_source_sha256"],
+        "source_artifact": observations.get("source_hash") == run["parameter_artifact_contract"]["source_sha256"],
+        "campaign_parameter_binding": (
+            observations.get("robot_binding_evidence_sha256") == run["parameter_artifact_contract"]["robot_binding_evidence_sha256"] and
+            observations.get("source_compiled_relationship") == run["parameter_artifact_contract"]["source_compiled_relationship"]
+        ),
+        "effective_parameter_snapshot": observations.get("effective_parameter_snapshot_sha256") == run["parameter_artifact_contract"]["effective_parameter_snapshot_sha256"],
+        "effective_parameter_fingerprint": observations.get("effective_parameter_fingerprint") == run["parameter_artifact_contract"]["effective_parameter_fingerprint"],
+        "input_schema": observations.get("schema_status") == run["parameter_artifact_contract"]["schema_status"],
+        "parameter_drift": observations.get("parameter_drift_status") == "NO_DRIFT_OBSERVED" and run["parameter_artifact_contract"]["parameter_drift_status"] == "NO_DRIFT_OBSERVED",
+        "compiled_artifact_binding": (observations.get("compiled_hash") == run["compiled_hash"] and
+                                       observations.get("installed_compiled_path") == run["parameter_artifact_contract"]["installed_compiled_path"] and
+                                       observations.get("installed_compiled_status") == "MATCH" and
+                                       observations.get("artifact_drift_status") == "NO_DRIFT_OBSERVED" and
+                                       run["parameter_artifact_contract"]["installed_compiled_status"] == "MATCH" and
+                                       run["parameter_artifact_contract"]["compiled_artifact_status"] in {"AVAILABLE_EXACT", "AVAILABLE_MULTIPLE_COPIES_IDENTICAL"}),
         "scientific_config": observations.get("scientific_config_fingerprint") == run["scientific_config_fingerprint"],
         "materialized_config": observations.get("materialized_config_fingerprint") == run["materialized_config_fingerprint"],
         "output_routing": observations.get("output_routing_fingerprint") == run["output_routing_fingerprint"],
@@ -267,6 +315,7 @@ def build_approval_scope(plan: Mapping[str, Any], runs: list[Mapping[str, Any]],
         raise ValueError("APPROVAL_SCOPE_RUN_SET_MISMATCH")
     frozen = {r["test_run_id"]: r for r in plan["planned_runs"]}
     identity_fields = ("robot_id", "compiled_hash", "parameter_fingerprint",
+                       "parameter_artifact_contract",
                        "scientific_config_fingerprint", "materialized_config_fingerprint",
                        "output_routing_fingerprint", "market_window_id", "tester_model")
     for run in runs:
@@ -276,6 +325,7 @@ def build_approval_scope(plan: Mapping[str, Any], runs: list[Mapping[str, Any]],
     return {"campaign_id": plan["campaign_id"], "manifest_hash": plan["campaign_manifest_hash"],
             "terminal_target": plan["terminal_target"], "data_root_target": plan["data_root_target"],
             "runs": [{k: r[k] for k in ("test_run_id", "robot_id", "compiled_hash", "parameter_fingerprint",
+                                        "parameter_artifact_contract",
                                         "scientific_config_fingerprint", "materialized_config_fingerprint",
                                         "output_routing_fingerprint", "market_window_id", "tester_model")}
                      for r in sorted(runs, key=lambda x: x["test_run_id"])],
