@@ -1583,6 +1583,7 @@ function b43RenderRobotIntelligence(response) {
   const identity = data.artifact_identity || {};
   const campaign = data.scientific_campaign || {};
   const recovery = data.robot_identity_recovery || {};
+  const sharedTemporal = data.shared_temporal_preflight || {};
   const candidates = Array.isArray(recovery.candidates) ? recovery.candidates : [];
   const historicalArtifact = identity.compiled_artifacts?.historical_tested || {};
   const currentArtifact = identity.compiled_artifacts?.current_observed || {};
@@ -1616,6 +1617,20 @@ function b43RenderRobotIntelligence(response) {
     ["EXECUTION READY", proposed.execution_ready ? "YES" : "NO"],
     ["BLOCKERS", (proposed.execution_blockers || []).join(" · ")],
   ])}<table class="gB3Table"><thead><tr><th>RUN</th><th>ROBOT</th><th>WINDOW</th><th>TIMEFRAME</th><th>SPLIT</th></tr></thead><tbody>${campaignRowsB410}</tbody></table><p class="gB3Note">PROPOSED · NOT AUTHORIZED · NO TESTS EXECUTED</p>` : `<p class="gB3Note">B4.10 CAMPAIGN: ${esc(data.robot_identity_recovery_status || "UNAVAILABLE")}</p>`;
+  const sharedWindows = Array.isArray(sharedTemporal.market_windows) ? sharedTemporal.market_windows : [];
+  const sharedMacros = Array.isArray(sharedTemporal.macro_windows) ? sharedTemporal.macro_windows : [];
+  const sharedRows = sharedWindows.map((item) => `<tr><td>${esc(item.window_id)}</td><td>${esc(item.symbol)} · ${esc(item.timeframe)}</td><td>${esc(item.start)} → ${esc(item.end)}</td><td title="${esc(item.window_fingerprint)}">${esc(b3Short(item.window_fingerprint, 20))}</td><td>${esc(item.run_ids?.length || 0)}</td><td>${esc(item.context_status)}</td></tr>`).join("");
+  const macroRows = sharedMacros.map((item) => `<tr><td>${esc(item.window_id)}</td><td>${esc(item.start)} → ${esc(item.end)}</td><td title="${esc(item.macro_window_fingerprint)}">${esc(b3Short(item.macro_window_fingerprint, 20))}</td><td>${esc(item.run_ids?.length || 0)}</td><td>${esc(item.ex_ante_status)}</td><td>${esc(item.post_window_status)}</td></tr>`).join("");
+  const temporalView = sharedTemporal.context_plan_fingerprint ? `<h4>B4.11 SHARED TEMPORAL PREFLIGHT · READ ONLY</h4>${b3Detail([
+    ["CAMPAIGN / MANIFEST", `${sharedTemporal.campaign_id} · ${b3Short(sharedTemporal.campaign_manifest_hash, 20)}`],
+    ["STATE / AUTHORIZATION", `${sharedTemporal.state} · ${sharedTemporal.authorized ? "AUTHORIZED" : "NOT AUTHORIZED"}`],
+    ["RUNS / TECHNICAL WINDOWS / MACRO WINDOWS", `${sharedTemporal.planned_run_count} / ${sharedWindows.length} / ${sharedMacros.length}`],
+    ["SHARED MACRO LINKAGE", "ONE CALENDAR MACRO IDENTITY PER WINDOW; M1/M15 TECHNICAL CONTEXTS REMAIN DISTINCT"],
+    ["CONFIG", `SCIENTIFIC ${sharedTemporal.scientific_config_fingerprints?.length || 0}/16 · MATERIALIZED ${sharedTemporal.materialized_config_status}`],
+    ["POST-WINDOW CONTEXT", sharedTemporal.post_window_context_available_now ? "AVAILABLE" : "PENDING"],
+    ["PLAN FINGERPRINT", sharedTemporal.context_plan_fingerprint],
+    ["EXECUTABLE", sharedTemporal.campaign_executable_now ? "YES" : "NO"],
+  ])}<table class="gB3Table"><thead><tr><th>TECHNICAL WINDOW</th><th>SYMBOL · TF</th><th>DATES</th><th>FINGERPRINT</th><th>RUNS</th><th>LIFECYCLE</th></tr></thead><tbody>${sharedRows}</tbody></table><table class="gB3Table"><thead><tr><th>SHARED MACRO WINDOW</th><th>DATES</th><th>FINGERPRINT</th><th>RUNS</th><th>EX-ANTE</th><th>POST-WINDOW</th></tr></thead><tbody>${macroRows}</tbody></table><p class="gB3Note">MACRO WINDOW IDENTITIES: ${sharedMacros.length} · EACH IS LINKED BY CALENDAR WINDOW ACROSS ROBOTS. PRE-REGISTERED ONLY · NO MT5 · NO TESTER · NO AUTHORIZATION · NO LIVE TRADING.</p>` : `<p class="gB3Note">B4.11 SHARED TEMPORAL PREFLIGHT: ${esc(data.shared_temporal_preflight_status || "UNAVAILABLE")}</p>`;
   const campaignView = campaign.status ? `<h4>SCIENTIFIC CAMPAIGN · PLANNING ONLY · B4.9 PRE-REGISTERED · NOT EXECUTABLE YET</h4>${b3Detail([
     ["STATUS", campaign.status], ["CAMPAIGN", campaign.campaign_id],
     ["MANIFEST HASH", campaign.manifest_hash], ["PLANNED RUNS", campaign.planned_run_count],
@@ -1623,7 +1638,7 @@ function b43RenderRobotIntelligence(response) {
     ["EXECUTION READY", campaign.execution_ready ? "YES" : "NO"],
     ["BLOCKERS", (campaign.execution_blockers || []).join(" · ") || "CONTEXT/CONFIG PRE-FLIGHT PENDING"],
   ])}<table class="gB3Table"><thead><tr><th>RUN</th><th>ROBOT</th><th>WINDOW</th><th>SPLIT</th><th>LIFECYCLE</th></tr></thead><tbody>${campaignRows}</tbody></table><p class="gB3Note">PRE-REGISTERED · NOT EXECUTABLE YET · CONTEXT/CONFIG PRE-FLIGHT PENDING · BACKTEST NOT EXECUTED · HOLDOUT OUTCOMES NOT INSPECTED</p>` : `<p class="gB3Note">SCIENTIFIC CAMPAIGN: ${esc(data.scientific_campaign_status || "UNAVAILABLE")}</p>`;
-  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + readinessView + campaignView + proposedView + `<p class="gB3Note">ANALYSIS ONLY · NO EXECUTION CONTROLS · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
+  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + readinessView + campaignView + proposedView + temporalView + `<p class="gB3Note">ANALYSIS ONLY · NO EXECUTION CONTROLS · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
 }
 function b3RenderEvidence(response) {
   const validation = b3Payload(response?.validation);

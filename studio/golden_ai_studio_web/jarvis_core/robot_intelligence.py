@@ -26,6 +26,7 @@ from .historical_macro_evidence import build_production_macro_contexts
 from .robot_artifact_identity import load_production_artifact_identity
 from .scientific_campaign_design import load_scientific_campaign
 from .robot_identity_recovery import load_robot_identity_recovery
+from .shared_temporal_campaign import build_shared_temporal_preflight
 
 
 REPERTOIRE_STATES = (
@@ -317,6 +318,12 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
     except (OSError, ValueError, KeyError, TypeError) as exc:
         identity_recovery = None
         identity_recovery_status = "UNAVAILABLE:" + type(exc).__name__
+    try:
+        shared_temporal_preflight = build_shared_temporal_preflight()
+        shared_temporal_status = "AVAILABLE_READ_ONLY"
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        shared_temporal_preflight = None
+        shared_temporal_status = "UNAVAILABLE:" + type(exc).__name__
     market = market if isinstance(market, dict) else {"status": "SOURCE_DISABLED", "data": {}}
     suitability = build_suitability(profiles, market, symbol, timeframe)
     repertoire = Counter(item["repertoire_status"] for item in profiles)
@@ -334,6 +341,8 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
         "scientific_campaign_status": campaign_status,
         "robot_identity_recovery": identity_recovery,
         "robot_identity_recovery_status": identity_recovery_status,
+        "shared_temporal_preflight": shared_temporal_preflight,
+        "shared_temporal_preflight_status": shared_temporal_status,
         "suitability": suitability,
         "temporal_evidence_contract": {
             "market_snapshot_link": suitability["market_context"].get("snapshot_id", "UNKNOWN"),
