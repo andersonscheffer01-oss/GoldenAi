@@ -22,6 +22,7 @@ from .historical_market_evidence import (
     load_reconciled_post_window_outcomes,
     load_reconciled_temporal_contexts,
 )
+from .historical_macro_evidence import build_production_macro_contexts
 from .robot_artifact_identity import load_production_artifact_identity
 
 
@@ -287,6 +288,12 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
     raw_robots = [item for item in catalog_data.get("robots", []) if isinstance(item, dict)]
     profiles = [normalize_robot_profile(item) for item in raw_robots]
     temporal_contexts = load_reconciled_temporal_contexts() or build_production_window_contexts()
+    try:
+        macro_contexts = build_production_macro_contexts(temporal_contexts)
+        macro_evidence_status = "PARTIAL_RAW_SOURCE_BYTES_MISSING"
+    except (OSError, ValueError, KeyError) as exc:
+        macro_contexts = []
+        macro_evidence_status = "UNAVAILABLE:" + type(exc).__name__
     dataset = build_evidence_dataset(raw_robots, temporal_contexts)
     outcomes = []
     for robot in raw_robots:
@@ -305,6 +312,8 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
         "robots": profiles, "robot_count": len(profiles), "repertoire": dict(repertoire),
         "trading_authorization": "NOT_GRANTED", "evidence_dataset": dataset,
         "temporal_contexts": temporal_contexts,
+        "macro_contexts": macro_contexts,
+        "macro_evidence_status": macro_evidence_status,
         "temporal_evidence": temporal_evidence,
         "artifact_identity": artifact_identity,
         "suitability": suitability,

@@ -1,0 +1,92 @@
+{
+  "schema": "b4.8-curated-primary-release-transcription-v1",
+  "curated_at": "2026-10-02T15:27:37+00:00",
+  "raw_response_preserved": false,
+  "limitations": "Facts transcribed from official archived release pages. Raw HTTP responses and contemporaneous consensus are unavailable; this is not a source-byte archive.",
+  "releases": [
+    {
+      "event_id": "FED-2026-07-29-FOMC",
+      "family": "FOMC_DECISION",
+      "source": "Federal Reserve",
+      "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm",
+      "period_reference": "2026-07-29",
+      "released_at": "2026-07-29T14:00:00-04:00",
+      "measure": "federal_funds_target_range",
+      "actual": "3.50-3.75",
+      "unit": "percent",
+      "consensus": null,
+      "revision_status": "ORIGINAL_RELEASE_PAGE",
+      "raw_artifact_status": "NOT_PRESERVED"
+    },
+    {
+      "event_id": "BEA-2026-08-26-GDP-Q2-SECOND",
+      "family": "GDP",
+      "source": "BEA",
+      "url": "https://www.bea.gov/news/2026/gdp-second-estimate-and-corporate-profits-2nd-quarter-2026",
+      "period_reference": "2026-Q2",
+      "released_at": "2026-08-26T08:30:00-04:00",
+      "measure": "real_gdp_second_estimate_annualized",
+      "actual": 1.5,
+      "unit": "percent",
+      "consensus": null,
+      "revision_status": "SECOND_ESTIMATE_AS_RELEASED",
+      "raw_artifact_status": "NOT_PRESERVED"
+    },
+    {
+      "event_id": "BEA-2026-08-26-PCE-JULY",
+      "family": "PCE_INFLATION",
+      "source": "BEA",
+      "url": "https://www.bea.gov/news/2026/personal-income-and-outlays-july-2026",
+      "period_reference": "2026-07",
+      "released_at": "2026-08-26T08:30:00-04:00",
+      "measure": "pce_price_index_year_over_year",
+      "actual": 3.7,
+      "unit": "percent",
+      "consensus": null,
+      "revision_status": "ORIGINAL_RELEASE_PAGE_SUPERSEDED_LATER",
+      "raw_artifact_status": "NOT_PRESERVED"
+    },
+    {
+      "event_id": "BLS-2026-09-04-EMPSIT",
+      "family": "EMPLOYMENT_SITUATION",
+      "source": "BLS",
+      "url": "https://www.bls.gov/news.release/archives/empsit_09042026.htm",
+      "period_reference": "2026-08",
+      "released_at": "2026-09-04T08:30:00-04:00",
+      "measure": "nonfarm_payroll_change",
+      "actual": 162000,
+      "unit": "persons",
+      "consensus": null,
+      "revision_status": "ARCHIVED_ORIGINAL_RELEASE",
+      "raw_artifact_status": "HTTP_403_WEB_VERIFIED_ONLY"
+    },
+    {
+      "event_id": "BLS-2026-09-10-PPI",
+      "family": "PPI_INFLATION",
+      "source": "BLS",
+      "url": "https://www.bls.gov/news.release/archives/ppi_09102026.htm",
+      "period_reference": "2026-08",
+      "released_at": "2026-09-10T08:30:00-04:00",
+      "measure": "final_demand_ppi_month_over_month",
+      "actual": 0.4,
+      "unit": "percent",
+      "consensus": null,
+      "revision_status": "ARCHIVED_ORIGINAL_RELEASE",
+      "raw_artifact_status": "HTTP_403_WEB_VERIFIED_ONLY"
+    },
+    {
+      "event_id": "BLS-2026-09-11-CPI",
+      "family": "CPI_INFLATION",
+      "source": "BLS",
+      "url": "https://www.bls.gov/news.release/archives/cpi_09112026.htm",
+      "period_reference": "2026-08",
+      "released_at": "2026-09-11T08:30:00-04:00",
+      "measure": "cpi_all_items_year_over_year",
+      "actual": 3.4,
+      "unit": "percent",
+      "consensus": null,
+      "revision_status": "ARCHIVED_ORIGINAL_RELEASE",
+      "raw_artifact_status": "HTTP_403_WEB_VERIFIED_ONLY"
+    }
+  ]
+}
