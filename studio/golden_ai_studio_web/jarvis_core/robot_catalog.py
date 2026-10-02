@@ -120,6 +120,25 @@ def _logical_robot_id(name: str, version: str, role: str) -> str:
     return "robot_" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
 
 
+def _merge_identity_items(existing: list[dict[str, Any]], incoming: Iterable[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    merged = list(existing or [])
+    positions = {str(item.get(key) or ""): index for index, item in enumerate(merged)}
+    for item in incoming or []:
+        candidate = _bounded(dict(item))
+        identity = str(candidate.get(key) or "")
+        if not identity:
+            raise ValueError(f"{key.upper()}_REQUIRED")
+        if identity in positions:
+            prior = merged[positions[identity]]
+            if key == "sha256" and prior.get("sha256") != candidate.get("sha256"):
+                raise ValueError("IDENTITY_COLLISION")
+            merged[positions[identity]] = {**prior, **candidate}
+        else:
+            positions[identity] = len(merged)
+            merged.append(candidate)
+    return merged
+
+
 def default_approved_roots(workspace_root: Optional[Path | str] = None) -> tuple[Path, ...]:
     root = Path(workspace_root or Path(__file__).resolve().parents[3]).resolve()
     return (
@@ -232,6 +251,9 @@ class RobotRecord:
     name: str
     version: str = "UNKNOWN"
     status: str = "DISCOVERED"
+    classification: str = "UNKNOWN"
+    campaign_associations: list[dict[str, Any]] = field(default_factory=list)
+    temporal_contexts: list[dict[str, Any]] = field(default_factory=list)
     source_artifacts: list[dict[str, Any]] = field(default_factory=list)
     compiled_artifacts: list[dict[str, Any]] = field(default_factory=list)
     parameter_presets: list[dict[str, Any]] = field(default_factory=list)
@@ -282,6 +304,7 @@ class RobotRecord:
             "name": self.name,
             "version": self.version,
             "status": self.status,
+            "classification": self.classification,
             "artifact_role": self.artifact_role,
             "source_available": bool(self.source_artifacts),
             "compiled_available": bool(self.compiled_artifacts),
@@ -292,6 +315,10 @@ class RobotRecord:
             "compile_evidence_count": len(self.compile_evidence),
             "test_run_count": len(self.test_runs),
             "latest_test_status": self.latest_test_status,
+            "test_runs": list(self.test_runs),
+            "backtest_artifacts": list(self.backtest_artifacts),
+            "campaign_associations": list(self.campaign_associations),
+            "temporal_contexts": list(self.temporal_contexts),
             "aliases": list(self.aliases),
             "documentation_artifacts": list(self.documentation_artifacts),
             "backtest_count": len(self.backtest_artifacts),
@@ -308,6 +335,8 @@ class RobotRecord:
             data.update({
                 "backtest_artifacts": list(self.backtest_artifacts),
                 "optimization_artifacts": list(self.optimization_artifacts),
+                "campaign_associations": list(self.campaign_associations),
+                "temporal_contexts": list(self.temporal_contexts),
                 "supported_symbols": list(self.supported_symbols),
                 "supported_timeframes": list(self.supported_timeframes),
                 "parameter_sets": list(self.parameter_sets),
@@ -593,6 +622,43 @@ class RobotCatalogStore:
              row["first_seen_at"] if row else now, now),
         )
 
+    def save_production_association(self, record: "RobotRecord",
+                                    evidence_items: list[dict[str, Any]]) -> None:
+        """Atomically persist a production association through the catalog owner."""
+        now = time.time()
+        with self._connection:
+            self._connection.execute(
+                "INSERT INTO robot_records(robot_id, payload_json, first_seen_at, last_seen_at, updated_at) "
+                "VALUES(?, ?, ?, ?, ?) ON CONFLICT(robot_id) DO UPDATE SET payload_json=excluded.payload_json, "
+                "last_seen_at=excluded.last_seen_at, updated_at=excluded.updated_at",
+                (record.robot_id, json.dumps(record.to_dict(detail=True), ensure_ascii=True),
+                 record.discovered_at or now, record.last_seen_at or now, now),
+            )
+            for artifact in (record.source_artifacts + record.compiled_artifacts +
+                             record.parameter_presets + record.backtest_artifacts):
+                self._save_artifact(record.robot_id, artifact, now)
+            for artifact in record.backtest_artifacts:
+                self._connection.execute(
+                    "INSERT INTO robot_associations(artifact_id, robot_id, status, payload_json, updated_at) "
+                    "VALUES(?, ?, ?, ?, ?) ON CONFLICT(artifact_id) DO UPDATE SET robot_id=excluded.robot_id, "
+                    "status=excluded.status, payload_json=excluded.payload_json, updated_at=excluded.updated_at",
+                    (artifact["artifact_id"], record.robot_id,
+                     artifact.get("association_status", "VERIFIED"),
+                     json.dumps(artifact, ensure_ascii=True), now),
+                )
+            for item in evidence_items:
+                evidence_id = str(item.get("evidence_id") or item.get("test_run_id") or "")
+                if not evidence_id:
+                    raise ValueError("EVIDENCE_ID_REQUIRED")
+                self._connection.execute(
+                    "INSERT INTO catalog_evidence(evidence_id, robot_id, kind, status, payload_json, created_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(evidence_id) DO UPDATE SET robot_id=excluded.robot_id, "
+                    "kind=excluded.kind, status=excluded.status, payload_json=excluded.payload_json",
+                    (evidence_id, record.robot_id, "TEST_RUN",
+                     str(item.get("status") or "HISTORICAL_PRODUCTION_EVIDENCE"),
+                     json.dumps(_bounded(item), ensure_ascii=True), now),
+                )
+
     def history_counts(self) -> dict[str, int]:
         return {
             "robots": int(self._connection.execute("SELECT COUNT(*) FROM robot_records").fetchone()[0]),
@@ -753,13 +819,27 @@ class RobotCatalogReadModel:
             return
         for evidence in self._store.evidence_for_robot(record.robot_id):
             kind = evidence.get("evidence_kind", "")
-            if kind == "COMPILE" and evidence not in record.compile_evidence:
+            if kind == "COMPILE":
+                evidence_id = str(evidence.get("evidence_id") or "")
+                record.compile_evidence = [existing for existing in record.compile_evidence
+                                           if not evidence_id or existing.get("evidence_id") != evidence_id]
                 record.compile_evidence.append(evidence)
-            elif kind == "TEST_RUN" and evidence not in record.test_runs:
+            elif kind == "TEST_RUN":
+                test_run_id = str(evidence.get("test_run_id") or
+                                   evidence.get("manifest", {}).get("test_run_id") or
+                                   evidence.get("manifest", {}).get("identity", {}).get("test_run_id") or "")
+                record.test_runs = [existing for existing in record.test_runs
+                                    if not test_run_id or existing.get("test_run_id") != test_run_id]
                 record.test_runs.append(evidence)
             if kind == "TEST_RUN":
                 parameters = evidence.get("manifest", {}).get("parameters")
-                if isinstance(parameters, dict) and parameters not in record.parameter_sets:
+                parameter_fingerprint = (str(parameters.get("fingerprint") or "")
+                                         if isinstance(parameters, dict) else "")
+                if (isinstance(parameters, dict) and not any(
+                        (parameter_fingerprint and
+                         str(existing.get("fingerprint") or "") == parameter_fingerprint) or
+                        _claim_value(existing) == _claim_value(parameters)
+                        for existing in record.parameter_sets)):
                     record.parameter_sets.append(parameters)
         if record.test_runs:
             record.latest_test_status = str(record.test_runs[-1].get("status") or
@@ -1052,6 +1132,54 @@ class RobotCatalogReadModel:
             if self._store:
                 self._store.save_evidence("TEST_RUN", item)
             return {"ok": True, "read_only": False, "test_run": item}
+
+    def associate_production_evidence(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """Apply an already validated, idempotent production association plan."""
+        with self._lock:
+            if plan.get("dry_run_status") != "SAFE_TO_APPLY":
+                return {"ok": False, "error": "ASSOCIATION_PLAN_NOT_SAFE", "plan": plan}
+            logical = plan.get("logical_robot") if isinstance(plan.get("logical_robot"), dict) else {}
+            robot_id = str(logical.get("robot_id") or "")
+            if not robot_id or str(logical.get("classification")) != "PRODUCTION_ROBOT":
+                return {"ok": False, "error": "PRODUCTION_IDENTITY_REQUIRED"}
+            record = self._robots.get(robot_id)
+            if record is None:
+                now = time.time()
+                record = RobotRecord(
+                    robot_id=robot_id, name=str(logical.get("name") or robot_id),
+                    status="DISCOVERED", classification="PRODUCTION_ROBOT", artifact_role="EA",
+                    discovered_at=now, last_seen_at=now,
+                    known_limitations=["HISTORICAL_EVIDENCE_ONLY", "CURRENT_COMPILED_ARTIFACT_NOT_TESTED_BY_B4_5",
+                                       "ANALYSIS_ONLY", "NOT_AUTHORIZED_FOR_LIVE_TRADING"],
+                )
+                self._robots[robot_id] = record
+            elif record.classification not in {"UNKNOWN", "PRODUCTION_ROBOT"}:
+                return {"ok": False, "error": "IDENTITY_COLLISION", "robot_id": robot_id}
+            record.classification = "PRODUCTION_ROBOT"
+            record.status = record.status if record.status in {"DISCOVERED", "CANDIDATE", "INACTIVE", "BLOCKED", "ARCHIVED"} else "DISCOVERED"
+            record.source_artifacts = _merge_identity_items(record.source_artifacts, plan.get("source_artifacts", []), "sha256")
+            record.compiled_artifacts = _merge_identity_items(record.compiled_artifacts, plan.get("compiled_artifacts", []), "sha256")
+            record.backtest_artifacts = _merge_identity_items(record.backtest_artifacts, plan.get("backtest_artifacts", []), "artifact_id")
+            record.parameter_sets = _merge_identity_items(record.parameter_sets, plan.get("parameter_sets", []), "fingerprint")
+            record.test_runs = _merge_identity_items(record.test_runs, plan.get("test_runs", []), "test_run_id")
+            record.campaign_associations = _merge_identity_items(record.campaign_associations, plan.get("campaigns", []), "campaign_id")
+            record.temporal_contexts = _merge_identity_items(record.temporal_contexts, plan.get("temporal_contexts", []), "context_fingerprint")
+            record.latest_test_status = "HISTORICAL_PRODUCTION_EVIDENCE"
+            record.known_limitations = list(dict.fromkeys(record.known_limitations + [
+                "B4.5_RESULTS_BOUND_TO_HISTORICAL_COMPILED_ARTIFACT_ONLY",
+                "CURRENT_COMPILED_ARTIFACT_HAS_ZERO_B4.5_RESULTS",
+            ]))
+            if not any(claim.claim_id == f"{robot_id}:production_association" for claim in record.provenance):
+                record.provenance.append(EvidenceClaim(
+                    claim_id=f"{robot_id}:production_association", field="production_association",
+                    value=True, evidence_type="TEST_RESULT", fact_source="TEST_RESULT",
+                    source_ref=str(plan.get("campaign_id") or ""), confidence="HIGH",
+                    reason="B4.5 historical evidence indexed without changing trading authority",
+                ))
+            if self._store:
+                self._store.save_production_association(record, plan.get("evidence_items", []))
+            return {"ok": True, "read_only": False, "association_status": "PERSISTED",
+                    "robot": record.to_dict(detail=True), "plan": plan}
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

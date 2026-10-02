@@ -113,6 +113,8 @@ def normalize_robot_profile(robot: dict[str, Any]) -> dict[str, Any]:
         "metadata": metadata,
         "source_artifacts": list(robot.get("source_artifacts") or []),
         "compiled_artifacts": list(robot.get("compiled_artifacts") or []),
+        "campaign_associations": list(robot.get("campaign_associations") or []),
+        "temporal_contexts": list(robot.get("temporal_contexts") or []),
         "evidence_counts": dict(robot.get("evidence_summary") or {}),
         "known_limitations": list(robot.get("known_limitations") or []),
         "conflicts": list(robot.get("conflicts") or []),
