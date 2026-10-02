@@ -24,6 +24,7 @@ from .historical_market_evidence import (
 )
 from .historical_macro_evidence import build_production_macro_contexts
 from .robot_artifact_identity import load_production_artifact_identity
+from .scientific_campaign_design import load_scientific_campaign
 
 
 REPERTOIRE_STATES = (
@@ -303,6 +304,12 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
     temporal_evidence = (load_reconciled_post_window_outcomes() or
                          link_outcomes_after_context_freeze(temporal_contexts, outcomes))
     artifact_identity = load_production_artifact_identity()
+    try:
+        scientific_campaign = load_scientific_campaign()
+        campaign_status = scientific_campaign["status"]
+    except (OSError, ValueError, KeyError) as exc:
+        scientific_campaign = None
+        campaign_status = "UNAVAILABLE:" + type(exc).__name__
     market = market if isinstance(market, dict) else {"status": "SOURCE_DISABLED", "data": {}}
     suitability = build_suitability(profiles, market, symbol, timeframe)
     repertoire = Counter(item["repertoire_status"] for item in profiles)
@@ -316,6 +323,8 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
         "macro_evidence_status": macro_evidence_status,
         "temporal_evidence": temporal_evidence,
         "artifact_identity": artifact_identity,
+        "scientific_campaign": scientific_campaign,
+        "scientific_campaign_status": campaign_status,
         "suitability": suitability,
         "temporal_evidence_contract": {
             "market_snapshot_link": suitability["market_context"].get("snapshot_id", "UNKNOWN"),
@@ -323,7 +332,7 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
             "revision_semantics": "NEW_ARTIFACT_OR_NEW_SNAPSHOT; HISTORICAL_ROWS_NOT_REWRITTEN",
         },
         "security": {"analysis_only": True, "execution_authority": "NONE", "approval_boundary": "SEPARATE_FUTURE_GATE"},
-        "provenance": {"catalog": "RobotCatalogReadModel", "market": "B4.2 MarketSnapshot", "transformation": "B4.3 read projection"},
+        "provenance": {"catalog": "RobotCatalogReadModel", "market": "B4.2 MarketSnapshot", "transformation": "B4.3 read projection", "campaign": "B4.9 static pre-registered manifest"},
     }
     payload["snapshot_id"] = "robot_intelligence_" + _fingerprint({key: payload[key] for key in ("robots", "evidence_dataset", "suitability", "correlation_id")})
     payload["dataset_provenance"] = {"fingerprint": _fingerprint(dataset), "source": "existing_catalog_evidence"}

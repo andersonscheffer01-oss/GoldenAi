@@ -1581,6 +1581,7 @@ function b43RenderRobotIntelligence(response) {
   const dataset = data.evidence_dataset || {};
   const suitability = data.suitability || {};
   const identity = data.artifact_identity || {};
+  const campaign = data.scientific_campaign || {};
   const historicalArtifact = identity.compiled_artifacts?.historical_tested || {};
   const currentArtifact = identity.compiled_artifacts?.current_observed || {};
   const state = $("#gB43State");
@@ -1601,7 +1602,16 @@ function b43RenderRobotIntelligence(response) {
   const rows = Array.isArray(suitability.results) ? suitability.results : [];
   const table = rows.length ? `<table class="gB3Table"><thead><tr><th>ROBÔ</th><th>REPERTOIRE</th><th>SUITABILITY</th><th>EVIDÊNCIA</th><th>POR QUÊ</th></tr></thead><tbody>${rows.slice(0, 50).map((item) => `<tr><td>${esc(item.name || item.robot_id || "UNKNOWN")}</td><td>${b3StateTag(item.repertoire_status || "UNKNOWN")}</td><td>${b3StateTag(item.match_status || "UNKNOWN")}</td><td>${esc(item.evidence_strength || "UNKNOWN")}</td><td class="gB3Muted">${esc((item.explanation?.why || []).concat(item.explanation?.why_not || []).join("; ") || "UNKNOWN")}</td></tr>`).join("")}</tbody></table>` : b3Empty("Nenhuma suitability verificável disponível.");
   const identityNote = `<p class="gB3Note">TESTED ARTIFACT: ${esc(b3Short(historicalArtifact.sha256 || "UNKNOWN", 24))} · CURRENT ARTIFACT: ${esc(b3Short(currentArtifact.sha256 || "UNKNOWN", 24))} · HISTORICAL BYTES: ${esc(identity.historical_artifact_availability || "UNKNOWN")} · CURRENT ROBOT TESTED: NO</p>`;
-  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + `<p class="gB3Note">ANALYSIS ONLY · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
+  const planned = Array.isArray(campaign.planned_runs) ? campaign.planned_runs : [];
+  const campaignRows = planned.map((run) => `<tr><td>${esc(run.test_run_id)}</td><td>${esc(run.robot_id)}</td><td>${esc(run.window?.from)} → ${esc(run.window?.to)}</td><td>${esc(run.split)}</td><td>${esc(run.context_status)}</td></tr>`).join("");
+  const campaignView = campaign.status ? `<h4>SCIENTIFIC CAMPAIGN · PLANNING ONLY</h4>${b3Detail([
+    ["STATUS", campaign.status], ["CAMPAIGN", campaign.campaign_id],
+    ["MANIFEST HASH", campaign.manifest_hash], ["PLANNED RUNS", campaign.planned_run_count],
+    ["SPLITS", JSON.stringify(campaign.split_counts || {})], ["HOLDOUT INSPECTED", campaign.holdout_inspected ? "YES" : "NO"],
+    ["EXECUTION READY", campaign.execution_ready ? "YES" : "NO"],
+    ["BLOCKERS", (campaign.execution_blockers || []).join(" · ") || "NONE"],
+  ])}<table class="gB3Table"><thead><tr><th>RUN</th><th>ROBOT</th><th>WINDOW</th><th>SPLIT</th><th>CONTEXT</th></tr></thead><tbody>${campaignRows}</tbody></table><p class="gB3Note">PLANNING ONLY · BACKTEST NOT EXECUTED · NOT LIVE TRADING · HOLDOUT OUTCOMES NOT INSPECTED</p>` : `<p class="gB3Note">SCIENTIFIC CAMPAIGN: ${esc(data.scientific_campaign_status || "UNAVAILABLE")}</p>`;
+  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + campaignView + `<p class="gB3Note">ANALYSIS ONLY · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
 }
 function b3RenderEvidence(response) {
   const validation = b3Payload(response?.validation);

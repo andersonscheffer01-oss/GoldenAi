@@ -1,0 +1,68 @@
+{
+  "schema": "jarvis-b4.9-scientific-campaign-v1",
+  "campaign_id": "campaign_b49_xauusd_m1_temporal_01",
+  "design_version": "b4.9.1",
+  "pre_registered_at": "2026-10-02",
+  "purpose": "FUTURE_SCIENTIFIC_EVIDENCE_ONLY",
+  "robot": {
+    "robot_id": "EA_Canal_Pullback_MT5",
+    "classification": "PRODUCTION_ROBOT",
+    "source_hash": "0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4",
+    "compiled_hash": "e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc",
+    "compiled_identity_role": "HISTORICAL_TESTED_COMPILED_ARTIFACT",
+    "compile_result": "COMPILE_SUCCESS",
+    "parameter_fingerprint": "7953a3fa4ca05b223411fca3",
+    "parameter_preset": "Setup_8_Robusto_Base.set",
+    "parameter_preset_sha256": "87868b176181d827272d442044a532ce8dde51d856fbb43db4c9cbc3c202562c",
+    "current_compiled_hash_excluded": "e6e35d84f26deb705b9ef90db3e3fa4d94c739e0d7109d8b45cb9831ecaa3a7e",
+    "identity_status": "HISTORICAL_TESTED_IDENTITY_RECONCILED"
+  },
+  "design": {
+    "selection_rationale": "Single candidate with reconciled source, COMPILE_SUCCESS, tested compiled bytes, and canonical frozen preset identity; no performance-based selection.",
+    "planned_run_count": 8,
+    "temporal_split": ["DEVELOPMENT", "VALIDATION", "HOLDOUT"],
+    "holdout_policy": "No outcome access, tuning, or context label derived from post-window outcomes; distinct future calendar windows; promotion requires separate human gate.",
+    "window_selection": "Calendar-defined future Monday-Friday windows selected before any outcomes exist; skip US Thanksgiving week; chronological split only.",
+    "reuse_policy": "B4.5 R1-R3 are prior evidence, not new samples; all 179 legacy JSON results are unresolved discovery/regression only and excluded.",
+    "regime_coverage": "UNKNOWN_PENDING_POINT_IN_TIME_CONTEXT_FREEZE",
+    "macro_coverage": "UNKNOWN_PENDING_B4_8_COMPATIBLE_CONTEXT_FREEZE",
+    "robot_diversity": "LIMITED_TO_ONE_EVIDENCE_READY_ROBOT"
+  },
+  "planned_runs": [
+    {"test_run_id":"run_b49_01_dev","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-11-02","to":"2026-11-06"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"6702567297d4d9fe76d6ad9ed81d44c8128ed14ddb8f7b16c9404fe6e66d6c6f","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+    {"test_run_id":"run_b49_02_dev","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-11-09","to":"2026-11-13"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"9ee8d355487e9ac5ef9959290fcb3f4e234d9907516eca68795f5da41d1ac41c","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+    {"test_run_id":"run_b49_03_dev","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-11-16","to":"2026-11-20"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"44d37ad024f19b12018ca730e80477e84955482ee605099908b1dd848b2e87d6","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+    {"test_run_id":"run_b49_04_dev","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-11-30","to":"2026-12-04"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"491eb65a281c8e5a521efb8e93df6fe9f218ddff8e41acfbd09307acd0f9c103","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+    {"test_run_id":"run_b49_05_val","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-12-07","to":"2026-12-11"},"split":"VALIDATION","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"b1d89eb20fade3ed39bbff6c4e282583c8586d333c0921e64b737e82ec07a92b","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+    {"test_run_id":"run_b49_06_val","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-12-14","to":"2026-12-18"},"split":"VALIDATION","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"b635b6140d29d3be84c49b1d091fa7309cc7e87e3c95b6cf1d12bcc5ac4fdc4f","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+    {"test_run_id":"run_b49_07_holdout","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2027-01-04","to":"2027-01-08"},"split":"HOLDOUT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"ca4c5e17cdc5c79b274cec5166719e36da46538bb6b9147b22069eaa06573167","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+    {"test_run_id":"run_b49_08_holdout","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2027-01-11","to":"2027-01-15"},"split":"HOLDOUT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"4b322ac9154f3a47953f9a3ff38a59c4dc6e6a7f19891d9d96d403679b6b61c7","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"}
+  ],
+  "legacy_evidence_policy": {
+    "current_json_count": 179,
+    "scientific_identity_complete_count": 0,
+    "classification": "DISCOVERY_REGRESSION_ONLY",
+    "included_as_samples": false,
+    "strategy_name_is_not_robot_identity": true
+  },
+  "tester_policy": {
+    "optimization": 0,
+    "use_remote": 0,
+    "use_cloud": 0,
+    "allow_live_trading": 0,
+    "automatic_retry": false,
+    "metrics_contract": "NATIVE_RESULT_FIELDS_ONLY; ONTESTER_RETAINED_AS_CUSTOM_ROBUSTNESS_SCORE_NOT_PROFIT",
+    "failed_run_policy": "PRESERVE_FAILED_OR_UNVERIFIED; NO_AUTOMATIC_RETRY"
+  },
+  "safety": {
+    "planning_only": true,
+    "tester_executed": false,
+    "live_trading": false,
+    "order_send": false,
+    "broker_mutation": false,
+    "catalog_mutation": false,
+    "database_mutation": false,
+    "mt5_started": false,
+    "mql5_compiled": false
+  }
+}
