@@ -1584,6 +1584,7 @@ function b43RenderRobotIntelligence(response) {
   const campaign = data.scientific_campaign || {};
   const recovery = data.robot_identity_recovery || {};
   const sharedTemporal = data.shared_temporal_preflight || {};
+  const materialization = data.tester_materialization_preflight || {};
   const candidates = Array.isArray(recovery.candidates) ? recovery.candidates : [];
   const historicalArtifact = identity.compiled_artifacts?.historical_tested || {};
   const currentArtifact = identity.compiled_artifacts?.current_observed || {};
@@ -1631,6 +1632,16 @@ function b43RenderRobotIntelligence(response) {
     ["PLAN FINGERPRINT", sharedTemporal.context_plan_fingerprint],
     ["EXECUTABLE", sharedTemporal.campaign_executable_now ? "YES" : "NO"],
   ])}<table class="gB3Table"><thead><tr><th>TECHNICAL WINDOW</th><th>SYMBOL · TF</th><th>DATES</th><th>FINGERPRINT</th><th>RUNS</th><th>LIFECYCLE</th></tr></thead><tbody>${sharedRows}</tbody></table><table class="gB3Table"><thead><tr><th>SHARED MACRO WINDOW</th><th>DATES</th><th>FINGERPRINT</th><th>RUNS</th><th>EX-ANTE</th><th>POST-WINDOW</th></tr></thead><tbody>${macroRows}</tbody></table><p class="gB3Note">MACRO WINDOW IDENTITIES: ${sharedMacros.length} · EACH IS LINKED BY CALENDAR WINDOW ACROSS ROBOTS. PRE-REGISTERED ONLY · NO MT5 · NO TESTER · NO AUTHORIZATION · NO LIVE TRADING.</p>` : `<p class="gB3Note">B4.11 SHARED TEMPORAL PREFLIGHT: ${esc(data.shared_temporal_preflight_status || "UNAVAILABLE")}</p>`;
+  const materializedRuns = Array.isArray(materialization.planned_runs) ? materialization.planned_runs : [];
+  const materializationRows = materializedRuns.map((run) => `<tr><td>${esc(run.test_run_id)}</td><td>${esc(run.robot_id)} · ${esc(run.timeframe)}</td><td title="${esc(run.scientific_config_fingerprint)}">${esc(b3Short(run.scientific_config_fingerprint, 16))}</td><td title="${esc(run.materialized_config_fingerprint)}">${esc(b3Short(run.materialized_config_fingerprint, 16))}</td><td title="${esc(run.output_routing_fingerprint)}">${esc(b3Short(run.output_routing_fingerprint, 16))}</td><td>${esc(run.lifecycle || "FUTURE_WINDOW")} · ${esc(run.context_status)}</td><td>${esc(run.authorization)} · ${esc(run.execution)}</td></tr>`).join("");
+  const materializationView = materialization.materialization_plan_fingerprint ? `<h4>B4.12 TESTER MATERIALIZATION PREFLIGHT · READ ONLY</h4>${b3Detail([
+    ["CONTRACT / PLAN", `${materialization.contract_version} · ${materialization.materialization_plan_fingerprint}`],
+    ["SCIENTIFIC / DRY-RUN / ROUTING", `${materializedRuns.length} / ${materialization.materialized_config_fingerprints?.length || 0} / ${materialization.output_routing_fingerprints?.length || 0}`],
+    ["BYTES", `${materialization.encoding} · BOM ${materialization.bom ? "YES" : "NO"} · ${materialization.line_endings} · final newline ${materialization.final_newline}`],
+    ["OUTPUT POLICY", `${materialization.output_routing_status} · stale output ${materialization.stale_output_policy} · overwrite ${materialization.overwrite_allowed}`],
+    ["CONTEXT / AUTHORIZATION / EXECUTION", `${materialization.context_required_before_execution ? "CONTEXT REQUIRED" : "UNKNOWN"} · NOT GRANTED · BLOCKED`],
+    ["PROCESS / PROVIDERS", `${materialization.terminal_process_observation} · tester/market/model calls 0/0/0`],
+  ])}<table class="gB3Table"><thead><tr><th>RUN</th><th>ROBOT · TF</th><th>SCIENTIFIC</th><th>DRY-RUN BYTES</th><th>OUTPUT ROUTE</th><th>WINDOW · CONTEXT</th><th>AUTH · EXECUTION</th></tr></thead><tbody>${materializationRows}</tbody></table><p class="gB3Note">EXPECTED INI BYTES ARE IN-MEMORY ONLY. NO MT5, STRATEGY TESTER, EXECUTION AUTHORITY, OR LIVE TRADING.</p>` : `<p class="gB3Note">B4.12 MATERIALIZATION PREFLIGHT: ${esc(data.tester_materialization_preflight_status || "UNAVAILABLE")}</p>`;
   const campaignView = campaign.status ? `<h4>SCIENTIFIC CAMPAIGN · PLANNING ONLY · B4.9 PRE-REGISTERED · NOT EXECUTABLE YET</h4>${b3Detail([
     ["STATUS", campaign.status], ["CAMPAIGN", campaign.campaign_id],
     ["MANIFEST HASH", campaign.manifest_hash], ["PLANNED RUNS", campaign.planned_run_count],
@@ -1638,7 +1649,7 @@ function b43RenderRobotIntelligence(response) {
     ["EXECUTION READY", campaign.execution_ready ? "YES" : "NO"],
     ["BLOCKERS", (campaign.execution_blockers || []).join(" · ") || "CONTEXT/CONFIG PRE-FLIGHT PENDING"],
   ])}<table class="gB3Table"><thead><tr><th>RUN</th><th>ROBOT</th><th>WINDOW</th><th>SPLIT</th><th>LIFECYCLE</th></tr></thead><tbody>${campaignRows}</tbody></table><p class="gB3Note">PRE-REGISTERED · NOT EXECUTABLE YET · CONTEXT/CONFIG PRE-FLIGHT PENDING · BACKTEST NOT EXECUTED · HOLDOUT OUTCOMES NOT INSPECTED</p>` : `<p class="gB3Note">SCIENTIFIC CAMPAIGN: ${esc(data.scientific_campaign_status || "UNAVAILABLE")}</p>`;
-  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + readinessView + campaignView + proposedView + temporalView + `<p class="gB3Note">ANALYSIS ONLY · NO EXECUTION CONTROLS · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
+  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + readinessView + campaignView + proposedView + temporalView + materializationView + `<p class="gB3Note">ANALYSIS ONLY · NO EXECUTION CONTROLS · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
 }
 function b3RenderEvidence(response) {
   const validation = b3Payload(response?.validation);

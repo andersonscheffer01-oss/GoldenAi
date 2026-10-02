@@ -27,6 +27,7 @@ from .robot_artifact_identity import load_production_artifact_identity
 from .scientific_campaign_design import load_scientific_campaign
 from .robot_identity_recovery import load_robot_identity_recovery
 from .shared_temporal_campaign import build_shared_temporal_preflight
+from .tester_materialization_preflight import build_materialization_plan
 
 
 REPERTOIRE_STATES = (
@@ -324,6 +325,12 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
     except (OSError, ValueError, KeyError, TypeError) as exc:
         shared_temporal_preflight = None
         shared_temporal_status = "UNAVAILABLE:" + type(exc).__name__
+    try:
+        tester_materialization_preflight = build_materialization_plan()
+        tester_materialization_status = "AVAILABLE_READ_ONLY"
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        tester_materialization_preflight = None
+        tester_materialization_status = "UNAVAILABLE:" + type(exc).__name__
     market = market if isinstance(market, dict) else {"status": "SOURCE_DISABLED", "data": {}}
     suitability = build_suitability(profiles, market, symbol, timeframe)
     repertoire = Counter(item["repertoire_status"] for item in profiles)
@@ -343,6 +350,8 @@ def build_robot_intelligence_snapshot(catalog: dict[str, Any], market: dict[str,
         "robot_identity_recovery_status": identity_recovery_status,
         "shared_temporal_preflight": shared_temporal_preflight,
         "shared_temporal_preflight_status": shared_temporal_status,
+        "tester_materialization_preflight": tester_materialization_preflight,
+        "tester_materialization_preflight_status": tester_materialization_status,
         "suitability": suitability,
         "temporal_evidence_contract": {
             "market_snapshot_link": suitability["market_context"].get("snapshot_id", "UNKNOWN"),
