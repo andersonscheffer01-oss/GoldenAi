@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -100,22 +101,46 @@ def validate_campaign(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def load_scientific_campaign(path: Path = MANIFEST_PATH) -> dict[str, Any]:
+def _window_lifecycle(window: dict[str, Any], now: datetime) -> str:
+    start = date.fromisoformat(str(window["from"]))
+    end = date.fromisoformat(str(window["to"]))
+    start_at = datetime.combine(start, time.min, tzinfo=timezone.utc)
+    end_at = datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    if now < start_at:
+        return "WINDOW_PRE_REGISTERED"
+    if now < end_at:
+        return "WINDOW_IN_PROGRESS"
+    return "WINDOW_COMPLETE_CONTEXT_PENDING"
+
+
+def load_scientific_campaign(path: Path = MANIFEST_PATH,
+                             now: datetime | None = None) -> dict[str, Any]:
     """Return a validated planner projection; performs no writes or execution."""
     manifest = json.loads(path.read_text(encoding="utf-8"))
     validation = validate_campaign(manifest)
+    observed_now = now or datetime.now(timezone.utc)
+    if observed_now.tzinfo is None:
+        raise ValueError("TIMEZONE_REQUIRED")
+    observed_now = observed_now.astimezone(timezone.utc)
+    runs = [{**run, "window_lifecycle": _window_lifecycle(run["window"], observed_now)}
+            for run in manifest["planned_runs"]]
+    windows_elapsed = all(run["window_lifecycle"] == "WINDOW_COMPLETE_CONTEXT_PENDING"
+                          for run in runs)
+    blockers = list(validation["execution_blockers"])
+    if windows_elapsed:
+        blockers.remove("FUTURE_WINDOWS_NOT_ELAPSED")
     return {
-        "status": "PRE_REGISTERED_PLANNING_ONLY",
+        "status": "PRE_REGISTERED_NOT_EXECUTABLE_YET",
         "read_only": True,
         "campaign_id": manifest["campaign_id"],
         "manifest_hash": validation["manifest_hash"],
         "robot": manifest["robot"],
-        "planned_runs": manifest["planned_runs"],
+        "planned_runs": runs,
         "planned_run_count": validation["planned_run_count"],
         "split_counts": validation["split_counts"],
         "holdout_inspected": False,
         "execution_ready": False,
-        "execution_blockers": validation["execution_blockers"],
+        "execution_blockers": blockers,
         "legacy_evidence_policy": manifest["legacy_evidence_policy"],
         "tester_policy": manifest["tester_policy"],
         "safety": manifest["safety"],

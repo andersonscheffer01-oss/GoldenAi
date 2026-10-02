@@ -1,0 +1,186 @@
+{
+  "schema": "jarvis-b4.10-robot-identity-recovery-v1",
+  "audit_date": "2026-10-02",
+  "roots_audited": [
+    "C:\\GoldenAI\\projetos",
+    "C:\\GoldenAI\\studio\\golden_ai_studio_web",
+    "C:\\GoldenAI\\config\\backtest_results",
+    "C:\\Users\\Anderson\\AppData\\Roaming\\MetaQuotes\\Terminal\\D0E8209F77C8CF37AD8BF550E51FF075\\MQL5\\Experts (exact known candidate artifact paths only)"
+  ],
+  "b4_9_campaign_id": "campaign_b49_xauusd_m1_temporal_01",
+  "b4_9_manifest_hash": "0f09221134098dc0979867ec1fe1ab4429f864c9f870d2e195b6cd848b61aab4",
+  "catalog_observation": {
+    "database": "studio/golden_ai_studio_web/jarvis/robot_catalog.db",
+    "access": "READ_ONLY_SQLITE_QUERY",
+    "candidate_records_found": 0,
+    "candidate_associations_found": 0,
+    "records_observed": ["EA_Canal_Pullback_MT5", "fixture_golden_strategy_tester_v1"]
+  },
+  "legacy_evidence": {
+    "json_artifacts_audited": 179,
+    "candidate_identity_matches": 0,
+    "complete_scientific_identity_count": 0,
+    "forensic_use_only": true,
+    "outcomes_used_for_identity": false,
+    "classification": "DISCOVERY_REGRESSION_ONLY"
+  },
+  "candidates": [
+    {
+      "candidate_id": "EA_Rompimento_Range_MTF_MT5",
+      "name": "EA Rompimento Range MTF MT5",
+      "version": "1.00",
+      "classification": "PRODUCTION_CANDIDATE_NOT_CATALOGED",
+      "source_artifacts": [
+        {"path":"projetos/EA_Rompimento_Range_MTF_MT5/EA_Rompimento_Range_MTF_MT5.mq5","sha256":"3d7b5d1fc890d83fd684e5f3202effaed011dff91289f0690e0639baee38468e","size":32744,"modified":"2026-09-01T19:52:15-03:00"}
+      ],
+      "compiled_artifacts": [
+        {"path":"projetos/EA_Rompimento_Range_MTF_MT5/EA_Rompimento_Range_MTF_MT5.ex5","sha256":"2af3dbe3e80ce4e9f589f729cfbf4aabdf9cc5aab07e36fbdaae8964dc2592c9","size":85164,"modified":"2026-09-01T19:52:24-03:00","role":"PROJECT_COPY"},
+        {"path":"C:\\Users\\Anderson\\AppData\\Roaming\\MetaQuotes\\Terminal\\D0E8209F77C8CF37AD8BF550E51FF075\\MQL5\\Experts\\EA_Rompimento_Range_MTF_MT5\\EA_Rompimento_Range_MTF_MT5.ex5","sha256":"31c0055174c4d6959793621cf7812b0f6b84ad3c441c42f846309e995c3a1fc7","size":85880,"modified":"2026-09-01T19:52:34-03:00","role":"KNOWN_D0_DATA_ROOT_COPY"}
+      ],
+      "source_compiled_relationship": "PARTIAL",
+      "relationship_evidence": {
+        "compile_log_source_path_matches": true,
+        "project_compiled_mtime_matches_compile_log": true,
+        "compiled_hash_recorded_in_log": false,
+        "multiple_compiled_hashes": true
+      },
+      "compile_evidence": {
+        "path":"projetos/EA_Rompimento_Range_MTF_MT5/compilacao.log",
+        "sha256":"9dda9bfe0ba726b7634a0a92c9aa3d61a6ea75b02c3fd4f2e360d1627414535c",
+        "status":"COMPILE_SUCCESS",
+        "errors":0,
+        "warnings":0,
+        "compiler":"MetaEditor",
+        "compiler_version":"NOT_PRESENT",
+        "compiled_hash_recorded":"NOT_PRESENT",
+        "path_and_timestamp_correlated":true
+      },
+      "parameter_evidence": {
+        "status":"PARAMETERS_FROZEN_VERIFIED",
+        "kind":"EXISTING_SET_COMPLETE_AND_SEMANTICALLY_EQUAL_TO_SOURCE_DEFAULTS",
+        "path":"projetos/EA_Rompimento_Range_MTF_MT5/Range_M15_Entrada_M1.set",
+        "sha256":"2b59c8ea95a901175e2a89110f4b2eb71fb789705f6d99cfd7485da572cf12c7",
+        "fingerprint":"55b4ef689456d9f5e10ae1b4",
+        "input_count":61,
+        "preset_value_count":61,
+        "input_coverage":"61/61",
+        "enum_normalization":"MQL5_SOURCE_ENUMS_AND_PERIOD_CONSTANTS",
+        "semantic_defaults_match":true
+      },
+      "symbol_scope":"XAUUSD (existing preset); source permits configured symbol",
+      "timeframe_scope":"Reference M15 + entry M1 (existing preset); configurable inputs",
+      "dependencies_status":"KNOWN",
+      "dependencies":["REQUIRES_STANDARD_MT5_RESOURCE: Trade/Trade.mqh; built-in chart/time-series and CTrade APIs"],
+      "custom_indicators":[],
+      "external_files":[],
+      "dll_imports":false,
+      "network_calls":false,
+      "onTester_semantics":"NOT_DEFINED",
+      "existing_catalog_entries":[],
+      "existing_test_execution_identity":[],
+      "identity_collision":false
+    },
+    {
+      "candidate_id": "Robo_Tendencia_MA9_21_50_Volume",
+      "name": "Robo Tendencia MA9 21 50 Volume",
+      "version": "1.00",
+      "classification": "PRODUCTION_CANDIDATE_NOT_CATALOGED",
+      "source_artifacts": [
+        {"path":"projetos/Robo_Tendencia_MA9_21_50_Volume.mq5","sha256":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","size":14748,"modified":"2026-08-28T20:09:46-03:00"}
+      ],
+      "compiled_artifacts": [
+        {"path":"projetos/Robo_Tendencia_MA9_21_50_Volume.ex5","sha256":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","size":48778,"modified":"2026-08-28T20:11:12-03:00","role":"PROJECT_COPY"}
+      ],
+      "source_compiled_relationship": "PARTIAL",
+      "relationship_evidence": {
+        "compile_log_source_path_matches": true,
+        "project_compiled_mtime_matches_compile_log": true,
+        "compiled_hash_recorded_in_log": false,
+        "multiple_compiled_hashes": false
+      },
+      "compile_evidence": {
+        "path":"projetos/Robo_Tendencia_MA9_21_50_Volume_compile.log",
+        "sha256":"ba9007541c2000c4bd395ac4001d12cc1da7b55e9d7efb9767f62c95dba6145c",
+        "status":"COMPILE_SUCCESS",
+        "errors":0,
+        "warnings":0,
+        "compiler":"MetaEditor",
+        "compiler_version":"NOT_PRESENT",
+        "compiled_hash_recorded":"NOT_PRESENT",
+        "path_and_timestamp_correlated":true
+      },
+      "parameter_evidence": {
+        "status":"DEFAULT_PARAMETERS_VERIFIED",
+        "kind":"COMPLETE_SOURCE_INPUT_DEFAULTS",
+        "path":"projetos/Robo_Tendencia_MA9_21_50_Volume.mq5",
+        "sha256":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f",
+        "fingerprint":"9da7c5af45bacfb4f62de780",
+        "input_count":31,
+        "preset_value_count":0
+      },
+      "symbol_scope":"Chart symbol (_Symbol); no source allowlist; campaign proposal explicitly selects XAUUSD",
+      "timeframe_scope":"PERIOD_M15 default (configurable PeriodoGrafico input)",
+      "dependencies_status":"KNOWN",
+      "dependencies":["REQUIRES_STANDARD_MT5_RESOURCE: Trade/Trade.mqh; built-in iMA/iATR/iVolumes APIs"],
+      "custom_indicators":[],
+      "external_files":[],
+      "dll_imports":false,
+      "network_calls":false,
+      "onTester_semantics":"NOT_DEFINED",
+      "existing_catalog_entries":[],
+      "existing_test_execution_identity":[],
+      "identity_collision":false
+    },
+    {
+      "candidate_id": "Robo_XAUUSD_EMA_ATR_VWAP_TESTE",
+      "name": "Robo XAUUSD EMA ATR VWAP TESTE",
+      "version": "2.20",
+      "classification": "PRODUCTION_CANDIDATE_NOT_CATALOGED",
+      "source_artifacts": [
+        {"path":"projetos/Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5","sha256":"9216c5053f9d19f4c99d28c73ec91e4d722c5b86e4e637a23c3d5c33786d06b7","size":28350,"modified":"2026-08-19T01:25:48-03:00"}
+      ],
+      "compiled_artifacts": [
+        {"path":"projetos/Robo_XAUUSD_EMA_ATR_VWAP_TESTE.ex5","sha256":"6140f67c06a4ecf0b9c2b71c69b685313e60410faceae7f6f4ec59139cf528fa","size":52958,"modified":"2026-08-19T13:40:49-03:00","role":"PROJECT_COPY"}
+      ],
+      "source_compiled_relationship": "UNKNOWN",
+      "relationship_evidence": {
+        "compile_log_source_path_matches": false,
+        "project_compiled_mtime_matches_compile_log": false,
+        "compiled_hash_recorded_in_log": false,
+        "multiple_compiled_hashes": false
+      },
+      "compile_evidence": {
+        "path":"",
+        "sha256":"",
+        "status":"COMPILE_UNKNOWN",
+        "errors":"NOT_PRESENT",
+        "warnings":"NOT_PRESENT",
+        "compiler":"UNKNOWN",
+        "compiler_version":"NOT_PRESENT",
+        "compiled_hash_recorded":"NOT_PRESENT",
+        "path_and_timestamp_correlated":false
+      },
+      "parameter_evidence": {
+        "status":"DEFAULT_PARAMETERS_VERIFIED",
+        "kind":"COMPLETE_SOURCE_INPUT_DEFAULTS",
+        "path":"projetos/Robo_XAUUSD_EMA_ATR_VWAP_TESTE.mq5",
+        "sha256":"9216c5053f9d19f4c99d28c73ec91e4d722c5b86e4e637a23c3d5c33786d06b7",
+        "fingerprint":"523b72353293cd9daaceaac1",
+        "input_count":52,
+        "preset_value_count":0
+      },
+      "symbol_scope":"Chart symbol (_Symbol); no source allowlist; XAUUSD intent is indicated by filename only",
+      "timeframe_scope":"Chart timeframe (_Period); no timeframe restriction in source",
+      "dependencies_status":"KNOWN",
+      "dependencies":["REQUIRES_STANDARD_MT5_RESOURCE: Trade/Trade.mqh; built-in iMA/iATR/time-series APIs"],
+      "custom_indicators":[],
+      "external_files":[],
+      "dll_imports":false,
+      "network_calls":false,
+      "onTester_semantics":"NOT_DEFINED",
+      "existing_catalog_entries":[],
+      "existing_test_execution_identity":[],
+      "identity_collision":false
+    }
+  ]
+}

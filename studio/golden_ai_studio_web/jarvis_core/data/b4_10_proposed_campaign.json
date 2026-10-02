@@ -1,0 +1,116 @@
+{
+  "campaign_id": "campaign_bf3389bc66f0ac7777a3a06719ac5851",
+  "b4_9_manifest_hash": "0f09221134098dc0979867ec1fe1ab4429f864c9f870d2e195b6cd848b61aab4",
+  "execution_blockers": [
+    "FUTURE_WINDOWS_NOT_ELAPSED",
+    "POINT_IN_TIME_TECHNICAL_AND_MACRO_CONTEXT_NOT_FROZEN",
+    "MATERIALIZED_TESTER_CONFIG_AND_OUTPUT_ROUTING_NOT_CREATED",
+    "CANONICAL_SHARED_MACRO_CONTEXT_LINKAGE_NOT_VALIDATED",
+    "TREND_COMPILED_HASH_MUST_BE_REVALIDATED_AT_PREFLIGHT",
+    "CATALOG_DISCOVERED_ASSOCIATION_REVIEW_NOT_PERSISTED",
+    "FRESH_SINGLE_USE_HUMAN_AUTHORIZATION_REQUIRED"
+  ],
+  "manifest": {
+    "schema": "jarvis-b4.10-proposed-scientific-campaign-v1",
+    "campaign_id": "campaign_bf3389bc66f0ac7777a3a06719ac5851",
+    "campaign_family": "B4.10",
+    "status": "PROPOSED_NOT_AUTHORIZED",
+    "purpose": "VERSIONED_MULTI_ROBOT_FUTURE_EVIDENCE",
+    "b4_9_parent": {
+      "campaign_id": "campaign_b49_xauusd_m1_temporal_01",
+      "manifest_hash": "0f09221134098dc0979867ec1fe1ab4429f864c9f870d2e195b6cd848b61aab4",
+      "immutable": true,
+      "windows_reused": true,
+      "robots_or_parameters_added_to_parent": false
+    },
+    "selection_rationale": "Add only the one newly recoverable candidate with unique source and compiled bytes, successful source-path compile evidence, complete source defaults, and corroborating timestamps; retain Range's incompatible compiled hashes as excluded and EMA's missing compile linkage as excluded. No performance was used.",
+    "robots": [
+      {
+        "robot_id": "EA_Canal_Pullback_MT5",
+        "classification": "PRODUCTION_ROBOT",
+        "source_hash": "0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4",
+        "compiled_hash": "e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc",
+        "compiled_identity_role": "HISTORICAL_TESTED_COMPILED_ARTIFACT",
+        "parameter_fingerprint": "7953a3fa4ca05b223411fca3",
+        "parameter_origin": "B4.9_EXISTING_VERIFIED_PRESET",
+        "symbol": "XAUUSD",
+        "timeframe": "M1",
+        "readiness": "READY_FOR_CONTROLLED_EVIDENCE"
+      },
+      {
+        "robot_id": "Robo_Tendencia_MA9_21_50_Volume",
+        "classification": "PRODUCTION_CANDIDATE_NOT_CATALOGED",
+        "source_hash": "e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f",
+        "compiled_hash": "22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4",
+        "compiled_identity_role": "CURRENT_UNIQUE_COMPILED_BYTES_REVALIDATE_BEFORE_USE",
+        "parameter_fingerprint": "9da7c5af45bacfb4f62de780",
+        "parameter_origin": "COMPLETE_SOURCE_DEFAULTS",
+        "symbol": "XAUUSD",
+        "timeframe": "M15",
+        "source_compiled_relationship": "PARTIAL_PATH_AND_TIMESTAMP_CORROBORATION",
+        "readiness": "READY_WITH_RESTRICTIONS"
+      }
+    ],
+    "design": {
+      "planned_run_count": 16,
+      "robot_diversity": 2,
+      "shared_symbol": "XAUUSD",
+      "shared_windows_policy": "Same pre-registered calendar windows; keep each robot's timeframe and parameter semantics; technical context is timeframe-specific and macro context may be reused by symbol/window.",
+      "temporal_split": {"DEVELOPMENT":4,"VALIDATION":2,"HOLDOUT":2},
+      "window_selection": "Reuse B4.9 future calendar windows selected before outcomes; no result-based selection or shuffling.",
+      "holdout_policy": "No holdout outcome access, development use, tuning, or promotion before separate review.",
+      "legacy_evidence_policy": "179 unresolved legacy backtests remain excluded; B4.5 R1-R3 remain historical evidence and are not counted as new samples.",
+      "matcher": "NOT_IMPLEMENTED_NOT_READY"
+    },
+    "planned_runs": [
+      {"test_run_id":"run_d2a9061f911389bd140492c996d5b0ff","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-11-02","to":"2026-11-06"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"7af529cbffa33bbbc2038b7658154090a1178fe5b93b3c8913628f592029f8c9","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_9dbcd7e59f0eacd79b6e39c231f34a44","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-11-09","to":"2026-11-13"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"288d65e0b1557f8ff5fb5053a816fc7c98072f09da6e8f31b8e30dcbf0f9ec8f","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_dc6cdb51979b01c7b0537db705d771c8","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-11-16","to":"2026-11-20"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"4b1e1a07b32ed4879b4f14f855b961540b61342eccd757cc1ddb8aa3edb8414f","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_3c25836966ad1fed1309c5e4f356b2b3","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-11-30","to":"2026-12-04"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"9b32cb3f65f89bb3f4413ea8399c5f814c94f15696fb192f8e6875987804a3fe","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_e48ac1243f1ca4d02cf4a5a01393c62d","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-12-07","to":"2026-12-11"},"split":"VALIDATION","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"7776442ab74f50387c210e7277af87afa62a3ff5084fdfbc9629deed08aff59d","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_e4ec91b9aad8a12d7cfee367c30312a4","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2026-12-14","to":"2026-12-18"},"split":"VALIDATION","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"affbe259d63cd565eba944e706f22b82d77fb37e06ba34860a0c7c76178746b6","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_99832948aa35b284dfeab7c44da88b9e","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2027-01-04","to":"2027-01-08"},"split":"HOLDOUT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"e2e4379d7ed2c7d5ca9f6440f02e4f3361dad2cc0f21a17134c82030bd40b3fe","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_15b17e5d3ad96d6cefdbade8872fb44f","robot_id":"EA_Canal_Pullback_MT5","source_hash":"0f1ba3526de5e7b679281e38136479beb99dd707fd1b02db1d960ffae103aff4","compiled_hash":"e239e0dfc1c6a10c4bd4f8758b1913946b2423cd0901b8f3486b910fe56267cc","parameter_fingerprint":"7953a3fa4ca05b223411fca3","symbol":"XAUUSD","timeframe":"M1","window":{"from":"2027-01-11","to":"2027-01-15"},"split":"HOLDOUT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"940e84b8c79ddab3bccf81ee11129ad3388e831649168422a2bbfd7c07b416bf","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_e3cd3139c6f75ffe6cf96a0aa799e12a","robot_id":"Robo_Tendencia_MA9_21_50_Volume","source_hash":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","compiled_hash":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","parameter_fingerprint":"9da7c5af45bacfb4f62de780","symbol":"XAUUSD","timeframe":"M15","window":{"from":"2026-11-02","to":"2026-11-06"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"c4bac598ff53d7a17f692cead8ee3346a28a7c4ff5b64f9cf0a9059840f9e6ff","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_ac5aad9da8491e6975b31116e35488f7","robot_id":"Robo_Tendencia_MA9_21_50_Volume","source_hash":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","compiled_hash":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","parameter_fingerprint":"9da7c5af45bacfb4f62de780","symbol":"XAUUSD","timeframe":"M15","window":{"from":"2026-11-09","to":"2026-11-13"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"50a27545c3325fc8e8c15d07184538c01c49903d0830ae938aa77160ae29d092","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_cc84a3bbc3f082475db4599029415cc0","robot_id":"Robo_Tendencia_MA9_21_50_Volume","source_hash":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","compiled_hash":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","parameter_fingerprint":"9da7c5af45bacfb4f62de780","symbol":"XAUUSD","timeframe":"M15","window":{"from":"2026-11-16","to":"2026-11-20"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"a5e53c2c79911e1075f48f5e1e004e896e783b98da2c64f282d6778d50920f46","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_c53cc74f58accb800a4a986861fcd8cf","robot_id":"Robo_Tendencia_MA9_21_50_Volume","source_hash":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","compiled_hash":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","parameter_fingerprint":"9da7c5af45bacfb4f62de780","symbol":"XAUUSD","timeframe":"M15","window":{"from":"2026-11-30","to":"2026-12-04"},"split":"DEVELOPMENT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"32ea55be172712a6f46f910bae32952355b0e17b276db1c2056851db197903d7","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_f77f0d2d503834f6906a9a17d9bb1ee0","robot_id":"Robo_Tendencia_MA9_21_50_Volume","source_hash":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","compiled_hash":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","parameter_fingerprint":"9da7c5af45bacfb4f62de780","symbol":"XAUUSD","timeframe":"M15","window":{"from":"2026-12-07","to":"2026-12-11"},"split":"VALIDATION","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"49643d43321d57048c1d10ae278be7ed1dd89020ae9a323fcd6e2b121a3ee662","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_1d055df1c1fad083e1164d9ffc564569","robot_id":"Robo_Tendencia_MA9_21_50_Volume","source_hash":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","compiled_hash":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","parameter_fingerprint":"9da7c5af45bacfb4f62de780","symbol":"XAUUSD","timeframe":"M15","window":{"from":"2026-12-14","to":"2026-12-18"},"split":"VALIDATION","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"355cd23fdda77837cb5a11556dfc29ecda8e74e2803a80faa56d6163e5ed4e66","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_bc37db106940a24f6be069c00fd922e7","robot_id":"Robo_Tendencia_MA9_21_50_Volume","source_hash":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","compiled_hash":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","parameter_fingerprint":"9da7c5af45bacfb4f62de780","symbol":"XAUUSD","timeframe":"M15","window":{"from":"2027-01-04","to":"2027-01-08"},"split":"HOLDOUT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"f8adcc01d95aa4d25e8c134489e880b84cbbf3ac574dae6ebaf843fd55da689c","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"},
+      {"test_run_id":"run_29e903ccf88c2f0aedf084489ce63c0a","robot_id":"Robo_Tendencia_MA9_21_50_Volume","source_hash":"e7bcba2bb39dc6ab7a7389e32fa50f665e2caf62b1f2ecec6c4d6d5362d1130f","compiled_hash":"22f243a500aaf567f291cbaecf11ca87db89986e1be28c1e405009e9034629f4","parameter_fingerprint":"9da7c5af45bacfb4f62de780","symbol":"XAUUSD","timeframe":"M15","window":{"from":"2027-01-11","to":"2027-01-15"},"split":"HOLDOUT","tester_model":"REAL_TICKS","optimization":0,"use_remote":0,"use_cloud":0,"allow_live_trading":0,"context_status":"PENDING_PRE_EXECUTION_FREEZE","scientific_config_fingerprint":"cf617ad66041dfbac76ec736d977bf0107e27c74a98f57bf3143b445dd037849","materialized_config_fingerprint":"NOT_MATERIALIZED","output_routing_fingerprint":"NOT_MATERIALIZED"}
+    ],
+    "configuration_contract": {
+      "scientific_config_fingerprint":"CANONICAL_JSON_IDENTITY_AND_FROZEN_TESTER_SEMANTICS",
+      "materialized_config_fingerprint":"NOT_MATERIALIZED_UNTIL_FUTURE_GATE",
+      "output_routing_fingerprint":"NOT_MATERIALIZED_UNTIL_FUTURE_GATE",
+      "existing_materializer":"jarvis_core.tester_config_reconciliation.materialize_config",
+      "version":"jarvis-tester-config-materialization-v1",
+      "no_runtime_paths_fabricated":true
+    },
+    "preflight_contract": [
+      "REHASH_SOURCE_COMPILED_PRESET_AND_CAMPAIGN",
+      "VERIFY_SCIENTIFIC_CONFIG_FINGERPRINT",
+      "MATERIALIZE_AND_REHASH_CONFIG_AND_OUTPUT_ROUTING",
+      "VERIFY_TERMINAL_AND_DATA_ROOT_WITHOUT_FALLBACK",
+      "VERIFY_NO_CONFLICTING_MT5_PROCESS",
+      "SECURITY_MANAGER_APPROVAL_BOUND_TO_CAMPAIGN_RUN_HASHES_WINDOW_AND_TTL",
+      "ONE_RUN_THEN_RECONCILE_ARTIFACT_OWNERSHIP",
+      "STOP_ON_SCIENTIFIC_OR_SECURITY_FAILURE_NO_RETRY"
+    ],
+    "safety": {
+      "planning_only":true,
+      "authorized":false,
+      "tester_executed":false,
+      "auto_retry":0,
+      "optimization":0,
+      "use_remote":0,
+      "use_cloud":0,
+      "allow_live_trading":0,
+      "order_send":0,
+      "broker_mutation":0,
+      "database_mutation":false,
+      "catalog_mutation":false
+    }
+  }
+}

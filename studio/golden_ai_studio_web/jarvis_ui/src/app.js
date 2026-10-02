@@ -1582,6 +1582,8 @@ function b43RenderRobotIntelligence(response) {
   const suitability = data.suitability || {};
   const identity = data.artifact_identity || {};
   const campaign = data.scientific_campaign || {};
+  const recovery = data.robot_identity_recovery || {};
+  const candidates = Array.isArray(recovery.candidates) ? recovery.candidates : [];
   const historicalArtifact = identity.compiled_artifacts?.historical_tested || {};
   const currentArtifact = identity.compiled_artifacts?.current_observed || {};
   const state = $("#gB43State");
@@ -1603,15 +1605,25 @@ function b43RenderRobotIntelligence(response) {
   const table = rows.length ? `<table class="gB3Table"><thead><tr><th>ROBÔ</th><th>REPERTOIRE</th><th>SUITABILITY</th><th>EVIDÊNCIA</th><th>POR QUÊ</th></tr></thead><tbody>${rows.slice(0, 50).map((item) => `<tr><td>${esc(item.name || item.robot_id || "UNKNOWN")}</td><td>${b3StateTag(item.repertoire_status || "UNKNOWN")}</td><td>${b3StateTag(item.match_status || "UNKNOWN")}</td><td>${esc(item.evidence_strength || "UNKNOWN")}</td><td class="gB3Muted">${esc((item.explanation?.why || []).concat(item.explanation?.why_not || []).join("; ") || "UNKNOWN")}</td></tr>`).join("")}</tbody></table>` : b3Empty("Nenhuma suitability verificável disponível.");
   const identityNote = `<p class="gB3Note">TESTED ARTIFACT: ${esc(b3Short(historicalArtifact.sha256 || "UNKNOWN", 24))} · CURRENT ARTIFACT: ${esc(b3Short(currentArtifact.sha256 || "UNKNOWN", 24))} · HISTORICAL BYTES: ${esc(identity.historical_artifact_availability || "UNKNOWN")} · CURRENT ROBOT TESTED: NO</p>`;
   const planned = Array.isArray(campaign.planned_runs) ? campaign.planned_runs : [];
-  const campaignRows = planned.map((run) => `<tr><td>${esc(run.test_run_id)}</td><td>${esc(run.robot_id)}</td><td>${esc(run.window?.from)} → ${esc(run.window?.to)}</td><td>${esc(run.split)}</td><td>${esc(run.context_status)}</td></tr>`).join("");
-  const campaignView = campaign.status ? `<h4>SCIENTIFIC CAMPAIGN · PLANNING ONLY</h4>${b3Detail([
+  const campaignRows = planned.map((run) => `<tr><td>${esc(run.test_run_id)}</td><td>${esc(run.robot_id)}</td><td>${esc(run.window?.from)} → ${esc(run.window?.to)}</td><td>${esc(run.split)}</td><td>${esc(run.window_lifecycle || run.context_status)}</td></tr>`).join("");
+  const readinessRows = candidates.map((item) => `<tr><td>${esc(item.candidate_id)}</td><td>${esc(item.source_status)}</td><td>${esc(item.compiled_status)}</td><td>${esc(item.parameter_status)}</td><td>${esc(item.symbol_scope)} · ${esc(item.timeframe_scope)}</td><td>${esc(item.dependencies_status)} · ${esc(item.onTester_semantics || "UNKNOWN")}</td><td>${b3StateTag(item.readiness || "UNKNOWN")}</td><td class="gB3Muted">${esc((item.blockers || []).join("; ") || "NONE")}</td></tr>`).join("");
+  const readinessView = `<h4>ROBOT IDENTITY READINESS · READ ONLY</h4><table class="gB3Table"><thead><tr><th>CANDIDATE</th><th>SOURCE</th><th>COMPILED</th><th>PARAMETERS</th><th>SYMBOL · TIMEFRAME</th><th>DEPENDENCIES · ONTESTER</th><th>READINESS</th><th>BLOCKERS</th></tr></thead><tbody>${readinessRows || `<tr><td colspan="8">${esc(data.robot_identity_recovery_status || "UNAVAILABLE")}</td></tr>`}</tbody></table>`;
+  const campaignRowsB410 = (recovery.campaign_impact?.proposed_manifest?.planned_runs || []).map((run) => `<tr><td>${esc(run.test_run_id)}</td><td>${esc(run.robot_id)}</td><td>${esc(run.window?.from)} → ${esc(run.window?.to)}</td><td>${esc(run.timeframe)}</td><td>${esc(run.split)}</td></tr>`).join("");
+  const proposed = recovery.campaign_impact || {};
+  const proposedView = proposed.proposed_campaign_id ? `<h4>B4.10 SCIENTIFIC CAMPAIGN · PROPOSED · NOT AUTHORIZED</h4>${b3Detail([
+    ["STATUS", proposed.proposed_status], ["CAMPAIGN", proposed.proposed_campaign_id],
+    ["MANIFEST HASH", proposed.proposed_manifest_hash], ["PLANNED RUNS", proposed.proposed_run_count],
+    ["EXECUTION READY", proposed.execution_ready ? "YES" : "NO"],
+    ["BLOCKERS", (proposed.execution_blockers || []).join(" · ")],
+  ])}<table class="gB3Table"><thead><tr><th>RUN</th><th>ROBOT</th><th>WINDOW</th><th>TIMEFRAME</th><th>SPLIT</th></tr></thead><tbody>${campaignRowsB410}</tbody></table><p class="gB3Note">PROPOSED · NOT AUTHORIZED · NO TESTS EXECUTED</p>` : `<p class="gB3Note">B4.10 CAMPAIGN: ${esc(data.robot_identity_recovery_status || "UNAVAILABLE")}</p>`;
+  const campaignView = campaign.status ? `<h4>SCIENTIFIC CAMPAIGN · PLANNING ONLY · B4.9 PRE-REGISTERED · NOT EXECUTABLE YET</h4>${b3Detail([
     ["STATUS", campaign.status], ["CAMPAIGN", campaign.campaign_id],
     ["MANIFEST HASH", campaign.manifest_hash], ["PLANNED RUNS", campaign.planned_run_count],
     ["SPLITS", JSON.stringify(campaign.split_counts || {})], ["HOLDOUT INSPECTED", campaign.holdout_inspected ? "YES" : "NO"],
     ["EXECUTION READY", campaign.execution_ready ? "YES" : "NO"],
-    ["BLOCKERS", (campaign.execution_blockers || []).join(" · ") || "NONE"],
-  ])}<table class="gB3Table"><thead><tr><th>RUN</th><th>ROBOT</th><th>WINDOW</th><th>SPLIT</th><th>CONTEXT</th></tr></thead><tbody>${campaignRows}</tbody></table><p class="gB3Note">PLANNING ONLY · BACKTEST NOT EXECUTED · NOT LIVE TRADING · HOLDOUT OUTCOMES NOT INSPECTED</p>` : `<p class="gB3Note">SCIENTIFIC CAMPAIGN: ${esc(data.scientific_campaign_status || "UNAVAILABLE")}</p>`;
-  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + campaignView + `<p class="gB3Note">ANALYSIS ONLY · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
+    ["BLOCKERS", (campaign.execution_blockers || []).join(" · ") || "CONTEXT/CONFIG PRE-FLIGHT PENDING"],
+  ])}<table class="gB3Table"><thead><tr><th>RUN</th><th>ROBOT</th><th>WINDOW</th><th>SPLIT</th><th>LIFECYCLE</th></tr></thead><tbody>${campaignRows}</tbody></table><p class="gB3Note">PRE-REGISTERED · NOT EXECUTABLE YET · CONTEXT/CONFIG PRE-FLIGHT PENDING · BACKTEST NOT EXECUTED · HOLDOUT OUTCOMES NOT INSPECTED</p>` : `<p class="gB3Note">SCIENTIFIC CAMPAIGN: ${esc(data.scientific_campaign_status || "UNAVAILABLE")}</p>`;
+  $("#gB43RobotIntelligence").innerHTML = summary + table + identityNote + readinessView + campaignView + proposedView + `<p class="gB3Note">ANALYSIS ONLY · NO EXECUTION CONTROLS · ACTIVE NO REPERTOIRE NÃO AUTORIZA TRADING · OPAQUE_AI_SCORE=FALSE</p>`;
 }
 function b3RenderEvidence(response) {
   const validation = b3Payload(response?.validation);
