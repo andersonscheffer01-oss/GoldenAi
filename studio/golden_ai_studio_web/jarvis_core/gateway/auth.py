@@ -129,7 +129,10 @@ class AuthManager:
         """Set the device pairing service for device token authentication."""
         self._device_pairing = service
 
-    def authenticate(self, token: str, source_ip: str = "unknown") -> AuthState:
+    def authenticate(
+        self, token: str, source_ip: str = "unknown", *,
+        update_device_last_seen: bool = True,
+    ) -> AuthState:
         """Attempt authentication. Returns AuthState.
 
         Tries shared token first, then device token.
@@ -153,7 +156,9 @@ class AuthManager:
 
         # 2. Try device token
         if self._device_pairing and token:
-            device = self._device_pairing.verify_device_token(token)
+            device = self._device_pairing.verify_device_token(
+                token, update_last_seen=update_device_last_seen
+            )
             if device:
                 self._failure_counts.pop(source_ip, None)
                 self._failure_windows.pop(source_ip, None)
@@ -165,6 +170,7 @@ class AuthManager:
                         "type": "device",
                         "device_id": device.device_id,
                         "device_name": device.device_name,
+                        "device_type": device.device_type,
                     },
                 )
 

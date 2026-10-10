@@ -235,3 +235,20 @@ studio/golden_ai_studio_web/jarvis/golden_tasks.db
 # ==================================================
 
 /certs/
+
+# Local GoldenAI/Jarvis runtime state outside the Studio paths above
+/device_registry.json
+/golden_runtime.db
+/jarvis/*.db
+/jarvis/*.db-wal
+/jarvis/*.db-shm
+/jarvis/*.db-journal
+
+# Local market/trade evidence and generated test campaigns
+/data/trade_journal/
+/config/backtest_results/
+/studio/golden_ai_studio_web/tester_campaigns/
+/studio/golden_ai_studio_web/tester_runs/
+/studio/golden_ai_studio_web/test_fixtures/
+/studio/golden_ai_studio_web/build/
+/studio/golden_ai_studio_web/dist/

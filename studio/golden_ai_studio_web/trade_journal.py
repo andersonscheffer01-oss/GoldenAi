@@ -10,8 +10,9 @@ Componentes:
 """
 
 import json
+import math
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Optional
@@ -23,8 +24,13 @@ import numpy as np
 
 JOURNAL_DIR = Path(r"C:\GoldenAI\data\trade_journal")
 SETUP_DB_DIR = Path(r"C:\GoldenAI\data\setup_database")
-JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
-SETUP_DB_DIR.mkdir(parents=True, exist_ok=True)
+
+HISTORY_PAGE_MAX_LIMIT = 10
+HISTORY_SCAN_MAX_RECORDS = 10000
+HISTORY_RECORD_TYPES = frozenset({
+    "ALL", "PENDING_ANALYSIS", "IMPORTED_MT5",
+    "EXECUTION_UNVERIFIED", "JOURNAL_RESULT_UNVERIFIED",
+})
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -87,9 +93,10 @@ class TradeEntry:
 class TradeJournal:
     """Registra e recupera analises/trades"""
 
-    def __init__(self):
+    def __init__(self, journal_dir=None):
         self.current_date = datetime.now().strftime("%Y-%m-%d")
-        self.journal_file = JOURNAL_DIR / f"journal_{self.current_date}.jsonl"
+        self.journal_dir = Path(journal_dir) if journal_dir is not None else JOURNAL_DIR
+        self.journal_file = self.journal_dir / f"journal_{self.current_date}.jsonl"
 
     def log_analysis(self, analysis: Dict, ai_response: str = "", ai_model: str = "") -> str:
         """Registra uma analise completa no journal"""
@@ -159,6 +166,7 @@ class TradeJournal:
         )
 
         # Salvar no journal
+        self.journal_dir.mkdir(parents=True, exist_ok=True)
         with open(self.journal_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(asdict(entry), ensure_ascii=False) + '\n')
 
@@ -228,6 +236,165 @@ class TradeJournal:
                     except json.JSONDecodeError:
                         continue
         return entries
+
+    @staticmethod
+    def _iter_jsonl_reverse(path, chunk_size=65536):
+        with path.open("rb") as source:
+            position = source.seek(0, os.SEEK_END)
+            pending = b""
+            while position:
+                size = min(chunk_size, position)
+                position -= size
+                source.seek(position)
+                parts = (source.read(size) + pending).split(b"\n")
+                pending = parts[0]
+                for line in reversed(parts[1:]):
+                    if line.strip():
+                        yield line.decode("utf-8", errors="replace")
+            if pending.strip():
+                yield pending.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _history_projection(entry):
+        model = str(entry.get("ai_model") or "").strip().upper()
+        confidence = str(entry.get("confidence") or "").strip().upper()
+        rr_source = str(entry.get("rr_source") or "").strip().upper()
+        imported = (model == "MT5_IMPORT" or confidence.startswith("IMPORTED")
+                    or rr_source.startswith("MT5_IMPORT"))
+        result = str(entry.get("result") or "").strip().upper()
+        pending = result in {"", "PENDING"}
+        execution_claim = (model == "AUTO_TRADE" or entry.get("trade_opened") is True
+                           or (isinstance(entry.get("trade_ticket"), int)
+                               and not isinstance(entry.get("trade_ticket"), bool)
+                               and entry.get("trade_ticket", 0) > 0))
+
+        if imported:
+            record_type, execution_status = "IMPORTED_MT5", "NOT_REAL_ACCOUNT_VERIFIED"
+        elif execution_claim:
+            record_type, execution_status = "EXECUTION_UNVERIFIED", "UNVERIFIED"
+        elif pending:
+            record_type, execution_status = "PENDING_ANALYSIS", "NOT_EXECUTED"
+        else:
+            record_type, execution_status = "JOURNAL_RESULT_UNVERIFIED", "UNVERIFIED"
+
+        allowed = (
+            "setup_id", "timestamp", "symbol", "direction", "result",
+            "entry_price", "result_price", "result_time", "actual_rr",
+        )
+        projected = {"record_type": record_type,
+                     "execution_status": execution_status,
+                     "exit_type": "NOT_RECORDED"}
+        for key in allowed:
+            value = entry.get(key)
+            if (isinstance(value, (str, int, float))
+                    and not isinstance(value, bool)
+                    and (not isinstance(value, float) or math.isfinite(value))):
+                projected["record_id" if key == "setup_id" else key] = (
+                    str(value)[:160] if key in {"setup_id", "timestamp", "symbol",
+                                                "direction", "result", "result_time"}
+                    else value
+                )
+        return projected
+
+    def get_history_page(self, symbol="", record_type="ALL", limit=10, offset=0,
+                         date_from="", date_to="", exit_type="ALL"):
+        """Read a bounded, allowlisted Journal page without creating or writing files."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= HISTORY_PAGE_MAX_LIMIT:
+            return {"ok": False, "error_code": "INVALID_LIMIT", "read_only": True}
+        if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset < HISTORY_SCAN_MAX_RECORDS:
+            return {"ok": False, "error_code": "INVALID_OFFSET", "read_only": True}
+        kind = str(record_type or "ALL").strip().upper()
+        if kind not in HISTORY_RECORD_TYPES:
+            return {"ok": False, "error_code": "INVALID_RECORD_TYPE", "read_only": True}
+        selected_symbol = str(symbol or "").strip().upper()
+        if len(selected_symbol) > 32 or any(
+                char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._#-"
+                for char in selected_symbol):
+            return {"ok": False, "error_code": "INVALID_SYMBOL", "read_only": True}
+        bounds = []
+        for value in (date_from, date_to):
+            if value in (None, ""):
+                bounds.append(None)
+                continue
+            if not isinstance(value, str) or len(value) != 10:
+                return {"ok": False, "error_code": "INVALID_DATE", "read_only": True}
+            try:
+                bounds.append(date.fromisoformat(value))
+            except ValueError:
+                return {"ok": False, "error_code": "INVALID_DATE", "read_only": True}
+        if bounds[0] and bounds[1] and bounds[0] > bounds[1]:
+            return {"ok": False, "error_code": "INVALID_DATE_RANGE", "read_only": True}
+        selected_exit = str(exit_type or "ALL").strip().upper()
+        if selected_exit not in {"ALL", "NOT_RECORDED"}:
+            return {"ok": False, "error_code": "UNSUPPORTED_EXIT_FILTER", "read_only": True}
+
+        if self.journal_dir.is_symlink() or not self.journal_dir.is_dir():
+            return {"ok": True, "status": "UNAVAILABLE",
+                    "reason": "JOURNAL_DIRECTORY_MISSING", "records": [],
+                    "count": 0, "limit": limit, "offset": offset,
+                    "symbol": selected_symbol,
+                    "date_from": date_from or None, "date_to": date_to or None,
+                    "date_basis": "RAW_TIMESTAMP_CALENDAR_DATE_NO_TZ_CONVERSION",
+                    "exit_type_filter": selected_exit,
+                    "has_more": False, "scan_truncated": False,
+                    "scanned_records": 0, "read_only": True,
+                    "proven_execution_supported": False}
+
+        records = []
+        matched = 0
+        scanned = 0
+        truncated = False
+        for path in sorted(self.journal_dir.glob("journal_*.jsonl"), reverse=True):
+            if path.is_symlink() or not path.is_file():
+                continue
+            for line in self._iter_jsonl_reverse(path):
+                if scanned >= HISTORY_SCAN_MAX_RECORDS:
+                    truncated = True
+                    break
+                scanned += 1
+                try:
+                    entry = json.loads(line)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                projection = self._history_projection(entry)
+                if selected_symbol and str(projection.get("symbol") or "").upper() != selected_symbol:
+                    continue
+                if kind != "ALL" and projection["record_type"] != kind:
+                    continue
+                if selected_exit == "NOT_RECORDED" and projection["exit_type"] != "NOT_RECORDED":
+                    continue
+                if bounds[0] or bounds[1]:
+                    raw_timestamp = projection.get("timestamp", "")
+                    raw_date = raw_timestamp[:10] if isinstance(raw_timestamp, str) else ""
+                    try:
+                        record_date = date.fromisoformat(raw_date)
+                        if len(raw_timestamp) > 10:
+                            if raw_timestamp[10] not in {"T", " "}:
+                                continue
+                            datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+                    except ValueError:
+                        continue
+                    if bounds[0] and record_date < bounds[0]:
+                        continue
+                    if bounds[1] and record_date > bounds[1]:
+                        continue
+                if matched >= offset and len(records) < limit:
+                    records.append(projection)
+                matched += 1
+            if truncated:
+                break
+
+        return {"ok": True, "status": "AVAILABLE", "records": records,
+                "count": len(records), "limit": limit, "offset": offset,
+                "symbol": selected_symbol,
+                "date_from": date_from or None, "date_to": date_to or None,
+                "date_basis": "RAW_TIMESTAMP_CALENDAR_DATE_NO_TZ_CONVERSION",
+                "exit_type_filter": selected_exit,
+                "has_more": matched > offset + len(records),
+                "scan_truncated": truncated, "scanned_records": scanned,
+                "read_only": True, "proven_execution_supported": False}
 
     def get_statistics(self, symbol: str = None) -> Dict:
         """Calcula estatisticas gerais do journal"""
@@ -302,6 +469,7 @@ class SetupDatabase:
             'risk_reward': analysis.get('risk_reward', 0),
         }
 
+        SETUP_DB_DIR.mkdir(parents=True, exist_ok=True)
         with open(self.db_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(record, ensure_ascii=False) + '\n')
 

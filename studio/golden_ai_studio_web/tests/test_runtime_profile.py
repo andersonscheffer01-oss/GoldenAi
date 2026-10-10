@@ -21,6 +21,14 @@ def test_safe_profile_is_explicit_and_invalid_profiles_fail_closed():
     assert WEB_AI_SAFE_PROFILE.status()["voice"] == "DISABLED_BY_PROFILE"
     assert WEB_AI_SAFE_PROFILE.api_disabled_reason("/api/jarvis/voice/status") == "VOICE_DISABLED_BY_PROFILE"
     assert WEB_AI_SAFE_PROFILE.api_disabled_reason("/api/mt5/status") == "MT5_DISABLED_BY_PROFILE"
+    assert WEB_AI_SAFE_PROFILE.status()["market_data_read"] == "ENABLED"
+    assert WEB_AI_SAFE_PROFILE.status()["mt5_market_data_read"] == "ENABLED"
+    assert WEB_AI_SAFE_PROFILE.status()["trading"] == "DISABLED_BY_PROFILE"
+    assert WEB_AI_SAFE_PROFILE.tool_disabled_reason("golden_panel_market_snapshot") == ""
+    assert WEB_AI_SAFE_PROFILE.tool_disabled_reason("golden_panel_market_update") == ""
+    for mutation in ("order_send", "position_close", "position_modify",
+                     "pending_order_cancel", "autotrading_change", "broker_mutation"):
+        assert WEB_AI_SAFE_PROFILE.tool_disabled_reason(mutation) == "TRADING_DISABLED_BY_PROFILE"
     with pytest.raises(ValueError, match="Perfil de runtime invalido"):
         resolve_runtime_profile("unknown-profile")
 
@@ -36,10 +44,19 @@ def test_safe_service_keeps_canonical_core_and_blocks_disabled_tools(tmp_path):
 
         mt5_result = service.execute_tool("mt5_status", {})
         tester_result = service.execute_tool("strategy_tester_environment", {})
+        market_result = service.execute_tool("golden_panel_market_snapshot", {})
         assert mt5_result["disabled_by_profile"] is True
         assert mt5_result["error"] == "MT5_DISABLED_BY_PROFILE"
         assert tester_result["disabled_by_profile"] is True
         assert tester_result["error"] == "STRATEGY_TESTER_DISABLED_BY_PROFILE"
+        assert market_result.get("error") != "MARKET_DATA_READ_DISABLED_BY_PROFILE"
+        market_tool = service.registry.get("golden_panel_market_snapshot")
+        assert market_tool.side_effect_class.value == "READ_ONLY"
+        live_market_tool = service.registry.get("golden_panel_market_update")
+        assert live_market_tool.side_effect_class.value == "READ_ONLY"
+        assert service.registry.get("order_send") is None
+        assert service.registry.get("position_close") is None
+        assert service.registry.get("autotrading_change") is None
     finally:
         service.close()
         set_active_runtime_profile(DEFAULT_PROFILE)
@@ -72,7 +89,6 @@ def test_safe_bridge_read_paths_never_reach_connector(monkeypatch, tmp_path):
         raise AssertionError("ensure_connection must not run in web-ai-safe")
 
     monkeypatch.setattr(mt5_connector, "ensure_connection", fail_if_called)
-    monkeypatch.setattr(market_data, "_coingecko_snapshot", lambda: ([], "SOURCE_DISABLED"))
     monkeypatch.setattr(market_data, "_market_news", lambda: ([], "SOURCE_DISABLED"))
     monkeypatch.setattr(market_data, "_economic_calendar", lambda: ([], "SOURCE_DISABLED"))
     monkeypatch.setattr(market_data, "_macro_snapshot", lambda assets: {

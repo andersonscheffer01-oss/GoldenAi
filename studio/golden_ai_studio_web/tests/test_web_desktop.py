@@ -11,6 +11,7 @@ import urllib.error
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
@@ -21,13 +22,15 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWebEngineCore import QWebEngineScript
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from jarvis_desktop.core_launcher import (CoreLauncher, HTTPS_HEALTH_URL,
-                                          HTTPS_UI_ORIGIN)
+from jarvis_desktop.core_launcher import (CoreLaunchError, CoreLauncher,
+                                          HTTPS_HEALTH_URL, HTTPS_UI_ORIGIN)
 from jarvis_desktop.identity import (DesktopIdentityManager,
                                      PAIRING_CODE_URL, PAIRING_CONFIRM_URL)
-from jarvis_desktop.settings import candidate_origins, ui_url
+from jarvis_desktop.settings import candidate_origins, market_url, ui_url
 from jarvis_desktop.single_instance import SingleInstance
-from jarvis_desktop.web_window import DesktopMainWindow
+from jarvis_desktop.web_window import (DesktopMainWindow,
+                                       _UI_DIAGNOSTIC_REVISION,
+                                       _UI_DIAGNOSTIC_SCRIPT)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -66,7 +69,8 @@ def test_online_core_is_reused_without_starting_server():
 
 def test_gateway_idle_payload_is_healthy():
     payload = b'{"ok":true,"gateway":"running","connections":0,' \
-              b'"sessions":0,"service_state":"IDLE"}'
+              b'"sessions":0,"service_state":"IDLE",' \
+              b'"runtime_profile":"web-ai-safe"}'
     response = MagicMock(status=200)
     response.read.return_value = payload
     response.__enter__.return_value = response
@@ -122,9 +126,10 @@ def test_owned_core_is_stopped_but_reused_core_is_not():
     owned = CoreLauncher(ROOT, probe=lambda origin: False)
     process = FakeProcess()
     owned.process = process
-    owned.stop_owned_core()
-    assert process.terminated == 1
-    assert owned.process is None
+    assert owned.stop_owned_core() is False
+    assert process.terminated == 0
+    assert process.killed == 0
+    assert owned.process is process
 
     reused = CoreLauncher(ROOT, probe=lambda origin: True,
                           ui_probe=lambda url: True)
@@ -212,6 +217,99 @@ def test_desktop_identity_is_injected_at_document_creation():
         assert "jarvis-device-token" in marker.sourceCode()
         assert window.web_profile.isOffTheRecord() is False
         assert window.web_profile.persistentStoragePath()
+    finally:
+        window._explicit_exit = True
+        window.cleanup()
+        window.close()
+
+
+def test_market_intelligence_is_single_instance_and_closes_independently():
+    app = QApplication.instance() or QApplication([])
+    launcher = MagicMock()
+    launcher.origin = "http://127.0.0.1:9"
+    window = DesktopMainWindow(launcher)
+    try:
+        window.show()
+        market = window.open_market_intelligence()
+        assert market.windowTitle() == "JARVIS — Market Intelligence"
+        assert market.web_page.profile() is window.web_profile
+        assert window.open_market_intelligence() is market
+        assert window.market_window is market
+
+        market.close()
+        app.processEvents()
+        assert window.market_window is None
+        assert not window.isHidden()
+    finally:
+        window._explicit_exit = True
+        window.cleanup()
+        window.close()
+
+
+def test_market_window_loads_existing_golden_web_market_surface():
+    app = QApplication.instance() or QApplication([])
+    launcher = MagicMock()
+    launcher.origin = "https://192.0.2.10:8765"
+    window = DesktopMainWindow(launcher)
+    try:
+        market = window.open_market_intelligence()
+        assert market_url(launcher.origin) == "https://192.0.2.10:8765/market.html"
+        assert (ROOT / "market.html").is_file()
+    finally:
+        window._explicit_exit = True
+        window.cleanup()
+        window.close()
+
+
+def test_market_page_captures_javascript_console_diagnostics():
+    source = (ROOT / "jarvis_desktop" / "web_window.py").read_text(encoding="utf-8")
+    assert "def javaScriptConsoleMessage" in source
+    assert "runtime_js_errors" in source
+    assert "_handle_failed_load_probe" in source
+    assert "document.readyState" in source
+
+
+def test_desktop_load_records_bounded_qt_asset_diagnostic():
+    app = QApplication.instance() or QApplication([])
+    launcher = MagicMock()
+    launcher.origin = "http://127.0.0.1:9"
+    window = DesktopMainWindow(launcher)
+    try:
+        run_javascript = MagicMock()
+        window.web_page.runJavaScript = run_javascript
+        with patch("jarvis_desktop.web_window.boot_log") as boot_log:
+            window._on_load_finished(True)
+
+            script, callback = run_javascript.call_args.args
+            assert script == _UI_DIAGNOSTIC_SCRIPT
+            assert "performance.getEntriesByType(\"resource\")" in script
+            assert "localStorage" not in script
+            assert "document.cookie" not in script
+            assert "innerText" in script
+            assert "JSON.stringify" in script
+
+            callback(json.dumps({
+                "current_url": "https://127.0.0.1:8765/jarvis_ui/jarvis.html",
+                "asset_revisions": {
+                    "javascript": [_UI_DIAGNOSTIC_REVISION],
+                    "stylesheet": [_UI_DIAGNOSTIC_REVISION],
+                },
+                "old_controls": {
+                    "select_button": False,
+                    "class_filter": False,
+                    "search_field": True,
+                },
+                "new_dropdown_present": True,
+                "private_content": "must not reach log",
+            }))
+
+        record = boot_log.call_args.args[0]
+        assert record.startswith("UI_RUNTIME_DIAGNOSTIC ")
+        assert _UI_DIAGNOSTIC_REVISION in record
+        assert '"search_field": true' in record
+        assert '"new_dropdown_present": true' in record
+        assert "must not reach log" not in record
+        assert "private_content" not in record
     finally:
         window._explicit_exit = True
         window.cleanup()
@@ -384,7 +482,12 @@ def test_ui_url_is_canonical_and_no_desktop_copy_exists():
     assert not (ROOT / "jarvis_desktop" / "jarvis_ui").exists()
 
 
-def test_lan_ui_is_selected_when_loopback_is_unavailable():
+def test_market_url_points_to_existing_golden_web_surface():
+    assert market_url(HTTPS_UI_ORIGIN) == "https://127.0.0.1:8765/market.html"
+    assert (ROOT / "market.html").is_file()
+
+
+def test_desktop_never_falls_back_to_lan_ui_origin():
     attempted = []
 
     def ui_probe(url):
@@ -394,18 +497,36 @@ def test_lan_ui_is_selected_when_loopback_is_unavailable():
     launcher = CoreLauncher(
         ROOT, probe=lambda url: True, ui_probe=ui_probe,
         host_provider=lambda: "192.168.1.100")
-    assert launcher.ensure_online() == "https://192.168.1.100:8765"
-    assert attempted == [
-        "https://127.0.0.1:8765/jarvis_ui/jarvis.html",
-        "https://192.168.1.100:8765/jarvis_ui/jarvis.html",
-    ]
+    with pytest.raises(CoreLaunchError, match="jarvis_ui não respondeu"):
+        launcher.ensure_online()
+    assert attempted == ["https://127.0.0.1:8765/jarvis_ui/jarvis.html"]
     assert launcher.owns_core is False
 
 
-def test_lan_address_is_discovered_not_embedded_in_launcher_source():
+def test_lan_enabled_http_listener_addresses_include_loopback(monkeypatch):
+    from jarvis_core.lan_config import LanConfig
+
+    lan = object.__new__(LanConfig)
+    lan._enabled = True
+    lan._bind_address = "192.0.2.15"
+
+    assert lan.http_bind_addresses() == ("127.0.0.1", "192.0.2.15")
+
+
+def test_local_http_listener_address_is_loopback_when_lan_is_disabled():
+    from jarvis_core.lan_config import LanConfig
+
+    lan = object.__new__(LanConfig)
+    lan._enabled = False
+    lan._bind_address = "127.0.0.1"
+    assert lan.http_bind_addresses() == ("127.0.0.1",)
+
+
+def test_desktop_launcher_does_not_discover_or_use_lan_ui_fallback():
     source = (ROOT / "jarvis_desktop" / "core_launcher.py").read_text(encoding="utf-8")
     assert "192.168.1.100" not in source
-    assert "get_best_private_ip" in source
+    assert "get_best_private_ip" not in source
+    assert 'return ("127.0.0.1",)' in source
 
 
 def test_ui_load_failure_offers_retry_without_stopping_core():

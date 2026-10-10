@@ -1,7 +1,7 @@
 # Jarvis MQL5 and Strategy Tester Evidence Foundation
 
 **Gate:** `JARVIS_MQL5_TESTER_EVIDENCE_FOUNDATION`
-**Baseline:** `ac548b1`
+**Baseline:** `3e28f9a`
 **Status:** `PASS_WITH_RESTRICTIONS`
 
 ## Boundary
@@ -61,10 +61,23 @@ installed, and no duplicate authority was created.
 
 ## M6-M8 Tester and Result Design
 
-`StrategyTesterAdapterDesign` is deliberately design-only. It plans one managed
-run directory, bounded lifecycle states (`START`, `TIMEOUT`, `CANCEL`,
-`CLEANUP`, `VERIFY`), stale-run handling, and single-run parallelism, while
-returning `start: NOT_IMPLEMENTED` and `trade_authority: NONE`.
+`StrategyTesterAdapterDesign` remains the historical design contract. The
+controlled capability now lives in `jarvis_core/strategy_tester_adapter.py` as
+the single `StrategyTesterAdapter` boundary. It discovers the local terminal
+without launching it, requires an explicit data-root selection when multiple
+MetaQuotes profiles exist, builds a manifest-bound `[Tester]` configuration,
+and keeps `Optimization=0`, `UseRemote=0`, `UseCloud=0`, and
+`AllowLiveTrading=0` explicit.
+
+The side-effectful service tool is `strategy_tester_controlled_run`. It is
+registered below the normal `JarvisService.execute_tool` security path, is
+classified as `LOCAL_MUTATION`, requires the normal high-risk confirmation and
+an additional `human_action_confirmed` gate, and permits one bounded process at
+a time. A result is accepted only from a managed result path and only after the
+existing `reconcile_result` contract matches the `test_run_id`, robot, symbol,
+timeframe, and parameter fingerprint. Missing, malformed, stale, duplicate,
+or mismatched evidence remains unverified and cannot be associated as a
+successful test.
 
 The observed Golden JSON shape is supported: UTF-8 object, optional `stats`,
 metrics, symbol/timeframe, period fields, optional parameters, and optional

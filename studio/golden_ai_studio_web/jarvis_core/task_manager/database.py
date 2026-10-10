@@ -14,7 +14,7 @@ from ..runtime_ownership import describe_task_database
 
 
 class TaskDatabase:
-    SCHEMA_VERSION = 5
+    SCHEMA_VERSION = 7
 
     def __init__(self, path, runtime_classification="EXPLICIT_TEST_DATABASE"):
         self.requested_path = Path(path).expanduser()
@@ -40,6 +40,17 @@ class TaskDatabase:
         except Exception:
             database.rollback()
             raise
+        finally:
+            database.close()
+
+    @contextmanager
+    def read_only(self, rows=False):
+        database = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True, timeout=10)
+        if rows:
+            database.row_factory = sqlite3.Row
+        try:
+            database.execute("PRAGMA query_only=ON")
+            yield database
         finally:
             database.close()
 
@@ -160,6 +171,52 @@ class TaskDatabase:
                     db.execute("ALTER TABLE task_approvals ADD COLUMN decided_at REAL")
                 if "decided_by" not in columns:
                     db.execute("ALTER TABLE task_approvals ADD COLUMN decided_by TEXT")
+            db.execute("""CREATE TABLE IF NOT EXISTS golden_analysis_results(
+                analysis_id TEXT PRIMARY KEY,
+                schema_version INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                completed_at REAL NOT NULL,
+                created_at_raw TEXT NOT NULL,
+                completed_at_raw TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                provider_asset_id TEXT NOT NULL,
+                provider_symbol TEXT NOT NULL,
+                source_provider TEXT NOT NULL,
+                asset_class TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                analysis_mode TEXT NOT NULL,
+                analysis_style TEXT NOT NULL,
+                analysis_status TEXT NOT NULL,
+                result_kind TEXT NOT NULL,
+                snapshot_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                model_provider TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                result_sha256 TEXT NOT NULL
+            )""")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_golden_analysis_created "
+                       "ON golden_analysis_results(created_at DESC, analysis_id)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_golden_analysis_symbol "
+                       "ON golden_analysis_results(symbol, created_at DESC)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_golden_analysis_mode "
+                       "ON golden_analysis_results(analysis_mode, created_at DESC)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_golden_analysis_status "
+                       "ON golden_analysis_results(analysis_status, created_at DESC)")
+            db.execute("""CREATE TABLE IF NOT EXISTS golden_trend_scans(
+                scan_id TEXT PRIMARY KEY,
+                contract_version TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                universe_hash_client TEXT NOT NULL,
+                universe_hash_core TEXT NOT NULL,
+                state_sha256 TEXT NOT NULL,
+                state_json TEXT NOT NULL
+            )""")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_golden_trend_scans_actor "
+                       "ON golden_trend_scans(actor_id, updated_at DESC)")
             db.execute("DELETE FROM task_schema_version")
             db.execute("INSERT INTO task_schema_version(version) VALUES(?)", (self.SCHEMA_VERSION,))
 

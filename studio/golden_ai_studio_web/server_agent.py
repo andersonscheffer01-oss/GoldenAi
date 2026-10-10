@@ -17,7 +17,7 @@ from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from datetime import datetime
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 
 import numpy as _np
 
@@ -50,8 +50,10 @@ from jarvis_core.security import SecurityManager
 from jarvis_core.security_compatibility import ExecutionSecurityFacade
 from jarvis_core.gateway.auth import AuthManager
 from jarvis_core.http_perimeter import HttpPerimeter
+from jarvis_core.lifecycle import CoreLifecycle
 
 ACTIVE_RUNTIME_PROFILE = DEFAULT_PROFILE
+ACTIVE_CORE_LIFECYCLE = None
 
 # Legacy operational families remain available for compatibility, but are
 # frozen at the authenticated dispatcher until their canonical read/mutation
@@ -76,7 +78,8 @@ _canonical_audit = AuditLog(ROOT / "golden_runtime.db")
 _canonical_security = SecurityManager(audit_log=_canonical_audit)
 HTTP_AUTH_MANAGER = AuthManager()
 HTTP_PERIMETER = HttpPerimeter(
-    auth_manager=HTTP_AUTH_MANAGER, audit_log=_canonical_audit)
+    auth_manager=HTTP_AUTH_MANAGER, audit_log=_canonical_audit,
+    runtime_profile_provider=lambda: ACTIVE_RUNTIME_PROFILE)
 
 # Import Ollama
 try:
@@ -236,7 +239,6 @@ Usuario: "cotacao do dolar"
 {"tool":"run_backtest","symbol":"EURUSD","timeframe":"H1","period":"1Y","strategy":"moving_average"}
 {"tool":"list_strategies"}
 {"tool":"list_symbols"}
-{"tool":"crypto_price","coins":"bitcoin,ethereum"}
 {"tool":"analyze_strategy","triple_confluence":true,"filter_spread":true,"filter_hours":true,"adaptive_mode":true}
 {"tool":"optimize_strategy","symbol":"XAUUSD","timeframe":"M15"}
 {"tool":"compare_strategies"}
@@ -392,9 +394,15 @@ def call_gemini_model(api_messages, model_key, timeout=60):
         parts = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
         return "".join(str(p.get("text", "")) for p in parts)
     except urllib.error.HTTPError as e:
-        return "Erro Gemini: HTTP %s - %s" % (e.code, e.read().decode("utf-8", errors="replace")[:300])
-    except Exception as e:
-        return "Erro Gemini: %s" % str(e)
+        return "Erro Gemini: HTTP %s" % e.code
+    except (TimeoutError, urllib.error.URLError) as e:
+        if isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError):
+            return "Erro Gemini: TIMEOUT"
+        return "Erro Gemini: TRANSPORT_ERROR"
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+        return "Erro Gemini: RESPONSE_PARSE_ERROR"
+    except Exception:
+        return "Erro Gemini: INTERNAL_ERROR"
 
 
 def probe_groq_health(api_key, timeout=5):
@@ -517,12 +525,23 @@ def warm_jarvis_boot(skip_voice=False):
 
 class GoldenAIHandler(SimpleHTTPRequestHandler):
 
+    _JARVIS_SHELL_ASSETS = {
+        "/jarvis_ui/jarvis.html",
+        "/jarvis_ui/src/desktop-shell.js",
+        "/jarvis_ui/src/desktop-shell.css",
+    }
+
     def __init__(self, *args, **kwargs):
         web_dir = str(Path(__file__).parent.resolve())
         super().__init__(*args, directory=web_dir, **kwargs)
 
     def _request_path(self):
         return HTTP_PERIMETER.path_only(self.path)
+
+    def end_headers(self):
+        if self._request_path() in self._JARVIS_SHELL_ASSETS:
+            self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def _source_ip(self):
         try:
@@ -593,8 +612,11 @@ class GoldenAIHandler(SimpleHTTPRequestHandler):
         if path == "/health":
             if self._authorize_http("GET", path) is None:
                 return
-            self._send_json({"ok": True, "service": "golden-ai",
-                             "runtime_profile": ACTIVE_RUNTIME_PROFILE.name}, 200)
+            payload = {"ok": True, "service": "golden-ai",
+                       "runtime_profile": ACTIVE_RUNTIME_PROFILE.name}
+            if ACTIVE_CORE_LIFECYCLE is not None:
+                payload.update(ACTIVE_CORE_LIFECYCLE.snapshot())
+            self._send_json(payload, 200)
         elif path.startswith("/api/"):
             self.handle_api()
         elif path.startswith("/stream/"):
@@ -4476,6 +4498,7 @@ void OnTick()
                     'session': session,
                     'magic': magic,
                 }
+                journal.journal_file.parent.mkdir(parents=True, exist_ok=True)
                 with open(journal.journal_file, 'a', encoding='utf-8') as f:
                     f.write(json.dumps(entry_record, ensure_ascii=False) + '\n')
                 imported += 1
@@ -5300,7 +5323,16 @@ void OnTick()
             "/api/jarvis/chat": lambda d: self._api_jarvis_chat(d),
             "/api/jarvis/golden/overview": lambda d: self._api_jarvis_golden_overview(d),
             "/api/jarvis/golden/radar": lambda d: self._api_jarvis_golden_radar(d),
+            "/api/jarvis/golden/strategies": lambda d: self._execute_jarvis_read("golden_strategy_summary"),
+            "/api/jarvis/golden/statistics": lambda d: self._execute_jarvis_read("golden_statistics_snapshot"),
+            "/api/jarvis/golden/trade-history": lambda d: self._api_jarvis_golden_trade_history(d),
             "/api/jarvis/golden/market-intelligence": lambda d: self._api_jarvis_golden_market_intelligence(d),
+            "/api/jarvis/golden/symbol-discovery": lambda d: self._api_jarvis_golden_symbol_discovery(d),
+            "/api/jarvis/golden/market-data": lambda d: self._api_jarvis_golden_market_data(d),
+            "/api/jarvis/golden/trend-ranking": lambda d: self._api_jarvis_golden_trend_ranking(d),
+            "/api/jarvis/golden/trend-scan": lambda d: self._api_jarvis_golden_trend_scan(d),
+            "/api/jarvis/golden/market-live": lambda d: self._api_jarvis_golden_market_live(d),
+            "/api/jarvis/golden/panel-analysis": lambda d: self._api_jarvis_golden_panel_analysis(d),
             "/api/jarvis/golden/scanner": lambda d: self._api_jarvis_golden_scanner(d),
             "/api/jarvis/golden/robots": lambda d: self._api_jarvis_golden_robots(d),
             "/api/jarvis/golden/robot": lambda d: self._api_jarvis_golden_robot(d),
@@ -6055,6 +6087,324 @@ void OnTick()
             "correlation_id": context["correlation_id"],
         }, audit_context=context)
 
+    def _api_jarvis_golden_trade_history(self, data):
+        payload = data if isinstance(data, dict) else {}
+        context = self._legacy_audit_context(
+            payload, "control_center", "trade_journal_history")
+        limit = payload.get("limit", 10)
+        offset = payload.get("offset", 0)
+        if (isinstance(limit, bool) or not isinstance(limit, int)
+                or not 1 <= limit <= 10
+                or isinstance(offset, bool) or not isinstance(offset, int)
+                or not 0 <= offset < 10000):
+            return {"ok": False, "error_code": "INVALID_PAGINATION"}
+        return self._execute_jarvis_read("golden_trade_journal_history", {
+            "symbol": str(payload.get("symbol") or "")[:32],
+            "record_type": str(payload.get("record_type") or "ALL")[:40],
+            "limit": limit,
+            "offset": offset,
+            "date_from": payload.get("date_from", ""),
+            "date_to": payload.get("date_to", ""),
+            "exit_type": payload.get("exit_type", "ALL"),
+        }, audit_context=context)
+
+    def _api_jarvis_golden_panel_analysis(self, data):
+        payload = data if isinstance(data, dict) else {}
+        action = str(payload.get("action") or "ANALYZE").strip().upper()
+        context = self._legacy_audit_context(
+            payload, "control_center", "panel_analysis_" + action.lower())
+        if action == "GET":
+            analysis_id = payload.get("analysis_id")
+            if not isinstance(analysis_id, str) or not analysis_id.strip():
+                return {"ok": False, "status": "INVALID_REQUEST",
+                        "error_code": "ANALYSIS_ID_REQUIRED"}
+            return self._execute_jarvis_read("golden_panel_analysis_get", {
+                "analysis_id": analysis_id.strip()[:128],
+            }, audit_context=context)
+        if action == "LIST":
+            defaults = {"limit": 25, "offset": 0}
+            for key, default in defaults.items():
+                value = payload.get(key, default)
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return {"ok": False, "status": "INVALID_REQUEST",
+                            "error_code": "INVALID_PAGINATION"}
+            limit, offset = payload.get("limit", 25), payload.get("offset", 0)
+            if not 1 <= limit <= 50 or not 0 <= offset <= 100000:
+                return {"ok": False, "status": "INVALID_REQUEST",
+                        "error_code": "INVALID_PAGINATION"}
+            return self._execute_jarvis_read("golden_panel_analysis_list", {
+                "symbol": str(payload.get("symbol") or "")[:64],
+                "analysis_mode": str(payload.get("analysis_mode") or "")[:24],
+                "date_from": str(payload.get("date_from") or "")[:64],
+                "date_to": str(payload.get("date_to") or "")[:64],
+                "status": str(payload.get("status") or "")[:40],
+                "limit": limit, "offset": offset,
+            }, audit_context=context)
+        if action != "ANALYZE":
+            return {"ok": False, "status": "INVALID_REQUEST",
+                    "error_code": "INVALID_ANALYSIS_ACTION"}
+        return self._execute_jarvis_read("golden_panel_analysis", {
+            "symbol": str(payload.get("symbol") or ""),
+            "timeframe": str(payload.get("timeframe") or "M15"),
+            "provider": str(payload.get("provider") or ""),
+            "provider_asset_id": str(payload.get("provider_asset_id") or ""),
+            "provider_symbol": str(payload.get("provider_symbol") or ""),
+            "asset_class": str(payload.get("asset_class") or ""),
+            "analysis_mode": str(payload.get("analysis_mode") or "INDEPENDENT")[:24],
+            "request_type": str(payload.get("request_type") or "ON_DEMAND")[:24],
+            "analysis_style": str(payload.get("analysis_style") or "AUTO")[:24],
+            "strategy_id": str(payload.get("strategy_id") or "")[:96],
+            "correlation_id": context["correlation_id"],
+        }, audit_context=context)
+
+    def _api_jarvis_golden_symbol_discovery(self, data):
+        payload = data or {}
+        context = self._legacy_audit_context(payload, "control_center", "symbol_discovery")
+        return self._execute_jarvis_read("golden_panel_symbol_discovery", {
+            "query": str(payload.get("query") or "")[:64],
+            "asset_class": str(payload.get("asset_class") or "ALL")[:24],
+            "correlation_id": context["correlation_id"],
+        }, audit_context=context)
+
+    def _api_jarvis_golden_market_data(self, data):
+        payload = data or {}
+        context = self._legacy_audit_context(payload, "control_center", "panel_market_data")
+        return self._execute_jarvis_read("golden_panel_market_snapshot", {
+            "provider": str(payload.get("provider") or "")[:40],
+            "provider_asset_id": str(payload.get("provider_asset_id") or "")[:96],
+            "provider_symbol": str(payload.get("provider_symbol") or "")[:64],
+            "asset_class": str(payload.get("asset_class") or "")[:24],
+            "timeframe": str(payload.get("timeframe") or "M15")[:8],
+            "count": max(50, min(int(payload.get("count") or 120), 200)),
+            "correlation_id": context["correlation_id"],
+        }, audit_context=context)
+
+    def _api_jarvis_golden_trend_scan(self, data):
+        payload = data if isinstance(data, dict) else {}
+        action = str(payload.get("action") or "").upper()
+        context = self._legacy_audit_context(payload, "control_center", "trend_scan_" + action.lower())
+        if (context.get("route") != "/api/jarvis/golden/trend-scan"
+                or not str(context.get("actor_id") or "").startswith("device:")):
+            return {"ok": False, "status": "UNAUTHORIZED",
+                    "error_code": "DESKTOP_DEVICE_IDENTITY_REQUIRED"}
+        def execute_scan_tool(name, arguments):
+            try:
+                from desktop_center import DESKTOP_CENTER
+                return DESKTOP_CENTER.service.execute_tool(
+                    name, arguments, command="control_center_trend_scan",
+                    task_id="control_center", request_audit_context=context)
+            except Exception:
+                return {"ok": False, "status": "UNAVAILABLE",
+                        "error_code": "TREND_SCAN_TOOL_UNAVAILABLE"}
+        if action == "RECOVER":
+            return execute_scan_tool("golden_trend_scan_recover", {})
+        if action == "SAVE":
+            scan = payload.get("scan")
+            revision = payload.get("base_revision")
+            if (not isinstance(scan, dict) or not isinstance(revision, int)
+                    or isinstance(revision, bool)):
+                return {"ok": False, "status": "INVALID_REQUEST",
+                        "error_code": "INVALID_SCAN_PAYLOAD"}
+            return execute_scan_tool("golden_trend_scan_save", {
+                "scan": scan, "base_revision": revision,
+            })
+        if action == "APPLY_BATCH":
+            scan = payload.get("scan")
+            revision = payload.get("base_revision")
+            batch_index = payload.get("batch_index")
+            batch_asset_ids = payload.get("batch_asset_ids")
+            if (not isinstance(scan, dict) or not isinstance(revision, int)
+                    or isinstance(revision, bool) or not isinstance(batch_index, int)
+                    or isinstance(batch_index, bool) or not isinstance(batch_asset_ids, list)):
+                return {"ok": False, "status": "INVALID_REQUEST",
+                        "error_code": "INVALID_BATCH_PAYLOAD"}
+            return execute_scan_tool("golden_trend_scan_apply_batch", {
+                "scan": scan, "base_revision": revision,
+                "batch_index": batch_index, "batch_asset_ids": batch_asset_ids,
+            })
+        if action == "APPLY_BATCH_RESULTS":
+            scan_id = str(payload.get("scan_id") or "")[:80]
+            revision = payload.get("base_revision")
+            batch_index = payload.get("batch_index")
+            batch_asset_ids = payload.get("batch_asset_ids")
+            results = payload.get("results")
+            if (not scan_id or not isinstance(revision, int) or isinstance(revision, bool)
+                    or not isinstance(batch_index, int) or isinstance(batch_index, bool)
+                    or not isinstance(batch_asset_ids, list) or not isinstance(results, list)):
+                return {"ok": False, "status": "INVALID_REQUEST",
+                        "error_code": "INVALID_BATCH_RESULTS_PAYLOAD"}
+            return execute_scan_tool("golden_trend_scan_apply_batch_results", {
+                "scan_id": scan_id, "base_revision": revision,
+                "batch_index": batch_index, "batch_asset_ids": batch_asset_ids,
+                "results": results, "metadata": payload.get("metadata") or {},
+            })
+        if action == "RUN_MONITOR_BATCH":
+            scan_id = str(payload.get("scan_id") or "")[:80]
+            revision = payload.get("base_revision")
+            batch_index = payload.get("batch_index")
+            assets = payload.get("assets")
+            if (not scan_id or not isinstance(revision, int) or isinstance(revision, bool)
+                    or not isinstance(batch_index, int) or isinstance(batch_index, bool)
+                    or not isinstance(assets, list) or not 1 <= len(assets) <= 4):
+                return {"ok": False, "status": "INVALID_REQUEST",
+                        "error_code": "INVALID_MONITOR_BATCH_PAYLOAD"}
+            normalized_assets = []
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    return {"ok": False, "status": "INVALID_REQUEST",
+                            "error_code": "INVALID_MONITOR_ASSET"}
+                normalized_assets.append({key: str(asset.get(key) or "")[:120]
+                                          for key in ("provider", "provider_asset_id",
+                                                      "provider_symbol", "display_symbol",
+                                                      "display_name", "asset_class")})
+            return execute_scan_tool("golden_trend_scan_monitor_batch", {
+                "scan_id": scan_id, "base_revision": revision,
+                "batch_index": batch_index, "assets": normalized_assets,
+            })
+        if action in {"GET_MONITOR_STATUS", "START_MONITOR"}:
+            tool_name = ("golden_trend_monitor_status" if action == "GET_MONITOR_STATUS"
+                         else "golden_trend_monitor_start")
+            return execute_scan_tool(tool_name, {})
+        return {"ok": False, "status": "INVALID_REQUEST",
+                "error_code": "INVALID_SCAN_ACTION"}
+
+    def _api_jarvis_golden_trend_ranking(self, data):
+        payload = data if isinstance(data, dict) else {}
+        context = self._legacy_audit_context(payload, "control_center", "panel_trend_ranking")
+        rows = payload.get("assets") if isinstance(payload.get("assets"), list) else []
+        if len(rows) > 4:
+            return {"ok": False, "status": "INVALID_BATCH_SIZE",
+                    "maximum_assets": 4, "execution_authority": "NONE"}
+        assets = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            assets.append({key: str(row.get(key) or "")[:120] for key in
+                           ("provider", "provider_asset_id", "provider_symbol",
+                            "display_symbol", "display_name", "asset_class")})
+        correlation_id = str(payload.get("correlation_id") or context["correlation_id"])[:128]
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", correlation_id):
+            return {"ok": False, "status": "INVALID_CORRELATION_ID",
+                    "execution_authority": "NONE"}
+        context["correlation_id"] = correlation_id
+        if any(isinstance(payload.get(key), bool) for key in
+               ("universe_total", "batch_index", "batch_total")):
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        try:
+            universe_total = int(payload.get("universe_total", len(assets)))
+            batch_index = int(payload.get("batch_index", 0))
+            batch_total = int(payload.get("batch_total", 1))
+        except (TypeError, ValueError):
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        batch_asset_ids = payload.get("batch_asset_ids")
+        if batch_asset_ids is None:
+            batch_asset_ids = [asset["provider_asset_id"] for asset in assets]
+        batch_asset_ids = [str(value)[:96] for value in batch_asset_ids] \
+            if isinstance(batch_asset_ids, list) else []
+        actual_asset_ids = [asset["provider_asset_id"] for asset in assets]
+        if (not 1 <= len(assets) <= 4 or not 1 <= universe_total <= 50000
+                or batch_index < 0 or batch_index > 100000
+                or batch_total != (universe_total + 3) // 4
+                or len(batch_asset_ids) != len(assets)
+                or len(set(batch_asset_ids)) != len(batch_asset_ids)
+                or set(batch_asset_ids) != set(actual_asset_ids)):
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        scan_id = str(payload.get("scan_id") or "LEGACY_UNTRACKED")[:80]
+        universe_hash = str(payload.get("universe_hash") or "UNKNOWN").lower()[:64]
+        if scan_id != "LEGACY_UNTRACKED" and not re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                scan_id.lower()):
+            return {"ok": False, "status": "INVALID_SCAN_ID",
+                    "execution_authority": "NONE"}
+        if universe_hash != "UNKNOWN" and not re.fullmatch(r"[0-9a-f]{64}", universe_hash):
+            return {"ok": False, "status": "INVALID_UNIVERSE_HASH",
+                    "execution_authority": "NONE"}
+        asset_class_filter = str(payload.get("asset_class_filter") or "ALL").upper()
+        if asset_class_filter not in {"ALL", "FOREX", "INDICES", "STOCKS", "ETF",
+                                      "CRYPTO", "COMMODITIES_METALS", "OTHER_UNKNOWN"}:
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        raw_exclusions = payload.get("excluded_reason_counts")
+        exclusion_keys = {"NON_CANONICAL_MT5_IDENTITY", "UNSUPPORTED_ASSET_CLASS",
+                          "DUPLICATE_PROVIDER_ASSET_ID"}
+        if raw_exclusions is None:
+            raw_exclusions = {}
+        if (not isinstance(raw_exclusions, dict)
+                or any(key not in exclusion_keys
+                       or isinstance(value, bool) or not isinstance(value, int) or value < 0
+                       for key, value in raw_exclusions.items())):
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        excluded_count = sum(raw_exclusions.values())
+        supplied_excluded_count = payload.get("excluded_count", excluded_count)
+        if (isinstance(supplied_excluded_count, bool)
+                or not isinstance(supplied_excluded_count, int)
+                or excluded_count > 50000 or supplied_excluded_count != excluded_count):
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        catalog_source = str(payload.get("catalog_source") or "UNKNOWN")[:48]
+        if catalog_source not in {"UNKNOWN", "AUTHENTICATED_MT5_SYMBOL_DISCOVERY"}:
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        raw_catalog = payload.get("catalog_observation") or {}
+        allowed_catalog_counts = {"FOREX", "METALS", "CRYPTO", "INDICES",
+                                  "STOCKS", "ETF", "COMMODITIES", "OTHER", "OTHER_UNKNOWN"}
+        if not isinstance(raw_catalog, dict):
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        raw_counts = raw_catalog.get("classification_counts") or {}
+        if (not isinstance(raw_counts, dict)
+                or any(key not in allowed_catalog_counts
+                       or isinstance(value, bool) or not isinstance(value, int) or value < 0
+                       for key, value in raw_counts.items())):
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        catalog_enumerated = raw_catalog.get("enumerated_count")
+        if (catalog_enumerated is not None and
+                (isinstance(catalog_enumerated, bool) or not isinstance(catalog_enumerated, int)
+                 or catalog_enumerated < 0 or catalog_enumerated > 50000)):
+            return {"ok": False, "status": "INVALID_SCAN_METADATA",
+                    "execution_authority": "NONE"}
+        catalog_observation = {
+            "status": str(raw_catalog.get("status") or "UNKNOWN")[:48],
+            "observed_at": str(raw_catalog.get("observed_at") or "UNKNOWN")[:48],
+            "enumerated_count": catalog_enumerated,
+            "classification_counts": raw_counts,
+        }
+        retry_of_failed_assets = payload.get("retry_of_failed_assets") is True
+        scan_metadata = {
+            "scan_id": scan_id, "universe_hash": universe_hash,
+            "asset_class_filter": asset_class_filter,
+            "universe_total": universe_total, "batch_index": batch_index,
+            "batch_total": batch_total, "batch_asset_ids": batch_asset_ids,
+            "excluded_count": excluded_count,
+            "excluded_reason_counts": raw_exclusions,
+            "catalog_source": catalog_source,
+            "catalog_observation": catalog_observation,
+            "retry_of_failed_assets": retry_of_failed_assets,
+            "hash_verification": "CLIENT_PROVIDED_NOT_RECOMPUTED_BY_CORE",
+        }
+        context["metadata"] = {**(context.get("metadata") or {}), **scan_metadata}
+        return self._execute_jarvis_read("golden_panel_trend_ranking", {
+            "assets": assets, "correlation_id": correlation_id,
+            "scan_metadata": scan_metadata,
+        }, audit_context=context)
+
+    def _api_jarvis_golden_market_live(self, data):
+        payload = data or {}
+        context = self._legacy_audit_context(payload, "control_center", "panel_market_live")
+        return self._execute_jarvis_read("golden_panel_market_update", {
+            "provider": str(payload.get("provider") or "")[:40],
+            "provider_asset_id": str(payload.get("provider_asset_id") or "")[:96],
+            "provider_symbol": str(payload.get("provider_symbol") or "")[:64],
+            "asset_class": str(payload.get("asset_class") or "")[:24],
+            "timeframe": str(payload.get("timeframe") or "M15")[:8],
+            "correlation_id": context["correlation_id"],
+        }, audit_context=context)
+
     def _api_jarvis_golden_radar(self, data):
         payload = data or {}
         return self._execute_jarvis_read("golden_radar_detail", {
@@ -6535,6 +6885,7 @@ void OnTick()
                             projects.append({"name": f.name, "path": str(f), "size": f.stat().st_size, "ext": f.suffix})
                         except:
                             pass
+
         # Also check MT5
         mt5_common = Path(r"C:\Users\Anderson\AppData\Roaming\MetaQuotes\Terminal")
         if mt5_common.exists():
@@ -6895,7 +7246,7 @@ void OnTick()
 
 
 def start_server(port=8765, runtime_profile=None):
-    global ACTIVE_RUNTIME_PROFILE
+    global ACTIVE_RUNTIME_PROFILE, ACTIVE_CORE_LIFECYCLE
     ACTIVE_RUNTIME_PROFILE = resolve_runtime_profile(runtime_profile)
     from desktop_center import DESKTOP_CENTER
     DESKTOP_CENTER.service.apply_runtime_profile(ACTIVE_RUNTIME_PROFILE)
@@ -6913,11 +7264,29 @@ def start_server(port=8765, runtime_profile=None):
     class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
 
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.additional_servers = []
+
+        def shutdown(self):
+            for additional in self.additional_servers:
+                additional.shutdown()
+            super().shutdown()
+
+        def server_close(self):
+            for additional in self.additional_servers:
+                try:
+                    additional.shutdown()
+                finally:
+                    additional.server_close()
+            super().server_close()
+
     # LAN mode configuration
     from jarvis_core.lan_config import get_lan_config
     _lan = get_lan_config()
     HTTP_PERIMETER.set_lan_config(_lan)
-    _http_host = _lan.bind_address
+    _http_hosts = _lan.http_bind_addresses()
+    _http_host = _http_hosts[0]
     _gateway_host = _lan.bind_address
 
     # SSL configuration (FAIL CLOSED)
@@ -6973,7 +7342,7 @@ def start_server(port=8765, runtime_profile=None):
     print(f'  Dashboard: {_scheme}://{_http_host}:{port}/dashboard.html')
     print(f'  Studio:    {_scheme}://{_http_host}:{port}/studio_v7.html')
     if _lan.enabled:
-        print(f'  LAN Mode:  ENABLED ({_http_host})')
+        print('  LAN Mode:  ENABLED (%s)' % ', '.join(_http_hosts[1:]))
     else:
         print(f'  LAN Mode:  OFF (localhost only)')
     if _ssl_enabled:
@@ -6986,8 +7355,32 @@ def start_server(port=8765, runtime_profile=None):
     
     # Create server with optional SSL
     server = ThreadedHTTPServer((_http_host, port), GoldenAIHandler)
+    additional_threads = []
+    if len(_http_hosts) > 1:
+        for host in _http_hosts[1:]:
+            additional = ThreadedHTTPServer((host, port), GoldenAIHandler)
+            server.additional_servers.append(additional)
+            additional_threads.append(Thread(
+                target=additional.serve_forever,
+                name='jarvis-http-lan', daemon=True,
+            ))
     if _ssl_context:
         server.socket = _ssl_context.wrap_socket(server.socket, server_side=True)
+        for additional in server.additional_servers:
+            additional.socket = _ssl_context.wrap_socket(
+                additional.socket, server_side=True)
+    for listener_thread in additional_threads:
+        listener_thread.start()
+    ACTIVE_CORE_LIFECYCLE = CoreLifecycle(
+        runtime_profile=ACTIVE_RUNTIME_PROFILE.name,
+        auth_manager=HTTP_AUTH_MANAGER,
+        security_manager=_canonical_security,
+        audit_log=_canonical_audit,
+        pid=os.getpid(),
+        parent_pid=os.getppid(),
+        market_live_available=hasattr(
+            GoldenAIHandler, "_api_jarvis_golden_market_live"),
+    )
 
     if ACTIVE_RUNTIME_PROFILE.monitor_enabled:
         try:
@@ -7059,10 +7452,15 @@ def start_server(port=8765, runtime_profile=None):
             extra_hosts=_gw_extra_hosts,
             ssl_context=_ssl_context,  # None if SSL disabled
             auth_manager=HTTP_AUTH_MANAGER,
+            runtime_metadata_provider=ACTIVE_CORE_LIFECYCLE.snapshot,
+            lifecycle_controller=ACTIVE_CORE_LIFECYCLE,
+            lifecycle_server=server,
         )
 
         # Connect device pairing
         _pairing = get_device_pairing_service()
+        _pairing.set_audit_context(
+            _canonical_audit, ACTIVE_CORE_LIFECYCLE.snapshot)
         _pairing.start()
         _gateway_instance.set_device_pairing(_pairing)
         _gateway_instance.set_lan_config(_lan)
@@ -7133,6 +7531,7 @@ def start_server(port=8765, runtime_profile=None):
             server.server_close()
         except Exception:
             pass
+        ACTIVE_CORE_LIFECYCLE = None
 
 
 if __name__ == "__main__":

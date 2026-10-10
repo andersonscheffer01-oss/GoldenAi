@@ -36,10 +36,8 @@ class _NumpyEncoder(json.JSONEncoder):
 # ═══════════════════════════════════════════════════════════════
 
 DATA_DIR = Path(r"C:\GoldenAI\data\statistics")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 JOURNAL_DIR = Path(r"C:\GoldenAI\data\trade_journal")
-JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -88,6 +86,7 @@ class StatisticsEngine:
 
     def _save_cached_stats(self, stats):
         """Salva estatisticas em cache"""
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = DATA_DIR / "cached_stats.json"
         with open(cache_file, 'w', encoding='utf-8') as f:
             json.dump(stats, f, ensure_ascii=False, indent=2, cls=_NumpyEncoder)

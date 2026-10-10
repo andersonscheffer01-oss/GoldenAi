@@ -663,6 +663,7 @@ class TestGatewayIntegration:
         """Health endpoint returns status."""
         mock_service = MagicMock()
         mock_service.status.return_value = {"state": "idle"}
+        mock_service.runtime_profile.name = "default"
         gw = Gateway(mock_service)
 
         # Mock request
@@ -673,6 +674,7 @@ class TestGatewayIntegration:
         data = json.loads(response.body)
         assert data["ok"] is True
         assert data["gateway"] == "running"
+        assert data["runtime_profile"] == "default"
 
     def test_message_flood_limited(self):
         """Auth failures are rate limited."""

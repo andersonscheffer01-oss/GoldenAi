@@ -533,7 +533,7 @@ class JarvisBrain:
         return messages
 
     def _call_llm(self, user_input, memory_context="", source="text", voice_capture=False,
-                  conversation_history=None, market_context=None):
+                  conversation_history=None, market_context=None, one_shot=False):
         if "llm_calls_before_tool" not in self.last_metrics:
             self._reset_metrics()
         profile = (self.orchestrator.last_decision.preferred_model_profile
@@ -566,10 +566,12 @@ class JarvisBrain:
         register_local_ollama_adapter(self.orchestrator.models)
         classification = (self.orchestrator.last_decision.data_classification
                           if self.orchestrator.last_decision else None)
+        router_options = {"timeout": self.timeout}
+        if one_shot:
+            router_options["one_shot"] = True
         result = self.orchestrator.models.execute(
             messages, profile=profile or _MP.GENERAL,
-            classification=classification or _DC.INTERNAL,
-            timeout=self.timeout)
+            classification=classification or _DC.INTERNAL, **router_options)
         self.last_llm = {"provider_requested": "groq" if (profile or _MP.GENERAL) == _MP.VOICE_FAST else "",
                          "model_requested": "qwen/qwen3.8-27b" if (profile or _MP.GENERAL) == _MP.VOICE_FAST else "",
                          "provider": result.provider, "model": result.model,
@@ -599,7 +601,8 @@ class JarvisBrain:
                 "fallback": result.fallback_used, "latency_ms": result.latency_ms}
 
     def generate_response(self, user_input, source="text", conversation_history=None,
-                          market_context=None):
+                          market_context=None, include_memory_context=True,
+                          record_history=True, one_shot=False):
         """Generate a grounded text response through the canonical ModelRouter.
 
         This path deliberately disables tool proposals. Market Chat and Deep
@@ -618,16 +621,20 @@ class JarvisBrain:
         self.last_metrics.update({"route": decision.route.value,
                                   "intent": decision.intent,
                                   "conceptual": decision.intent == "conceptual_question"})
-        memory_context = self._get_memory_context(
+        memory_context = (self._get_memory_context(
             user_input, source=source,
             profile=decision.preferred_model_profile)
+            if include_memory_context else "")
         previous_tools = self._allowed_tools
         self._allowed_tools = set()
+        llm_options = {}
+        if one_shot:
+            llm_options["one_shot"] = True
         try:
             result = self._call_llm(
                 user_input, memory_context, source=source,
                 conversation_history=conversation_history,
-                market_context=market_context)
+                market_context=market_context, **llm_options)
         finally:
             self._allowed_tools = previous_tools
         if not result.get("ok"):
@@ -648,9 +655,10 @@ class JarvisBrain:
         self.last_metrics["llm_result_type"] = "CONVERSATION"
         self.state = BrainState.IDLE
         self.last_result = plan
-        self.history.append({"time": time.time(), "input": user_input,
-                             "plan": plan, "source": source})
-        self.history = self.history[-12:]
+        if record_history:
+            self.history.append({"time": time.time(), "input": user_input,
+                                 "plan": plan, "source": source})
+            self.history = self.history[-12:]
         return {"ok": True, "response": str(plan["response"]),
                 "provider": result.get("provider", ""),
                 "model": result.get("model", ""),

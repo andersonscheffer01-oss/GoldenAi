@@ -203,7 +203,8 @@ class TestExistingPluginLoads:
         plugins = reg.list_plugins()
         names = [p["name"] for p in plugins]
 
-        assert "crypto_price" in names or "system_info_detailed" in names
+        assert "crypto_price" not in names
+        assert names
 
     def test_loaded_plugin_has_required_fields(self):
         """Plugin carregado tem todos os campos obrigatórios."""
@@ -627,12 +628,10 @@ class TestExistingPluginsBackwardCompatible:
         """execute() funciona igual ao comportamento original."""
         real_plugins_dir = str(GOLDEN_ROOT / "plugins")
         reg = PluginRegistry(real_plugins_dir)
-        # crypto_price ou system_info_detailed
-        for name in ["crypto_price", "system_info_detailed"]:
-            plugin = reg.get(name)
-            if plugin:
-                result = reg.execute(name, {})
-                assert isinstance(result, dict)
+        assert reg.get("crypto_price") is None
+        plugin = reg.get("system_info_detailed")
+        if plugin:
+            assert isinstance(reg.execute("system_info_detailed", {}), dict)
 
     def test_singleton_pattern(self):
         """get_plugin_registry retorna singleton."""
@@ -790,72 +789,11 @@ class TestBackupExclusion:
 class TestLegacyPluginValidation:
     """Validação completa dos plugins legados."""
 
-    def test_crypto_price_discovery(self):
-        """crypto_price.py é descoberto."""
+    def test_external_crypto_price_plugin_is_not_discovered(self):
         real_plugins_dir = str(GOLDEN_ROOT / "plugins")
         reg = PluginRegistry(real_plugins_dir)
-        plugin = reg.get("crypto_price")
-        assert plugin is not None
-        assert plugin.name == "crypto_price"
-        assert "cripto" in plugin.description.lower() or "crypto" in plugin.description.lower()
-
-    def test_crypto_price_registration(self):
-        """crypto_price está registrado no registry."""
-        real_plugins_dir = str(GOLDEN_ROOT / "plugins")
-        reg = PluginRegistry(real_plugins_dir)
-        plugins = reg.list_plugins()
-        names = [p["name"] for p in plugins]
-        assert "crypto_price" in names
-
-    def test_crypto_price_tool_format(self):
-        """crypto_price aparece em list_tools no formato correto."""
-        real_plugins_dir = str(GOLDEN_ROOT / "plugins")
-        reg = PluginRegistry(real_plugins_dir)
-        tools = reg.list_tools()
-        crypto_tools = [t for t in tools if t["function"]["name"] == "crypto_price"]
-        assert len(crypto_tools) == 1
-        tool = crypto_tools[0]
-        assert tool["type"] == "function"
-        assert "description" in tool["function"]
-        assert "parameters" in tool["function"]
-
-    def test_crypto_price_enable_disable(self):
-        """crypto_price pode ser habilitado/desabilitado."""
-        real_plugins_dir = str(GOLDEN_ROOT / "plugins")
-        reg = PluginRegistry(real_plugins_dir)
-        assert reg.disable("crypto_price") is True
-        plugin = reg.get("crypto_price")
-        assert plugin.enabled is False
-        tools = reg.list_tools()
-        names = [t["function"]["name"] for t in tools]
-        assert "crypto_price" not in names
-        assert reg.enable("crypto_price") is True
-        assert plugin.enabled is True
-
-    def test_crypto_price_lifecycle_compatibility(self):
-        """crypto_price funciona com lifecycle V2 (start/stop/health)."""
-        real_plugins_dir = str(GOLDEN_ROOT / "plugins")
-        reg = PluginRegistry(real_plugins_dir)
-        # start em plugin legado (sem plugin_start fn)
-        result = reg.start("crypto_price")
-        assert result is True
-        plugin = reg.get("crypto_price")
-        assert plugin.state == PluginState.RUNNING
-        # health
-        health = reg.health_check("crypto_price")
-        assert health.status == PluginHealthStatus.OK
-        # stop
-        result = reg.stop("crypto_price")
-        assert result is True
-        assert plugin.state == PluginState.STOPPED
-
-    def test_crypto_price_no_duplicate_registration(self):
-        """crypto_price não é registrado duas vezes."""
-        real_plugins_dir = str(GOLDEN_ROOT / "plugins")
-        reg = PluginRegistry(real_plugins_dir)
-        tools = reg.list_tools()
-        crypto_count = len([t for t in tools if t["function"]["name"] == "crypto_price"])
-        assert crypto_count == 1
+        assert reg.get("crypto_price") is None
+        assert "crypto_price" not in [tool["function"]["name"] for tool in reg.list_tools()]
 
     def test_system_info_discovery(self):
         """system_info.py é descoberto (mesmo que falhe por psutil)."""
@@ -867,6 +805,5 @@ class TestLegacyPluginValidation:
         """Falha de system_info (psutil) não afeta outros plugins."""
         real_plugins_dir = str(GOLDEN_ROOT / "plugins")
         reg = PluginRegistry(real_plugins_dir)
-        # system_info pode falhar, mas crypto_price deve funcionar
-        result = reg.execute("crypto_price", {})
+        result = reg.execute("system_info_detailed", {})
         assert isinstance(result, dict)

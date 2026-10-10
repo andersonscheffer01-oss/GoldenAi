@@ -493,20 +493,6 @@ def _mt5_snapshot(mt5_enabled=None):
     except Exception as exc:
         return [], str(exc)
 
-def _coingecko_snapshot():
-    url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum&sparkline=true&price_change_percentage=24h"
-    try:
-        request = urllib.request.Request(url, headers={"User-Agent": "GoldenAI/1.0"})
-        with urllib.request.urlopen(request, timeout=6) as response:
-            payload = json.load(response)
-        return [{"group": "Cripto", "symbol": item["symbol"].upper(), "name": item["name"],
-                 "price": float(item.get("current_price") or 0),
-                 "change": round(float(item.get("price_change_percentage_24h") or 0), 3),
-                 "series": [round(float(x), 4) for x in item.get("sparkline_in_7d", {}).get("price", [])[-32:]],
-                 "source": "CoinGecko", "status": "live"} for item in payload], None
-    except Exception as exc:
-        return [], str(exc)
-
 def _gold_levels(mt5_enabled=None):
     """Classic daily pivot levels calculated from the previous closed XAUUSD candle."""
     if not _mt5_enabled(mt5_enabled):
@@ -671,11 +657,10 @@ def _economic_calendar():
 
 def get_market_overview(mt5_enabled=None):
     mt5_rows, mt5_error = _mt5_snapshot(mt5_enabled=mt5_enabled)
-    crypto_rows, crypto_error = _coingecko_snapshot()
     te_ready = bool(os.getenv("TRADING_ECONOMICS_KEY"))
     td_ready = bool(os.getenv("TWELVE_DATA_API_KEY"))
     news, news_source = _market_news()
-    assets = mt5_rows + crypto_rows
+    assets = mt5_rows
     calendar, calendar_state = _economic_calendar()
     return {"ok": bool(assets), "updated_at": datetime.now(timezone.utc).isoformat(),
             "assets": assets, "gold_levels": _gold_levels(mt5_enabled=mt5_enabled),
@@ -684,7 +669,6 @@ def get_market_overview(mt5_enabled=None):
             "economic_calendar": calendar, "calendar_state": calendar_state,
             "sources": [
                 {"name": "MetaTrader 5", "state": "online" if mt5_rows else "offline", "detail": mt5_error or "Cotacoes da corretora"},
-                {"name": "CoinGecko", "state": "online" if crypto_rows else "offline", "detail": crypto_error or "Cripto publico"},
                 {"name": "Trading Economics", "state": "ready" if te_ready else "configure", "detail": "Calendario economico"},
                 {"name": "Twelve Data", "state": "ready" if td_ready else "configure", "detail": "Cobertura multiativos"},
             ], "configured": {"trading_economics": te_ready, "twelve_data": td_ready}}

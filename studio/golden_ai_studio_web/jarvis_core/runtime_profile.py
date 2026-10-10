@@ -16,6 +16,8 @@ class RuntimeProfile:
     security_enabled: bool = True
     audit_enabled: bool = True
     market_read_models_enabled: bool = True
+    market_data_read_enabled: bool = False
+    mt5_market_data_read_enabled: bool = False
     mt5_enabled: bool = True
     voice_enabled: bool = True
     trading_enabled: bool = True
@@ -34,6 +36,10 @@ class RuntimeProfile:
             "audit": "ENABLED" if self.audit_enabled else "DISABLED_BY_PROFILE",
             "market_read_models": (
                 "ENABLED" if self.market_read_models_enabled else "DISABLED_BY_PROFILE"),
+            "market_data_read": (
+                "ENABLED" if self.market_data_read_enabled else "DISABLED_BY_PROFILE"),
+            "mt5_market_data_read": (
+                "ENABLED" if self.mt5_market_data_read_enabled else "DISABLED_BY_PROFILE"),
             "mt5": "ENABLED" if self.mt5_enabled else "DISABLED_BY_PROFILE",
             "voice": "ENABLED" if self.voice_enabled else "DISABLED_BY_PROFILE",
             "trading": "ENABLED" if self.trading_enabled else "DISABLED_BY_PROFILE",
@@ -45,13 +51,22 @@ class RuntimeProfile:
 
     def tool_disabled_reason(self, tool_name: str) -> str:
         name = str(tool_name or "").lower()
+        if name in {"golden_panel_market_snapshot", "golden_panel_market_update",
+                    "golden_panel_analysis", "golden_panel_symbol_discovery"} and not self.market_data_read_enabled:
+            return "MARKET_DATA_READ_DISABLED_BY_PROFILE"
         if not self.mt5_enabled and (
                 name.startswith("mt5_") or name in {"golden_mt5_read_snapshot"}):
             return "MT5_DISABLED_BY_PROFILE"
         if not self.strategy_tester_enabled and name.startswith("strategy_tester"):
             return "STRATEGY_TESTER_DISABLED_BY_PROFILE"
-        if not self.trading_enabled and (
-                "order" in name or "position" in name or "trade" in name):
+        # This exact capability is an allowlisted Journal read, not trade authority.
+        # JarvisService registers it READ_ONLY and requires per-request human approval.
+        if name == "golden_trade_journal_history":
+            return ""
+        if not self.trading_enabled and any(
+                marker in name for marker in
+                ("order", "position", "trade", "autotrading", "auto_trading",
+                 "broker_mutation")):
             return "TRADING_DISABLED_BY_PROFILE"
         return ""
 
@@ -92,6 +107,8 @@ class RuntimeProfile:
 DEFAULT_PROFILE = RuntimeProfile(name="default")
 WEB_AI_SAFE_PROFILE = RuntimeProfile(
     name="web-ai-safe",
+    market_data_read_enabled=True,
+    mt5_market_data_read_enabled=True,
     mt5_enabled=False,
     voice_enabled=False,
     trading_enabled=False,

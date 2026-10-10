@@ -300,6 +300,13 @@ class LanConfig:
     def bind_address(self) -> str:
         return self._bind_address
 
+    def http_bind_addresses(self) -> Tuple[str, ...]:
+        """Keep local Desktop access while retaining the explicit LAN listener."""
+        hosts = ["127.0.0.1"]
+        if self._enabled and self._bind_address not in hosts:
+            hosts.append(self._bind_address)
+        return tuple(hosts)
+
     @property
     def gateway_port(self) -> int:
         return self._gateway_port

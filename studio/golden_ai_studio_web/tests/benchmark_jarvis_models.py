@@ -19,6 +19,7 @@ Marcado como: BENCHMARK/MANUAL — nunca importado pela suíte de testes.
 """
 
 import json
+import os
 import sys
 import tempfile
 import time
@@ -79,9 +80,20 @@ SYSTEM_PROMPT = (
 # PROVIDERS (chamam as APIs diretamente; usam mecanismo existente)
 # ═══════════════════════════════════════════════════════════════
 def _load_key(name):
-    from pathlib import Path as P
-    cfg = P(r"C:\GoldenAI\config\api_keys.json")
-    return json.loads(cfg.read_text(encoding="utf-8")).get(name, "")
+    from jarvis_core.config import resolve_api_key
+
+    identities = {
+        "gemini_api_key": ("GEMINI_API_KEY", "gemini_api_key"),
+        "groq_api_key": ("GROQ_API_KEY", "groq_api_key"),
+        "openrouter_api_key": ("OPENROUTER_API_KEY", "openrouter_api_key"),
+    }
+    identity = identities.get(name)
+    if identity is None:
+        raise ValueError("unknown benchmark provider key")
+    value = resolve_api_key(*identity)
+    if not value:
+        raise RuntimeError("provider key unavailable")
+    return value
 
 
 def _post_with_retry(req_builder, timeout):
@@ -429,9 +441,8 @@ def main():
 # ═══════════════════════════════════════════════════════════════
 def call_gemini(model, user, timeout, system=None):
     t0 = time.time()
-    url = ("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s"
-           % (urllib.parse.quote(model, safe=""),
-              urllib.parse.quote(_load_key('gemini_api_key'), safe="")))
+    url = ("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
+           % urllib.parse.quote(model, safe=""))
     payload = {
         "systemInstruction": {"parts": [{"text": system or R2_SYSTEM}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
@@ -439,7 +450,8 @@ def call_gemini(model, user, timeout, system=None):
     }
     body = json.dumps(payload).encode()
     d = _post_with_retry(lambda: urllib.request.Request(url, data=body,
-        headers={"Content-Type": "application/json"}), timeout)
+        headers={"Content-Type": "application/json",
+                 "x-goog-api-key": _load_key("gemini_api_key")}), timeout)
     parts = d.get("candidates", [{}])[0].get("content", {}).get("parts", [])
     return "".join(str(p.get("text", "")) for p in parts), time.time() - t0, "cloud"
 
@@ -666,6 +678,10 @@ def _dump_r2(out):
 
 
 if __name__ == "__main__":
+    if os.environ.get("GOLDEN_ALLOW_LIVE_MODEL_BENCHMARK") != "1":
+        print("BLOQUEADO: benchmark pode chamar providers reais. "
+              "Defina GOLDEN_ALLOW_LIVE_MODEL_BENCHMARK=1 conscientemente para liberar.")
+        raise SystemExit(2)
     if len(sys.argv) > 1 and sys.argv[1].lower() == "r2":
         print("BENCHMARK/MANUAL — RODADA 2 (ORCHESTRATOR).")
         _tag = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -682,4 +698,3 @@ if __name__ == "__main__":
     else:
         print("BENCHMARK/MANUAL — não faz parte da suíte de testes.")
         main()
-

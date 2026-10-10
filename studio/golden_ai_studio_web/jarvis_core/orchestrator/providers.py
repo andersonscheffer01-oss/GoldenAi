@@ -1,5 +1,6 @@
 """Adapters finos sobre clientes existentes; não executam ferramentas."""
 import json
+import inspect
 import os
 import re
 import time
@@ -12,9 +13,10 @@ from .models import ProviderState
 
 
 class ProviderCallError(RuntimeError):
-    def __init__(self, message, status_code=None):
+    def __init__(self, message, status_code=None, error_code=""):
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = str(error_code or "")
 
 
 def _env_enabled(name):
@@ -204,28 +206,44 @@ def _raise_text_error(value):
     if not text.lower().startswith(("erro groq:", "erro gemini:", "erro openrouter:")):
         return value
     match = re.search(r"HTTP\s+(\d+)", text, re.I)
-    raise ProviderCallError(text[:500], int(match.group(1)) if match else None)
+    if match:
+        raise ProviderCallError("Provider HTTP failure.", int(match.group(1)))
+    upper = text.upper()
+    if "TIMEOUT" in upper or "TIMED OUT" in upper:
+        raise TimeoutError("provider timeout")
+    if "AUTH_NOT_CONFIGURED" in upper or "API KEY NAO CONFIGURADA" in upper:
+        raise ProviderCallError("Provider authentication is not configured.", 401)
+    if "RESPONSE_PARSE_ERROR" in upper:
+        raise ProviderCallError("Provider response parsing failed.",
+                                error_code="INTEGRATION_OR_PARSING")
+    if "TRANSPORT_ERROR" in upper:
+        raise ProviderCallError("Provider transport failed.",
+                                error_code="PROVIDER_TRANSPORT_FAILURE")
+    raise ProviderCallError("Provider integration failed.",
+                            error_code="PROVIDER_OR_INTEGRATION_FAILURE")
 
 
 def build_real_adapters(groq_call=None, gemini_call=None):
     adapters = []
     if groq_call:
+        groq_signature = _accepts_timeout(groq_call)
         def groq(payload, model, timeout):
             keys = {"qwen/qwen3.8-27b": "groq-llama",
                     "groq/compound-mini": "groq-fast",
                     "openai/gpt-oss-120b": "groq-reasoning"}
-            try:
+            if groq_signature:
                 value = groq_call(payload, keys.get(model, "groq-fast"), timeout=timeout,
                                   stream=model in {"qwen/qwen3.8-27b", "groq/compound-mini"})
-            except TypeError:
+            else:
                 value = groq_call(payload, keys.get(model, "groq-fast"))
             return value if isinstance(value, dict) and "text" in value else _raise_text_error(value)
         adapters.append(ProviderAdapter("groq", groq, cloud=True))
     if gemini_call:
+        gemini_signature = _accepts_timeout(gemini_call)
         def gemini(payload, model, timeout):
-            try:
+            if gemini_signature:
                 value = gemini_call(payload, model, timeout=timeout)
-            except TypeError:
+            else:
                 value = gemini_call(payload, model)
             return _raise_text_error(value)
         adapters.append(ProviderAdapter("gemini", gemini, cloud=True))
@@ -247,6 +265,17 @@ def build_real_adapters(groq_call=None, gemini_call=None):
     except Exception:
         pass
     return adapters
+
+
+def _accepts_timeout(callback):
+    """Choose callback calling convention before invocation, never by retry."""
+    try:
+        parameters = inspect.signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(parameter.name == "timeout" or
+               parameter.kind == inspect.Parameter.VAR_KEYWORD
+               for parameter in parameters)
 
 
 def build_local_ollama_adapter():

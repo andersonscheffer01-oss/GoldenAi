@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
@@ -98,12 +99,26 @@ class ModelRouter:
         return candidates
 
     def execute(self, payload, profile=ModelProfile.GENERAL,
-                classification=DataClassification.INTERNAL, timeout=None) -> ProviderResult:
+                classification=DataClassification.INTERNAL, timeout=None,
+                allowed_providers=None, one_shot=False) -> ProviderResult:
         candidates = self.select(profile, classification)
+        if allowed_providers is not None:
+            allowed = {str(name).strip().casefold() for name in allowed_providers}
+            candidates = [(adapter, model) for adapter, model in candidates
+                          if adapter.name.casefold() in allowed]
+        if one_shot:
+            preferred_provider = DEFAULT_MODELS[profile][0].casefold()
+            candidates = [(adapter, model) for adapter, model in candidates
+                          if adapter.name.casefold() == preferred_provider][:1]
         last_error = "nenhum provider disponível"
+        last_provider = ""
+        last_model = ""
         attempt_log = []
         for index, (adapter, model) in enumerate(candidates):
-            attempts = 1 if profile == ModelProfile.VOICE_FAST else self.retries + 1
+            last_provider = adapter.name
+            last_model = model
+            attempts = (1 if one_shot or profile == ModelProfile.VOICE_FAST
+                        else self.retries + 1)
             for attempt in range(attempts):
                 started = time.perf_counter()
                 effective_timeout = (self.timeout if timeout is None else
@@ -153,9 +168,11 @@ class ModelRouter:
                     adapter.last_failure_at = time.time()
                     adapter.last_error_type = state.value
                     self.last_health[adapter.name] = state
-                    last_error = f"{adapter.name} excedeu {attempt_timeout:g}s"
+                    error_code = "PROVIDER_TIMEOUT"
+                    last_error = error_code
                     attempt_log.append({"provider": adapter.name, "model": model,
-                        "result": "timeout", "elapsed_ms": int((time.perf_counter()-started)*1000)})
+                        "result": "timeout", "error_code": error_code,
+                        "elapsed_ms": int((time.perf_counter()-started)*1000)})
                     if attempt + 1 >= attempts:
                         break
                 except Exception as exc:
@@ -164,13 +181,17 @@ class ModelRouter:
                     adapter.last_failure_at = time.time()
                     adapter.last_error_type = state.value
                     self.last_health[adapter.name] = state
-                    last_error = str(exc)
+                    error_code, http_status = self._safe_error_metadata(exc)
+                    last_error = error_code
                     attempt_log.append({"provider": adapter.name, "model": model,
-                        "result": state.value, "elapsed_ms": int((time.perf_counter()-started)*1000)})
+                        "result": state.value, "error_code": error_code,
+                        "http_status": http_status,
+                        "exception_type": type(exc).__name__,
+                        "elapsed_ms": int((time.perf_counter()-started)*1000)})
                     if state not in {ProviderState.RATE_LIMITED, ProviderState.TIMEOUT,
                                       ProviderState.DEGRADED} or attempt + 1 >= attempts:
                         break
-        return ProviderResult(False, "", "", ProviderState.OFFLINE, error=last_error,
+        return ProviderResult(False, last_provider, last_model, ProviderState.OFFLINE, error=last_error,
                               attempts=tuple(attempt_log))
 
     def stream(self, payload, profile=ModelProfile.GENERAL,
@@ -299,8 +320,40 @@ class ModelRouter:
         } for name, adapter in self.providers.items()}
 
     @staticmethod
+    def _safe_error_metadata(exc):
+        explicit_code = getattr(exc, "error_code", "")
+        if explicit_code:
+            return str(explicit_code), None
+        code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+        if not isinstance(code, int):
+            match = re.search(r"HTTP\s+(\d{3})", str(exc), re.I)
+            code = int(match.group(1)) if match else None
+        if code == 401:
+            category = "AUTHENTICATION"
+        elif code == 403:
+            category = "AUTHORIZATION"
+        elif code == 429:
+            category = "QUOTA_OR_RATE_LIMIT"
+        elif code == 404:
+            category = "MODEL_OR_ENDPOINT"
+        elif isinstance(code, int) and code >= 500:
+            category = "PROVIDER_HTTP_FAILURE"
+        elif isinstance(exc, (TimeoutError, FutureTimeout)):
+            category = "TIMEOUT"
+        elif isinstance(exc, (ValueError, TypeError, KeyError, IndexError)):
+            category = "INTEGRATION_OR_PARSING"
+        else:
+            category = "PROVIDER_OR_INTEGRATION_FAILURE"
+        return f"{category}_HTTP_{code}" if isinstance(code, int) else category, code
+
+    @staticmethod
     def _classify_error(exc):
         from concurrent.futures import TimeoutError as FutureTimeout
+        explicit_code = getattr(exc, "error_code", "")
+        if explicit_code == "INTEGRATION_OR_PARSING":
+            return ProviderState.OFFLINE
+        if explicit_code == "PROVIDER_TRANSPORT_FAILURE":
+            return ProviderState.DEGRADED
         code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
         if code == 429:
             return ProviderState.RATE_LIMITED

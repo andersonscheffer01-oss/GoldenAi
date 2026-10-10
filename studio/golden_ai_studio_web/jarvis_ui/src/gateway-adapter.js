@@ -173,7 +173,8 @@
     }
 
     _sendAuth(token) {
-      this._send('auth', { token: token });
+      const payload = { token: token };
+      this._send('auth', payload);
     }
 
     _nextId() {
@@ -351,20 +352,81 @@
     }
 
     async httpPost(path, data) {
+      const requestId = (() => {
+        try {
+          if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+        } catch {}
+        return `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+      })();
+      const safeId = (value, fallback = "") => {
+        const text = String(value || "");
+        return /^[A-Za-z0-9._:-]{1,160}$/.test(text) ? text : fallback;
+      };
+      const safeCode = (value, fallback) => {
+        const text = String(value || "").trim().toUpperCase();
+        return /^[A-Z0-9_]{1,80}$/.test(text) ? text : fallback;
+      };
+      const failure = (stage, status, code, response = null) => {
+        const body = response || {};
+        const resolvedRequestId = safeId(body.request_id, requestId);
+        const resolvedCorrelationId = safeId(body.correlation_id, resolvedRequestId);
+        const result = {
+          ok: false,
+          http_failure: true,
+          http_status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
+          error_code: safeCode(body.error_code || body.code, code),
+          request_id: resolvedRequestId,
+          correlation_id: resolvedCorrelationId,
+          failure_stage: stage,
+        };
+        console.warn("[JARVIS-GATEWAY] HTTP POST failed", {
+          path: String(path || "").split("?")[0].slice(0, 120),
+          http_status: result.http_status,
+          error_code: result.error_code,
+          request_id: result.request_id,
+          correlation_id: result.correlation_id,
+          failure_stage: result.failure_stage,
+        });
+        return result;
+      };
       try {
-        const headers = { 'Content-Type': 'application/json' };
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-Request-ID': requestId,
+          'X-Correlation-ID': requestId,
+        };
         const token = this.getToken();
         if (token) headers.Authorization = 'Bearer ' + token;
-        const res = await fetch(this.httpUrl + path, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(data || {}),
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return await res.json();
-      } catch (err) {
-        console.error('HTTP POST failed:', path, err);
-        return null;
+        let res;
+        try {
+          res = await fetch(this.httpUrl + path, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(data || {}),
+          });
+        } catch {
+          return failure("NETWORK_TRANSPORT", null, "NETWORK_FAILURE");
+        }
+        if (!res.ok) {
+          let body = {};
+          try {
+            const response = typeof res.clone === "function" ? res.clone() : res;
+            body = await response.json();
+          } catch {}
+          if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
+          const headerRequestId = safeId(res.headers?.get?.("X-Request-ID"));
+          const headerCorrelationId = safeId(res.headers?.get?.("X-Correlation-ID"));
+          if (!safeId(body.request_id) && headerRequestId) body.request_id = headerRequestId;
+          if (!safeId(body.correlation_id) && headerCorrelationId) body.correlation_id = headerCorrelationId;
+          return failure("HTTP_RESPONSE", res.status, "HTTP_REQUEST_FAILED", body);
+        }
+        try {
+          return await res.json();
+        } catch {
+          return failure("RESPONSE_PARSE", res.status, "INVALID_JSON_RESPONSE");
+        }
+      } catch {
+        return failure("CLIENT_REQUEST", null, "REQUEST_PREPARATION_FAILED");
       }
     }
 

@@ -1,4 +1,6 @@
 from unittest.mock import patch
+import io
+import urllib.error
 
 from jarvis_core.config import resolve_api_key
 from jarvis_core.memory.v2.research import (
@@ -10,9 +12,14 @@ from jarvis_core.orchestrator.models import DataClassification, ModelProfile
 from jarvis_core.orchestrator.providers import build_real_adapters
 
 
-def test_windows_or_golden_keys_are_detected_without_exposing_values():
-    assert bool(resolve_api_key("GEMINI_API_KEY", "gemini_api_key"))
-    assert bool(resolve_api_key("TAVILY_API_KEY", "tavily_api_key"))
+def test_test_mode_uses_only_synthetic_fixture_keys(monkeypatch):
+    monkeypatch.setenv("JARVIS_TEST_MODE", "1")
+    monkeypatch.setenv("GEMINI_API_KEY", "real-key-must-be-ignored")
+    monkeypatch.setenv("TEST_GEMINI_API_KEY", "fixture-gemini-key")
+    monkeypatch.setenv("TEST_TAVILY_API_KEY", "fixture-tavily-key")
+
+    assert resolve_api_key("GEMINI_API_KEY", "gemini_api_key") == "fixture-gemini-key"
+    assert resolve_api_key("TAVILY_API_KEY", "tavily_api_key") == "fixture-tavily-key"
 
 
 def test_gemini_adapter_preserves_policy_model_and_timeout():
@@ -32,6 +39,58 @@ def test_gemini_adapter_preserves_policy_model_and_timeout():
     assert result.provider == "gemini"
     assert result.model == "gemini-3.8-flash"
     assert captured == {"model": "gemini-3.8-flash", "timeout": 3}
+
+
+def test_gemini_callback_internal_type_error_is_not_retried():
+    calls = []
+
+    def gemini_call(payload, model, timeout=None):
+        calls.append((payload, model, timeout))
+        raise TypeError("private callback detail")
+
+    adapter = next(item for item in build_real_adapters(gemini_call=gemini_call)
+                   if item.name == "gemini")
+    router = ModelRouter(timeout=3, retries=0)
+    router.register_provider(adapter)
+    result = router.execute([], ModelProfile.GENERAL, one_shot=True)
+
+    assert not result.ok
+    assert len(calls) == 1
+    assert result.attempts[0]["error_code"] == "INTEGRATION_OR_PARSING"
+    assert "private callback detail" not in str(result.attempts)
+
+
+def test_gemini_http_timeout_and_parse_failures_are_sanitized(monkeypatch):
+    from jarvis_core import config
+    import server_agent
+
+    monkeypatch.setattr(config, "resolve_api_key", lambda *_args: "fixture-key")
+    private_body = b"private provider response api_key=hidden"
+    http_error = urllib.error.HTTPError(
+        "https://provider.invalid", 429, "rate limited", {}, io.BytesIO(private_body))
+    monkeypatch.setattr(server_agent.urllib.request, "urlopen",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(http_error))
+    assert server_agent.call_gemini_model([], "gemini-3.8-flash", timeout=1) == (
+        "Erro Gemini: HTTP 429")
+
+    monkeypatch.setattr(server_agent.urllib.request, "urlopen",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                            TimeoutError("private timeout detail")))
+    assert server_agent.call_gemini_model([], "gemini-3.8-flash", timeout=1) == (
+        "Erro Gemini: TIMEOUT")
+
+    class InvalidJsonResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def read(self):
+            return b"{"
+
+    monkeypatch.setattr(server_agent.urllib.request, "urlopen",
+                        lambda *_args, **_kwargs: InvalidJsonResponse())
+    assert server_agent.call_gemini_model([], "gemini-3.8-flash", timeout=1) == (
+        "Erro Gemini: RESPONSE_PARSE_ERROR")
 
 
 def test_secret_selects_only_local_provider():

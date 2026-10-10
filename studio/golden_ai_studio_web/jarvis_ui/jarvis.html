@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="src/fonts.css">
 <link rel="stylesheet" href="src/styles.css?v=20260928-b3-runtime-reconcile">
+<link rel="stylesheet" href="src/desktop-shell.css?v=20261007-market-score-detail-1">
 <link rel="stylesheet" href="lib/github-dark.min.css">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0a0a0f">
@@ -128,7 +129,37 @@
        à esquerda o menu de seções; à direita SISTEMA ONLINE, AGENTES ATIVOS,
        MEMÓRIA DO SISTEMA, PESQUISA E INTERNET e PROJETOS RECENTES; embaixo
        TAREFAS EM ANDAMENTO, COMANDO MANUAL e AÇÕES RÁPIDAS. -->
-  <div id="golden" aria-hidden="true">
+<div id="golden" aria-hidden="true">
+
+    <header id="d2Topbar" aria-label="Golden Jarvis Desktop">
+      <div class="d2Brand"><span class="d2BrandMark" aria-hidden="true">G</span><span><b>JARVIS</b><small>GOLDENAI WORKSPACE</small></span></div>
+      <div class="d2TopStatus">
+        <span class="d2Mode"><i aria-hidden="true"></i>MODO <b>ANÁLISE</b></span>
+        <span class="d2LiveLock">LIVE NÃO AUTORIZADO</span>
+        <span class="d2DemoBadge">PAINEL · LEITURA SOMENTE</span>
+        <span id="d2GatewaySlot" aria-label="Estado do Gateway"></span>
+      </div>
+      <span id="d2SettingsSlot"></span>
+      <button id="d2JarvisAccess" class="d2JarvisAccess" type="button" data-d2-route="jarvis" title="Abrir Jarvis">JARVIS</button>
+    </header>
+
+    <nav id="d2Navigation" aria-label="Navegação principal">
+      <span class="d2NavLabel">WORKSPACE</span>
+      <button type="button" data-d2-route="jarvis" data-target-view="conversa">Jarvis</button>
+      <button type="button" data-d2-route="painel" data-target-view="d2-panel">Painel</button>
+      <button type="button" data-d2-route="analise" data-target-view="controle">Análise GoldenAI</button>
+      <button type="button" data-d2-route="operacoes" data-target-view="d2-operations">Operações</button>
+      <button type="button" data-d2-route="performance" data-target-view="d2-performance">Performance</button>
+      <button type="button" data-d2-route="historico" data-target-view="d2-history">Histórico</button>
+      <button type="button" data-d2-route="inteligencia-mercado" data-target-view="d2-market-intelligence">Inteligência de Mercado</button>
+      <span class="d2NavLabel d2NavSecondary">INTELIGÊNCIA E CONTROLE</span>
+      <button type="button" data-d2-route="robos" data-target-view="controle" data-focus-target="gB3RobotsSection">Robôs</button>
+      <button type="button" data-d2-route="backtests" data-target-view="d2-backtests">Backtests</button>
+      <button type="button" data-d2-route="tarefas" data-target-view="projetos">Tarefas</button>
+      <button type="button" data-d2-route="memoria" data-target-view="memoria">Memória</button>
+      <button type="button" data-d2-route="seguranca" data-target-view="d2-security">Segurança / Configuração</button>
+      <div class="d2NavFooter"><span class="d2FooterDot" aria-hidden="true"></span><span>JARVIS CORE</span><b id="d2CoreState">ESTADO NÃO VALIDADO</b></div>
+    </nav>
 
     <header id="gTop">
       <div class="gBrand">
@@ -449,6 +480,125 @@
           </section>
         </div>
       </div>
+
+      <section class="gView d2View d2DonorView d2PanelView" data-view="d2-panel" hidden aria-labelledby="d2PanelTitle">
+        <div class="d2PanelMetrics" aria-label="Resumo executivo">
+          <article class="d2Metric"><span>OPERAÇÕES</span><strong>—</strong><small>Fonte canônica não consultada</small><i class="d2MetricIcon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg></i></article>
+          <article class="d2Metric"><span>TAKE</span><strong>—</strong><small>Taxa de acerto indisponível</small><i class="d2MetricIcon d2MetricSuccess" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 10l7-7 7 7M12 3v18"/></svg></i></article>
+          <article class="d2Metric"><span>STOP</span><strong>—</strong><small>Registros não consultados</small><i class="d2MetricIcon d2MetricDanger" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 14l7 7 7-7M12 21V3"/></svg></i></article>
+          <article class="d2Metric"><span>RESULTADO</span><strong>—</strong><small>Resultado líquido indisponível</small><i class="d2MetricIcon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.5-1-1.5-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 2 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v12"/></svg></i></article>
+        </div>
+        <div class="d2PanelColumns d2PanelDonorColumns">
+          <section class="d2DonorSurface d2PanelAnalysis"><header class="d2DonorSectionTitle"><b><i class="d2GoldDot"></i> GoldenAI — Análise do Mercado</b><span>READ MODEL · NÃO CONSULTADO</span></header>
+            <div class="d2DonorEmpty d2MarketEmpty"><span class="d2EmptyGlyph">⌁</span><b>Sem snapshot de mercado disponível</b><p>A tese e as evidências aparecem aqui quando uma fonte canônica fornecer dados.</p></div>
+            <div class="d2EvidenceRows"><div><span>TENDÊNCIA</span><b>Indisponível</b></div><div><span>CONTEXTO</span><b>Sem evidências</b></div><div><span>FRESCOR</span><b>Não consultado</b></div></div>
+            <button type="button" class="d2DonorButton" data-d2-route="analise">ABRIR ANÁLISE GOLDENAI <span aria-hidden="true">→</span></button>
+          </section>
+          <section class="d2DonorSurface d2PanelPosition"><header class="d2DonorSectionTitle"><b><i class="d2BuildingIcon">▧</i> Situação da Posição</b><span class="d2OutlineTag">DIAGNÓSTICO</span></header>
+            <div class="d2DonorEmpty d2PositionEmpty"><span class="d2EmptyGlyph d2PositionGlyph">◇</span><b>Observação de posição indisponível</b><p>Este estado não confirma ausência de posições: nenhuma fonte operacional foi consultada.</p></div>
+            <div class="d2UnavailableReadout"><span>EXPOSIÇÃO</span><strong>—</strong><small>Não observado</small></div>
+            <div class="d2ReadOnlyFooter">OBSERVAÇÃO SOMENTE LEITURA · MT5 NÃO CONSULTADO</div>
+          </section>
+          <section class="d2DonorSurface d2PanelPlan"><header class="d2DonorSectionTitle"><b><i class="d2RedDot"></i> Plano Operacional</b><span class="d2OutlineTag">ANÁLISE</span></header>
+            <div class="d2PlanUnavailable"><span>DIREÇÃO</span><b>Sem análise canônica</b></div>
+            <div class="d2PlanLevels"><div><span>ENTRADA</span><strong>—</strong></div><div><span>STOP</span><strong>—</strong></div><div><span>ALVO</span><strong>—</strong></div></div>
+            <div class="d2PlanRisk"><span>RISCO POTENCIAL <b>—</b></span><span>RETORNO POTENCIAL <b>—</b></span><span>RATIO <b>—</b></span></div>
+            <div class="d2SafetyNote">Este painel apresenta apenas projeções analíticas. Nenhuma operação será executada por esta view.</div>
+          </section>
+        </div>
+        <div class="d2PanelBottom">
+          <section class="d2DonorSurface d2PanelChart"><header class="d2DonorSectionTitle"><b data-market-chart-title>GRÁFICO DO MERCADO — SEM ATIVO</b><span data-market-chart-meta>MT5 · M15 · AGUARDANDO ATIVO</span></header><div class="d2MarketChartToolbar" role="group" aria-label="Período do gráfico"><span data-market-chart-quote>QUOTE INDISPONÍVEL</span><div data-market-timeframes class="d2MarketTimeframes"><button type="button" data-market-timeframe="M1" aria-pressed="false">M1</button><button type="button" data-market-timeframe="M5" aria-pressed="false">M5</button><button type="button" data-market-timeframe="M15" aria-pressed="true">M15</button><button type="button" data-market-timeframe="H1" aria-pressed="false">H1</button><button type="button" data-market-timeframe="H4" aria-pressed="false">H4</button><button type="button" data-market-timeframe="D1" aria-pressed="false">D1</button></div></div><div class="d2ChartFrame d2PanelChartFrame"><canvas data-market-chart role="img" aria-label="Candles reais do MetaTrader 5 aguardando ativo"></canvas><div class="d2MarketChartState" data-market-chart-state role="status">Selecione um ativo para carregar candles reais do MT5.</div></div><footer class="d2ChartLegend"><span data-market-chart-source>MT5 · CANDLES OHLC READ-ONLY</span><span data-market-chart-updated>SEM ATUALIZAÇÃO</span></footer></section>
+          <section class="d2DonorSurface d2PanelHistory"><header class="d2DonorSectionTitle"><b>Histórico de Operações</b><button type="button" class="d2TextAction" data-d2-route="historico">VER HISTÓRICO <span aria-hidden="true">→</span></button></header><div class="d2DonorEmpty d2CompactEmpty"><b>Nenhum registro carregado</b><p>Trade Journal e auditoria permanecem fontes distintas.</p></div><div class="d2ReadOnlyFooter">FONTE · NÃO CONSULTADA</div></section>
+        </div>
+      </section>
+
+      <section class="gView d2View d2DonorView d2AnalysisView" data-view="d2-analysis" hidden aria-labelledby="d2AnalysisTitle">
+        <div class="d2AnalysisToolbar"><div class="d2SymbolChoices" role="group" aria-label="Ativo da análise"><button type="button" data-d2-symbol="XAU/USD" aria-pressed="true">XAU/USD</button><button type="button" data-d2-symbol="EUR/USD" aria-pressed="false">EUR/USD</button><button type="button" data-d2-symbol="GBP/USD" aria-pressed="false">GBP/USD</button><button type="button" data-d2-symbol="BTC/USD" aria-pressed="false">BTC/USD</button></div><div class="d2AnalysisState"><b id="d2AnalysisTitle">ANÁLISE GOLDENAI</b><span>FONTE NÃO CONSULTADA · SEM SNAPSHOT</span></div><button type="button" class="d2ScanButton" disabled title="A varredura analítica ainda não está conectada a esta view"><span class="d2BoltIcon" aria-hidden="true">ϟ</span> SOLICITAR ANÁLISE</button></div>
+        <div class="d2AudioSummary"><div class="d2AudioGlyph">≋</div><div><b>Resumo de análise</b><span>Conteúdo de áudio indisponível</span></div><span class="d2AudioQuality">GOLDENAI · SEM SÍNTESE</span><button type="button" disabled title="Voice/áudio não inicializado nesta fase">▶</button><time>—</time></div>
+        <div class="d2AnalysisColumns">
+          <div class="d2AnalysisPrimary">
+            <section class="d2DonorSurface d2ThesisPanel"><header class="d2DonorSectionTitle"><b>◉ &nbsp; Tese Operacional &amp; Evidências</b><span class="d2MutedTag">AGUARDANDO DADOS</span></header><div class="d2AnalysisSummary"><div><span>VIÉS</span><strong>—</strong><small>Não avaliado</small></div><div><span>CONFIANÇA</span><strong>—</strong><small>Sem cálculo</small></div><div><span>CONFLUÊNCIA</span><strong>—</strong><small>Sem validação</small></div><div><span>PERÍODO</span><strong>—</strong><small>Não selecionado</small></div></div><div class="d2ThesisEmpty"><b>Sem tese de mercado canônica</b><p>Não há snapshot, scanner ou evidência de contexto disponível nesta sessão.</p></div><div class="d2EvidenceRows"><div><span>TENDÊNCIA</span><b>Não consultada</b></div><div><span>MACRO / EVENTOS</span><b>Não consultados</b></div><div><span>VOLATILIDADE</span><b>Não calculada</b></div><div><span>PROVENIÊNCIA</span><b>Sem snapshot ID</b></div></div></section>
+            <section class="d2DonorSurface d2ParametersPanel"><header class="d2DonorSectionTitle"><b>▣ &nbsp; Parâmetros Analíticos</b><span class="d2MutedTag">NÃO DISPONÍVEIS</span></header><div class="d2ParameterRows"><div><span>ENTRADA</span><b>—</b><small>Sem análise</small></div><div><span>STOP LOSS</span><b>—</b><small>Não calculado</small></div><div><span>ALVO</span><b>—</b><small>Não calculado</small></div></div><div class="d2ReadOnlyFooter">VALORES DEMONSTRATIVOS DO TEMPLATE REMOVIDOS</div></section>
+            <section class="d2DonorSurface d2ProtectionPanel"><header class="d2DonorSectionTitle"><b>Régua de Proteção</b><span class="d2MutedTag">SEM POSIÇÃO SELECIONADA</span></header><div class="d2ProtectionSteps"><div><i>01</i><b>Break-even</b><span>Indisponível</span></div><div><i>02</i><b>Parcial</b><span>Indisponível</span></div><div><i>03</i><b>Trailing</b><span>Indisponível</span></div><div><i>04</i><b>Encerramento</b><span>Indisponível</span></div></div></section>
+          </div>
+          <div class="d2AnalysisSecondary">
+            <section class="d2DonorSurface d2ChecklistPanel"><header class="d2DonorSectionTitle"><b>☷ &nbsp; Checklist Quantitativo</b><span class="d2MutedTag">0 / 8 VERIFICADOS</span></header><div class="d2CriteriaList"><div><i>01</i><span><b>Tendência Multitemporal</b><small>Sem dados de timeframe</small></span><em>—</em></div><div><i>02</i><span><b>Notícias e contexto macro</b><small>Fonte macro não consultada</small></span><em>—</em></div><div><i>03</i><span><b>Estrutura de mercado</b><small>Sem série de preços</small></span><em>—</em></div><div><i>04</i><span><b>Rompimento institucional</b><small>Não avaliado</small></span><em>—</em></div><div><i>05</i><span><b>Ritmo / Price Action</b><small>Sem observação</small></span><em>—</em></div><div><i>06</i><span><b>Volume</b><small>Não consultado</small></span><em>—</em></div><div><i>07</i><span><b>Volatilidade ATR</b><small>Não calculada</small></span><em>—</em></div><div><i>08</i><span><b>Médias e momentum</b><small>Não avaliado</small></span><em>—</em></div></div></section>
+            <section class="d2DonorSurface d2DispersionPanel"><header class="d2DonorSectionTitle"><div><b>Dispersão e Volatilidade Intraday</b><p>Pressão compradora vs vendedora</p></div><span class="d2MutedTag">SEM SÉRIE</span></header><div class="d2DispersionChart"><div class="d2ChartGrid" aria-hidden="true"></div><div class="d2DonorEmpty"><b>Gráfico indisponível</b><p>Nenhum ponto foi plotado sem série de mercado.</p></div></div><footer class="d2ChartLegend"><span>FONTE · NÃO CONSULTADA</span><b>SEM DADOS</b></footer></section>
+          </div>
+        </div>
+        <footer class="d2AnalysisProvenance"><span>ORIGEM <b>NÃO CONSULTADA</b></span><span>SNAPSHOT <b>—</b></span><span>FRESCOR <b>DESCONHECIDO</b></span><span>PROVENIÊNCIA <b>NÃO DISPONÍVEL</b></span><button type="button" class="d2TextAction" data-d2-route="radar">ABRIR RADAR GOLDENAI →</button></footer>
+      </section>
+
+      <section class="gView d2View d2DonorView d2OperationsView" data-view="d2-operations" hidden aria-labelledby="d2OperationsTitle">
+        <div class="d2OpsIntro"><div><span class="d2Eyebrow">CENTRAL DE EXECUÇÃO &amp; CUSTÓDIA DE POSIÇÕES</span><h1 id="d2OperationsTitle">Operações</h1></div><span class="d2SourceBadge"><i></i> OBSERVAÇÃO NÃO DISPONÍVEL</span></div>
+        <div class="d2OpsBanner"><span>ⓘ</span><div><b>SEM OBSERVAÇÃO OPERACIONAL</b><p>MT5 não foi consultado neste modo. Isto não significa conta sem posições ou ordens.</p></div><span class="d2SyncUnavailable">SINCRONIZADOR · NÃO CONSULTADO</span></div>
+        <div class="d2OpsSummary">
+          <section><header><b>EXPOSIÇÃO TOTAL ABERTA</b><span>READ-ONLY</span></header><strong>—</strong><p>Sem observação canônica</p><small>Alocação · não consultada</small></section>
+          <section><header><b>RESULTADO FLUTUANTE</b><span>READ-ONLY</span></header><strong>—</strong><p>Sem observação canônica</p><small>Período · não disponível</small></section>
+          <section><header><b>ORDENS REGISTRADAS</b><span>READ-ONLY</span></header><strong>—</strong><p>Posições · não observadas</p><small>Pendentes · não observadas</small></section>
+          <section><header><b>PROTEÇÃO</b><span>READ-ONLY</span></header><strong>—</strong><p>Estado não consultado</p><small>Fonte operacional indisponível</small></section>
+        </div>
+        <section class="d2DonorSurface d2OpsLedger"><header class="d2DonorSectionTitle"><b>▤ &nbsp; Posições Abertas em Custódia</b><span class="d2SourceBadge"><i></i> MT5 NÃO CONSULTADO</span></header>
+          <div class="d2LedgerWrap"><table class="d2Ledger"><thead><tr><th>TICKET</th><th>HORÁRIO</th><th>ATIVO</th><th>TIPO</th><th>LOTE</th><th>PREÇO ABERTURA</th><th>PREÇO ATUAL</th><th>STOP LOSS</th><th>TAKE PROFIT</th><th>PNL</th><th>PROTEÇÃO</th><th>AÇÕES</th></tr></thead><tbody><tr><td colspan="12"><div class="d2TableEmpty"><b>Nenhuma posição carregada</b><span>A conexão não foi consultada por esta interface.</span></div></td></tr></tbody></table></div>
+          <footer class="d2LedgerFooter"><span>TOTAL DE POSIÇÕES <b>—</b></span><span>VOLUME CONSOLIDADO <b>—</b></span><span>FONTE <b>INDISPONÍVEL</b></span></footer>
+        </section>
+        <section class="d2DonorSurface d2OpsLedger"><header class="d2DonorSectionTitle"><b>▹ &nbsp; Ordens Pendentes no Book</b><span class="d2SourceBadge"><i></i> NÃO OBSERVADO</span></header>
+          <div class="d2LedgerWrap"><table class="d2Ledger"><thead><tr><th>TICKET</th><th>ORIGEM</th><th>ATIVO</th><th>ORDEM / DIREÇÃO</th><th>LOTE</th><th>PREÇO GATILHO</th><th>DISTÂNCIA</th><th>STOP LOSS</th><th>TAKE PROFIT</th><th>CONDIÇÃO</th><th>GESTÃO</th></tr></thead><tbody><tr><td colspan="11"><div class="d2TableEmpty"><b>Nenhuma ordem carregada</b><span>Sem evidência operacional disponível.</span></div></td></tr></tbody></table></div>
+        </section>
+        <div class="d2OpsLower">
+          <section class="d2DonorSurface d2OrderPanel"><header class="d2DonorSectionTitle"><b>⇧ &nbsp; Módulo de Envio Direto ao MetaTrader 5</b><span class="d2ActionDenied">AÇÕES BLOQUEADAS</span></header><div class="d2OrderInputs"><label>VOLUME DE LOTE<input type="number" value="0.01" disabled aria-label="Volume de lote indisponível"></label><label>STOP LOSS (PONTOS)<input type="number" placeholder="—" disabled aria-label="Stop loss indisponível"></label><label>RISCO FINANCEIRO ESTIMADO<input type="text" value="—" disabled aria-label="Risco financeiro não calculado"></label></div><div class="d2OrderButtons"><button type="button" disabled>↗ &nbsp; BUY MERCADO</button><button type="button" disabled>↘ &nbsp; SELL MERCADO</button></div><div class="d2ActionLock"><span>SEM AUTORIDADE CANÔNICA · AÇÕES DE TRADING DESABILITADAS</span></div></section>
+          <section class="d2DonorSurface d2BridgePanel"><header class="d2DonorSectionTitle"><b>▣ &nbsp; Console de Mensagens da Bridge</b><span class="d2MutedTag">SEM STREAM</span></header><div class="d2Console"><p>Bridge não consultada.</p><p>Mensagens e estado de conexão não disponíveis nesta view.</p><p>Esta interface não abre conexão direta com MetaTrader ou broker.</p></div></section>
+        </div>
+      </section>
+
+      <section class="gView d2View d2DonorView d2PerformanceView" data-view="d2-performance" hidden aria-labelledby="d2PerformanceTitle">
+        <div class="d2ReportHeading d2PerformanceHeading"><div><span class="d2Eyebrow">RESULTADOS REGISTRADOS · EXECUÇÃO NÃO COMPROVADA</span><h1 id="d2PerformanceTitle">Performance</h1><p>Trade Journal · limite de 10.000 registros por agregado · importações não comprovam conta real</p></div><div class="d2ReportControls" role="group" aria-label="Período do relatório"><button type="button" data-d2-period="7D" aria-pressed="false">7D</button><button type="button" data-d2-period="30D" aria-pressed="true">30D</button><button type="button" data-d2-period="90D" aria-pressed="false">90D</button><button type="button" data-d2-period="ALL" aria-pressed="false">TUDO</button><button type="button" disabled title="Nenhuma evidência disponível para exportar">⇩ EXPORTAR</button></div></div>
+        <div class="d2PerformanceMetrics"><article><span>LUCRO LÍQUIDO</span><strong>—</strong><small>Sem resultado selecionado</small></article><article><span>DRAWDOWN MÁXIMO</span><strong>—</strong><small>Não calculado</small></article><article><span>TAXA DE ACERTO</span><strong>—</strong><small>Amostra indisponível</small></article><article><span>PAYOFF RATIO</span><strong>—</strong><small>Não calculado</small></article><article><span>SEQUÊNCIA MÁXIMA</span><strong>—</strong><small>Sem registros</small></article><article><span>SHARPE RATIO</span><strong>—</strong><small>Não calculado</small></article></div>
+        <div class="d2PerformanceMain">
+          <section class="d2DonorSurface d2EquityPanel"><header class="d2DonorSectionTitle"><div><b>Curva Patrimonial de Longo Prazo</b><p>Série realizada · período selecionado</p></div><span class="d2MutedTag">BACKTEST / JOURNAL NÃO SELECIONADOS</span></header><div class="d2EquityChart"><div class="d2ChartGrid" aria-hidden="true"></div><div class="d2YAxis" aria-hidden="true"><span>—</span><span>—</span><span>—</span><span>—</span></div><div class="d2DonorEmpty"><b>Curva indisponível</b><p>Nenhuma série de performance foi carregada.</p></div></div><div class="d2ChartLegend"><span><i class="d2GoldLine"></i> RESULTADO REALIZADO</span><span><i class="d2BlueLine"></i> REFERÊNCIA</span><b>SEM DADOS</b></div><div class="d2EquitySummary"><span>SALDO INICIAL <b>—</b></span><span>PICO DIÁRIO <b>—</b></span><span>PERDA MÁXIMA <b>—</b></span><span>EXPECTATIVA <b>—</b></span></div></section>
+          <section class="d2DonorSurface d2AssetPanel"><header class="d2DonorSectionTitle"><div><b>Desempenho por Ativo</b><p>Resultados resolvidos registrados no Journal · execução não comprovada</p></div><span class="d2MutedTag">NÃO CARREGADO</span></header><div class="d2DonorEmpty d2CompactEmpty"><b>Sem evidência por ativo</b><p>Resultados de trades não foram conectados.</p></div></section>
+        </div>
+        <div class="d2PerformanceLower">
+          <section class="d2DonorSurface d2SessionPanel"><header class="d2DonorSectionTitle"><div><b>Matriz de Desempenho por Sessão &amp; Horário</b><p>Dados segmentados por sessão e período</p></div><span class="d2MutedTag">FUSO NÃO DEFINIDO</span></header><div class="d2LedgerWrap"><table class="d2Ledger d2PerformanceTable"><thead><tr><th>DIA / SESSÃO</th><th>VOLUME</th><th>WINRATE</th><th>RESULTADO</th><th>CLASSIFICAÇÃO</th></tr></thead><tbody><tr><td colspan="5"><div class="d2TableEmpty"><b>Sem amostra disponível</b><span>Não há dados para calcular métricas segmentadas.</span></div></td></tr></tbody></table></div></section>
+          <section class="d2DonorSurface d2FilterPanel"><header class="d2DonorSectionTitle"><div><b>Eficácia dos Filtros</b><p>Comparação com proveniência</p></div><span class="d2MutedTag">NÃO VALIDADO</span></header><div class="d2FilterComparison"><div><span>CONFLUÊNCIA ALTA</span><strong>—</strong><small>Sem amostra</small></div><div><span>CONFLUÊNCIA BAIXA</span><strong>—</strong><small>Sem amostra</small></div></div><div class="d2SafetyNote">Nenhum ajuste de filtro está disponível nesta view.</div></section>
+        </div>
+      </section>
+
+      <section class="gView d2View d2DonorView d2HistoryView" data-view="d2-history" hidden aria-labelledby="d2HistoryTitle">
+        <section class="d2HistoryHeaderPanel"><div class="d2ReportHeading"><div><span class="d2Eyebrow">AUDITORIA FOREX &amp; COMMODITIES <span aria-hidden="true">·</span> LEDGER CANÔNICO NÃO CONSULTADO</span><h1 id="d2HistoryTitle">Histórico de Ordens &amp; Registro de Confluência</h1><p>Trade Journal, tester e AuditLog permanecem fontes distintas.</p></div><div class="d2HistoryExports"><button type="button" disabled title="Sem registros para exportar">▤ EXPORTAR CSV / EXCEL</button><button type="button" disabled title="Sem registros para exportar">▧ RELATÓRIO PDF</button></div></div>
+        <div class="d2HistoryFilterBar"><div class="d2PeriodChoices" role="group" aria-label="Período"><button type="button" data-d2-history-period="today" aria-pressed="false">HOJE</button><button type="button" data-d2-history-period="yesterday" aria-pressed="false">ONTEM</button><button type="button" data-d2-history-period="7d" aria-pressed="true">ÚLTIMOS 7D</button><button type="button" data-d2-history-period="month" aria-pressed="false">MÊS ATUAL</button><button type="button" data-d2-history-period="custom" aria-pressed="false">PERSONALIZADO</button></div><div class="d2HistoryCustomDates" data-history-custom-dates hidden><label>DE<input type="date" data-history-date-from></label><label>ATÉ<input type="date" data-history-date-to></label></div><label>ATIVO<input type="text" maxlength="32" autocomplete="off" placeholder="Todos os ativos" aria-label="Filtrar por ativo" data-history-symbol></label><label>SAÍDA<select aria-label="Filtrar por saída" data-history-exit><option value="ALL">Todas</option><option value="NOT_RECORDED">Não registrada no Journal</option></select></label><span id="d2HistoryFilterState" role="status" title="Presets seguem o calendário do Desktop; comparação pelo trecho YYYY-MM-DD original, sem conversão de fuso. UTC absoluto não verificado.">FONTE NÃO CONSULTADA · DATA ORIGINAL · FUSO NÃO CONVERTIDO</span></div></section>
+        <div class="d2HistoryMetrics"><article><span>OPERAÇÕES</span><strong>—</strong></article><article><span>TAXA DE ACERTO</span><strong>—</strong></article><article><span>LUCRO LÍQUIDO</span><strong>—</strong></article><article><span>FATOR DE LUCRO</span><strong>—</strong></article><article><span>RELAÇÃO R/R MÉDIA</span><strong>—</strong></article></div>
+        <div class="d2HistoryLayout"><section class="d2DonorSurface d2HistoryLedger"><header class="d2DonorSectionTitle"><div><b>▤ &nbsp; Ordens Executadas &amp; Liquidadas</b><p>Registro cronológico e evidência de origem</p></div><span class="d2MutedTag">FONTES NÃO CONSULTADAS</span></header><div class="d2LedgerWrap"><table class="d2Ledger"><thead><tr><th>TICKET</th><th>EXECUÇÃO</th><th>ATIVO</th><th>LADO</th><th>VOLUME</th><th>ENTRADA</th><th>SAÍDA</th><th>DUR.</th></tr></thead><tbody><tr><td colspan="8"><div class="d2TableEmpty"><b>Nenhum registro canônico carregado</b><span>Nenhuma linha demonstrativa será apresentada como trade real.</span></div></td></tr></tbody></table></div><footer class="d2LedgerFooter"><span>0 REGISTROS CARREGADOS · TRADE JOURNAL / TESTER NÃO CONSULTADOS</span><div class="d2Pagination"><button type="button" disabled aria-label="Página anterior">‹</button><button type="button" disabled aria-current="page">1</button><button type="button" disabled aria-label="Próxima página">›</button></div></footer></section>
+          <aside class="d2DonorSurface d2TradeInspector"><header class="d2DonorSectionTitle"><div><b>Tese Neural</b><p>Proveniência e evidência</p></div><span class="d2MutedTag">NÃO SELECIONADO</span></header><div class="d2InspectorEmpty"><span class="d2EmptyGlyph" aria-hidden="true">▤</span><b>Selecione um registro</b><p>A tese, os dados de execução e os vínculos de auditoria aparecerão aqui quando disponíveis.</p></div><section class="d2InspectorEvidence"><div class="d2InspectorSubhead"><span>TESE ALGORÍTMICA NO MOMENTO DA ORDEM</span><b>SEM LOG VERIFICADO</b></div><p class="d2InspectorThesis">Aguardando registro canônico com identidade, contexto e proveniência reconciliados.</p><div class="d2InspectorSubhead"><span>CHECKLIST DOS 7 FILTROS</span><b>NÃO AVALIADO</b></div><div class="d2InspectorChecks"><div><span>Fluxo Institucional &amp; Books</span><b>—</b></div><div><span>Divergência de Delta Volume</span><b>—</b></div><div><span>Estrutura de Sessão</span><b>—</b></div><div><span>Assimetria Risco / Retorno</span><b>—</b></div></div></section><div class="d2InspectorFields"><div><span>FONTE</span><b>—</b></div><div><span>IDENTIDADE</span><b>—</b></div><div><span>PROVENIÊNCIA</span><b>—</b></div></div><button type="button" class="d2CopyTicket" disabled title="Nenhum registro selecionado">▢ &nbsp; COPIAR TICKET</button></aside></div>
+      </section>
+
+      <section class="gView d2View d2DonorView d2MarketIntelligenceView" data-view="d2-market-intelligence" hidden aria-labelledby="d2MarketIntelligenceTitle">
+        <div class="d2MarketIntelligenceHeading"><div><span class="d2Eyebrow">ANÁLISE QUANTITATIVA MULTITEMPORAL · MT5 · LEITURA SOMENTE</span><h1 id="d2MarketIntelligenceTitle">Inteligência de Mercado</h1><p>Score direcional é intensidade de tendência, não probabilidade, sinal ou autorização de trading.</p></div><span class="d2MutedTag" data-trend-ranking-batch>Nenhuma varredura de mercado consultada.</span></div>
+        <section class="d2MarketLeaders"><article><b>MAIORES TENDÊNCIAS DE ALTA</b><div data-trend-ranking-up>Nenhuma varredura de mercado consultada.</div></article><article><b>MAIORES TENDÊNCIAS DE BAIXA</b><div data-trend-ranking-down>Nenhuma varredura de mercado consultada.</div></article></section>
+        <section class="d2DonorSurface d2TrendRanking d2MarketRanking" data-trend-ranking aria-labelledby="d2MarketRankingTitle">
+          <div class="d2TrendMonitorControl"><button type="button" class="d2TextAction" data-trend-monitor-start>INICIAR MONITORAMENTO</button><span data-trend-monitor-status role="status">MONITORAMENTO NAO CONSULTADO</span></div>
+          <header class="d2TrendRankingHeader"><div><b id="d2MarketRankingTitle">VARREDURA DO UNIVERSO CONGELADO</b><small data-market-ranking-counts>Nenhuma varredura de mercado consultada.</small></div><button type="button" class="d2TextAction" data-trend-ranking-run>CONSULTAR LOTE</button></header>
+          <progress class="d2TrendRankingProgress" data-trend-ranking-progress max="100" value="0" aria-label="Progresso da varredura">0%</progress>
+          <div class="d2TrendRankingControls"><label>UNIVERSO DA PRÓXIMA VARREDURA<select data-trend-class-select aria-label="Classe para a próxima varredura"><option value="ALL">TODOS</option></select></label><button type="button" class="d2TextAction" data-trend-scan-recover>RECUPERAR VARREDURA</button><span data-trend-ranking-status role="status">Catálogo consultado somente por ação explícita · no máximo 4 ativos por clique.</span><small data-trend-scan-persistence>Persistência não verificada.</small></div>
+          <div class="d2MarketFilters" role="group" aria-label="Filtros locais da matriz"><label>CLASSE<select data-market-filter-class><option value="ALL">TODAS</option><option value="FOREX">FOREX</option><option value="INDICES">ÍNDICES</option><option value="STOCKS">AÇÕES</option><option value="ETF">ETFs</option><option value="CRYPTO">CRYPTO</option><option value="COMMODITIES">COMMODITIES</option><option value="METALS">METAIS</option><option value="OTHER_UNKNOWN">OUTROS / DESCONHECIDOS</option></select></label><label>TENDÊNCIA<select data-market-filter-trend><option value="ALL">TODAS</option><option>ALTA FORTE</option><option>ALTA</option><option>LATERAL</option><option>BAIXA</option><option>BAIXA FORTE</option></select></label><label>ESTADO<select data-market-filter-state><option value="ALL">TODOS OS ESTADOS</option><option value="EVALUATED">AVALIADOS</option><option value="PENDING">PENDENTES</option><option value="INSUFFICIENT">INSUFICIENTES</option><option value="FAILED">FALHOS</option></select></label></div>
+          <small class="d2TrendRankingExcluded" data-trend-ranking-excluded hidden></small><details class="d2TrendRankingExcludedDetails" data-trend-ranking-excluded-details hidden><summary>IDENTIDADES EXCLUÍDAS E MOTIVOS</summary><ul data-trend-ranking-excluded-list></ul></details>
+          <div class="d2MarketMatrixWrap"><table class="d2MarketMatrix"><thead><tr><th>ATIVO</th><th>M1</th><th>M5</th><th>M15</th><th>M30</th><th>H1</th><th>H4</th><th>D1</th><th>TENDÊNCIA GERAL</th><th>SCORE</th><th>COBERTURA</th><th>QUALIDADE</th><th>SCALP</th><th>DAY</th><th>SWING</th></tr></thead><tbody data-trend-ranking-rows><tr><td colspan="15">Nenhuma varredura de mercado consultada.</td></tr></tbody></table></div>
+          <section class="d2MarketAssetDetail" data-market-asset-detail hidden aria-label="Detalhamento técnico do ativo selecionado"><header><div><small>DETALHAMENTO TÉCNICO · DADOS DA VARREDURA ATUAL</small><b data-market-asset-detail-title></b></div><button type="button" class="d2TextAction" data-market-asset-detail-close aria-label="Fechar detalhamento do ativo">FECHAR</button></header><div data-market-asset-detail-body></div></section>
+          <div class="d2TrendRankingLocalPages"><button type="button" class="d2TextAction" data-trend-ranking-previous disabled>ATIVOS ANTERIORES</button><button type="button" class="d2TextAction" data-trend-ranking-more disabled>1/1 · PRÓXIMOS ATIVOS</button></div>
+          <footer class="d2TrendRankingFooter"><span>Horizontes indicam apenas alinhamento técnico; freshness/UTC desconhecidos permanecem UNKNOWN.</span><div><button type="button" class="d2TextAction" data-trend-ranking-pause hidden>PAUSAR</button><button type="button" class="d2TextAction" data-trend-ranking-retry hidden>RETENTAR FALHOS</button><button type="button" class="d2TextAction" data-trend-ranking-next hidden>PRÓXIMO LOTE</button></div></footer>
+        </section>
+      </section>
+
+      <section class="gView d2View" data-view="d2-backtests" hidden aria-labelledby="d2BacktestsTitle">
+        <div class="d2ViewHeading"><div><span>PLANEJAMENTO E EVIDÊNCIA</span><h1 id="d2BacktestsTitle">Backtests</h1></div><span class="d2StateTag is-muted">SOMENTE LEITURA</span></div>
+        <div class="d2Notice"><b>NENHUMA EXECUÇÃO INICIADA</b><p>Planos, preflight e resultados devem permanecer reconciliados com identidade de robô, parâmetros e artefatos compilados.</p></div>
+        <section class="d2Surface"><header><b>EVIDÊNCIA DO TESTER</b><span>AGUARDANDO INTEGRAÇÃO</span></header><div class="d2EmptyState">Nenhuma campanha ou execução selecionada</div></section>
+      </section>
+
+      <section class="gView d2View" data-view="d2-security" hidden aria-labelledby="d2SecurityTitle">
+        <div class="d2ViewHeading"><div><span>AUTORIDADE CANÔNICA</span><h1 id="d2SecurityTitle">Segurança</h1></div><span class="d2StateTag is-muted">ESTADO NÃO CONSULTADO</span></div>
+        <section class="d2Surface"><header><b>POLÍTICA E APROVAÇÕES</b><span>SECURITY MANAGER</span></header><div class="d2EmptyState">Aguardando projeção canônica de segurança e AuditLog</div></section>
+      </section>
     </section>
 
     <footer id="gFoot">
@@ -573,6 +723,7 @@
 <script src="src/telemetry-adapter.js"></script>
 
 <!-- Application (modified: uses new adapters, no brain.js direct actions) -->
-<script type="module" src="src/app.js?v=20260928-b3-runtime-reconcile"></script>
+<script type="module" src="src/app.js?v=20261005-history-filters-pagination-1"></script>
+<script type="module" src="src/desktop-shell.js?v=20261008-trend-scan-persistence-1"></script>
 </body>
 </html>

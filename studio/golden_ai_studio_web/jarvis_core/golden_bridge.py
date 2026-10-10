@@ -10,6 +10,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
+import hashlib
+import threading
+import time
 
 from .b2_contracts import (EvidenceClass, FreshnessState, build_recovery_manifest,
                            provenance_for_payload, utc_now)
@@ -20,6 +23,7 @@ NO_SIDE_EFFECT = "NO_SIDE_EFFECT"
 UNKNOWN = "UNKNOWN"
 UNAVAILABLE = "UNAVAILABLE"
 STALE = "STALE"
+TREND_RANKING_MAX_ASSETS = 4
 
 
 def _now() -> str:
@@ -117,6 +121,8 @@ def _availability(payload: Any) -> tuple[str, str, bool]:
     status = str(payload.get("status") or "").upper()
     if status in {"OFFLINE", "UNAVAILABLE", "NOT_FOUND", "INVALID_TIMEFRAME"}:
         return UNAVAILABLE, status, True
+    if status in {"SOURCE_UNAVAILABLE", "SOURCE_DISABLED"}:
+        return UNAVAILABLE, "DEGRADED", False
     if payload.get("stale") is True or str(payload.get("freshness", "")).upper() == STALE:
         return STALE, STALE, True
     timestamp = payload.get("timestamp") or payload.get("observed_at") or payload.get("updated_at")
@@ -140,7 +146,10 @@ def _envelope(capability_id: str, payload: Any, source_module: str,
                        "calculation_origin": provenance.get("calculation_origin")
                        or "existing_golden_implementation"})
     return {
-        "ok": isinstance(data, dict) and data.get("ok", True) is not False,
+        "ok": (isinstance(data, dict) and
+               (data.get("ok", True) is not False or
+                str(data.get("status") or "").upper() in
+                {"SOURCE_UNAVAILABLE", "SOURCE_DISABLED"})),
         "capability_id": capability_id,
         "read_only": True,
         "side_effect_class": READ_ONLY,
@@ -227,6 +236,8 @@ class GoldenReadBridge:
     def __init__(self, robot_catalog=None, runtime_profile=None):
         self.robot_catalog = robot_catalog
         self.runtime_profile = runtime_profile
+        self._trend_ranking_lock = threading.Lock()
+        self._trend_ranking_cache = None
 
     def set_runtime_profile(self, profile):
         self.runtime_profile = profile
@@ -239,6 +250,33 @@ class GoldenReadBridge:
             return bool(active_runtime_profile().mt5_enabled)
         except Exception:
             return True
+
+    def _market_data_read_enabled(self):
+        if self.runtime_profile is not None:
+            return bool(getattr(self.runtime_profile, "market_data_read_enabled", False))
+        try:
+            from .runtime_profile import active_runtime_profile
+            return bool(active_runtime_profile().market_data_read_enabled)
+        except Exception:
+            return False
+
+    def _mt5_market_data_read_enabled(self):
+        if self.runtime_profile is not None:
+            return bool(getattr(self.runtime_profile, "mt5_market_data_read_enabled", False))
+        try:
+            from .runtime_profile import active_runtime_profile
+            return bool(active_runtime_profile().mt5_market_data_read_enabled)
+        except Exception:
+            return False
+
+    def _market_read_models_enabled(self):
+        if self.runtime_profile is not None:
+            return bool(getattr(self.runtime_profile, "market_read_models_enabled", True))
+        try:
+            from .runtime_profile import active_runtime_profile
+            return bool(active_runtime_profile().market_read_models_enabled)
+        except Exception:
+            return False
 
     @staticmethod
     def _source_disabled(capability_id, source_module):
@@ -330,6 +368,49 @@ class GoldenReadBridge:
             }
         return _safe("golden.radar", "market_data.py", read)
 
+    def statistics_snapshot(self) -> dict[str, Any]:
+        """Project journal statistics without the legacy dashboard cache write."""
+        def read():
+            from statistics_engine import get_engine
+            engine = get_engine()
+            return {
+                "strategy_performance": engine.get_strategy_performance(),
+                "asset_performance": engine.get_asset_performance(),
+                "hourly_performance": engine.get_hourly_performance(),
+                "regime_performance": engine.get_regime_performance(),
+                "mode_performance": engine.get_mode_performance(),
+                "score_calibration": engine.get_score_calibration(),
+                "walk_forward": engine.get_walk_forward(),
+                "confidence_status": engine.get_confidence_status(),
+                "observed_at": _now(),
+                "source": "trade_journal.jsonl",
+                "source_limit": 10000,
+                "source_scope": "up to 10000 journal records per aggregate",
+                "record_selection": "resolved result labels only; source provenance is mixed and unverified",
+                "execution_provenance": "NOT_VERIFIED",
+                "mt5_imports_proven_as_real_account_trades": False,
+                "execution_logger_limitation": (
+                    "AUTO_TRADE execution fields may be lost because log_analysis "
+                    "stores PENDING/false/0; no execution is proven by this Journal"),
+                "read_only": True,
+                "cache_written": False,
+            }
+        return _safe("golden.statistics", "statistics_engine.py", read,
+                     evidence_class="HISTORICAL_EVIDENCE")
+
+    def trade_journal_history(self, symbol="", record_type="ALL",
+                              limit=10, offset=0, date_from="", date_to="",
+                              exit_type="ALL") -> dict[str, Any]:
+        """Expose a bounded allowlisted Journal page through the canonical bridge."""
+        def read():
+            from trade_journal import TradeJournal
+            return TradeJournal().get_history_page(
+                symbol=symbol, record_type=record_type, limit=limit,
+                offset=offset, date_from=date_from, date_to=date_to,
+                exit_type=exit_type)
+        return _safe("golden.trade_journal.history", "trade_journal.jsonl", read,
+                     evidence_class="HISTORICAL_EVIDENCE")
+
     def market_intelligence_snapshot(self, symbol: str = "XAUUSD",
                                      timeframe: str = "M15",
                                      correlation_id: str = "") -> dict[str, Any]:
@@ -360,6 +441,503 @@ class GoldenReadBridge:
         result["status"] = data.get("status", result.get("availability", UNKNOWN))
         result["freshness"] = data.get("freshness", result.get("freshness", UNKNOWN))
         return result
+
+    def panel_symbol_discovery(self, query: str = "", asset_class: str = "ALL",
+                               correlation_id: str = "") -> dict[str, Any]:
+        """Discover provider instruments without granting execution authority."""
+        query = str(query or "").strip()[:64]
+        kind = str(asset_class or "ALL").strip().upper()
+        if not self._market_read_models_enabled():
+            return _envelope("golden.panel.symbol_discovery", {
+                "ok": False, "status": "SOURCE_DISABLED", "query": query,
+                "asset_class": kind, "assets": [], "sources": {},
+                "reason": "MARKET_READ_MODELS_DISABLED_BY_PROFILE",
+                "execution_authority": "NONE"}, "market_data.py",
+                correlation_id=correlation_id)
+        if kind not in {"ALL", "FOREX", "INDICES", "STOCKS", "ETF", "CRYPTO",
+                        "COMMODITIES", "METALS", "OTHER", "OTHER_UNKNOWN"}:
+            return _envelope("golden.panel.symbol_discovery", {
+                "ok": False, "status": "INVALID_QUERY", "query": query,
+                "asset_class": kind, "assets": [],
+                "reason": "SUPPORTED_ASSET_CLASS_REQUIRED",
+                "execution_authority": "NONE"}, "market_data.py",
+                correlation_id=correlation_id)
+
+        assets = []
+        sources = {
+            "MT5": {"status": "SOURCE_DISABLED_BY_PROFILE" if not self._mt5_market_data_read_enabled()
+                     else "NOT_QUERIED", "read_only": True},
+        }
+        if kind in {"ALL", "CRYPTO", "FOREX", "METALS", "INDICES", "COMMODITIES",
+                    "STOCKS", "ETF", "OTHER", "OTHER_UNKNOWN"}:
+            if self._mt5_market_data_read_enabled():
+                try:
+                    from .tools.market_readonly import mt5_search_symbols
+                    result = mt5_search_symbols(query, kind)
+                    sources["MT5"] = {"status": result.get("status", "SOURCE_UNAVAILABLE"),
+                                      "observed_at": result.get("observed_at"),
+                                      "reason": result.get("reason"), "read_only": True,
+                                      "classification_counts": result.get("classification_counts", {}),
+                                      "enumerated_count": result.get("enumerated_count", 0)}
+                    assets.extend(result.get("assets", []))
+                except Exception as exc:
+                    sources["MT5"] = {"status": "SOURCE_UNAVAILABLE",
+                                      "reason": type(exc).__name__, "read_only": True}
+            else:
+                sources["MT5"] = {"status": "SOURCE_DISABLED_BY_PROFILE", "read_only": True}
+
+        assets.sort(key=lambda item: (str(item.get("asset_class") or ""),
+                                      str(item.get("display_name") or "").casefold(),
+                                      item.get("provider", ""),
+                                      str(item.get("provider_symbol") or "")))
+        if assets:
+            status = "AVAILABLE"
+        elif (kind in {"ALL", "FOREX", "METALS", "CRYPTO", "INDICES", "COMMODITIES",
+                       "STOCKS", "ETF", "OTHER", "OTHER_UNKNOWN"}
+              and sources.get("MT5", {}).get("status") in
+              {"SOURCE_DISABLED_BY_PROFILE", "SOURCE_DISABLED"}):
+            status = "SOURCE_DISABLED"
+        elif sources.get("MT5", {}).get("status") == "SOURCE_UNAVAILABLE":
+            status = "SOURCE_UNAVAILABLE"
+        else:
+            status = "NO_MATCH"
+        payload = {
+            "ok": status == "AVAILABLE", "status": status,
+            "query": query, "asset_class": kind, "assets": assets,
+            "sources": sources, "observed_at": _now(),
+            "execution_authority": "NONE", "read_only": True,
+            "fallback_catalog_used": False,
+        }
+        result = _envelope("golden.panel.symbol_discovery", payload,
+                           "market_data.py + market_readonly.py",
+                           correlation_id=correlation_id)
+        return result
+
+    def panel_market_snapshot(self, provider: str, provider_asset_id: str,
+                              provider_symbol: str, asset_class: str,
+                              timeframe: str = "M15", count: int = 120,
+                              correlation_id: str = "") -> dict[str, Any]:
+        """Read one verified selected-asset snapshot through Jarvis-owned providers."""
+        provider = str(provider or "").strip()[:40]
+        asset_id = str(provider_asset_id or "").strip()[:96]
+        symbol = str(provider_symbol or "").strip()[:64]
+        kind = str(asset_class or "").strip().upper()[:24]
+        timeframe = str(timeframe or "M15").strip().upper()[:8]
+        if not self._market_data_read_enabled():
+            payload = {"ok": False, "status": "SOURCE_DISABLED",
+                       "reason": "MARKET_DATA_READ_DISABLED_BY_PROFILE"}
+        elif not symbol or kind not in {"FOREX", "METALS", "CRYPTO", "INDICES", "COMMODITIES",
+                                       "STOCKS", "ETF", "OTHER", "OTHER_UNKNOWN"}:
+            payload = {"ok": False, "status": "INVALID_REQUEST", "reason": "ASSET_IDENTITY_REQUIRED"}
+        elif provider != "MT5" or asset_id != f"mt5:{symbol}":
+            payload = {"ok": False, "status": "IDENTITY_MISMATCH",
+                       "reason": "MT5_PROVIDER_IDENTITY_NOT_RECONCILED"}
+        elif not self._mt5_market_data_read_enabled():
+            payload = {"ok": False, "status": "SOURCE_DISABLED",
+                       "reason": "MT5_MARKET_DATA_READ_DISABLED_BY_PROFILE"}
+        else:
+            from .tools.market_readonly import mt5_market_data_snapshot
+            payload = mt5_market_data_snapshot(symbol, timeframe, count)
+            source_status = str(payload.get("status") or "").upper()
+            asset = payload.get("asset") if isinstance(payload.get("asset"), dict) else {}
+            provider_kind = str(asset.get("asset_class") or "").strip().upper()
+            if source_status in {"SOURCE_UNAVAILABLE", "SOURCE_DISABLED"}:
+                pass
+            elif provider_kind and provider_kind != kind:
+                payload = {"ok": False, "status": "IDENTITY_MISMATCH",
+                           "reason": "PROVIDER_CLASSIFICATION_CHANGED",
+                           "provider_symbol": symbol}
+            elif payload.get("ok") is True and not provider_kind:
+                payload = {"ok": False, "status": "IDENTITY_UNVERIFIED",
+                           "reason": "PROVIDER_CLASSIFICATION_UNAVAILABLE",
+                           "provider_symbol": symbol}
+        payload.setdefault("read_only", True)
+        payload.setdefault("capability", "MT5_MARKET_DATA_READ" if provider == "MT5" else "MARKET_DATA_READ")
+        payload.setdefault("execution_authority", "NONE")
+        return _envelope("golden.panel.market_snapshot", payload,
+                         "market_data.py + market_readonly.py",
+                         correlation_id=correlation_id)
+
+    @staticmethod
+    def _trend_ranking_audit_summary(ranked, scan_metadata, correlation_id,
+                                     snapshot_requests, available_snapshots,
+                                     candles_returned, cache):
+        metadata = scan_metadata if isinstance(scan_metadata, dict) else {}
+        assets = []
+        safe_frame_states = {"AVAILABLE", "STALE", "SOURCE_UNAVAILABLE",
+                             "SOURCE_DISABLED", "INSUFFICIENT_DATA", "UNKNOWN"}
+        for row in ranked:
+            identity = row.get("asset") if isinstance(row.get("asset"), dict) else {}
+            frames = row.get("evaluated_timeframes") if isinstance(row.get("evaluated_timeframes"), list) else []
+            available = [str(frame.get("timeframe")) for frame in frames
+                         if frame.get("status") == "AVAILABLE"]
+            missing = []
+            for frame in frames:
+                frame_status = str(frame.get("status") or "UNKNOWN").upper()
+                if frame_status == "AVAILABLE":
+                    continue
+                safe_status = frame_status if frame_status in safe_frame_states else "UNKNOWN"
+                missing.append({"timeframe": str(frame.get("timeframe") or "UNKNOWN")[:8],
+                                "status": safe_status, "error_code": safe_status})
+            score = row.get("directional_score")
+            if row.get("read_errors"):
+                state = "FALHO"
+            elif isinstance(score, (int, float)):
+                state = "AVALIADO" if len(available) >= 3 else "DADOS INSUFICIENTES"
+            elif frames and all(frame.get("status") in {"SOURCE_UNAVAILABLE", "SOURCE_DISABLED"}
+                                for frame in frames):
+                state = "INDISPONÍVEL"
+            else:
+                state = "DADOS INSUFICIENTES"
+            snapshots = {str(frame.get("timeframe"))[:8]: str(frame.get("snapshot_id"))[:96]
+                         for frame in frames if frame.get("snapshot_id") not in {None, "", "UNKNOWN"}}
+            assets.append({
+                "provider": identity.get("provider", "MT5"),
+                "provider_asset_id": identity.get("provider_asset_id", "UNKNOWN"),
+                "provider_symbol": identity.get("provider_symbol", "UNKNOWN"),
+                "display_symbol": identity.get("display_symbol", identity.get("provider_symbol", "UNKNOWN")),
+                "display_name": identity.get("display_name", identity.get("provider_symbol", "UNKNOWN")),
+                "asset_class": identity.get("asset_class", "UNKNOWN"),
+                "asset_class_source": row.get("asset_class_source", "UNKNOWN"),
+                "state": state, "directional_score": score,
+                "trend": row.get("trend", "UNKNOWN"),
+                "available_timeframes": available, "missing_timeframes": missing,
+                "snapshot_ids": snapshots,
+                "candles_returned": sum(int(frame.get("candle_count") or 0) for frame in frames),
+                "freshness": row.get("freshness", "UNKNOWN"),
+                "temporal_authority": row.get("temporal_authority", "UNKNOWN"),
+                "timeframe_divergence": row.get("timeframe_divergence", "UNKNOWN"),
+                "extended_trend_risk": row.get("extended_trend_risk", "UNKNOWN"),
+                "terminal_identity_state": (
+                    "ROOT_FINGERPRINT_OBSERVED_NOT_RECONCILED"
+                    if row.get("terminal_data_root_fingerprints") else "UNKNOWN"),
+                "terminal_data_root_fingerprints": row.get("terminal_data_root_fingerprints", []),
+                "candles_in_snapshot_evidence": sum(
+                    int(frame.get("candle_count") or 0) for frame in frames),
+                "sanitized_errors": row.get("read_errors", []),
+            })
+        return {
+            "schema": "trend-ranking-audit-v1",
+            "scan_id": metadata.get("scan_id", "UNKNOWN"),
+            "asset_class_filter": metadata.get("asset_class_filter", "ALL"),
+            "universe_hash": metadata.get("universe_hash", "UNKNOWN"),
+            "universe_hash_verification": "CLIENT_PROVIDED_NOT_RECOMPUTED_BY_CORE",
+            "universe_total": metadata.get("universe_total", "UNKNOWN"),
+            "excluded_count": metadata.get("excluded_count", 0),
+            "excluded_reason_counts": metadata.get("excluded_reason_counts", {}),
+            "catalog_source": metadata.get("catalog_source", "UNKNOWN"),
+            "catalog_observation": metadata.get("catalog_observation", {}),
+            "catalog_observation_verification": "CLIENT_REPORTED_NOT_REVALIDATED_BY_CORE",
+            "batch_index": metadata.get("batch_index", "UNKNOWN"),
+            "batch_total": metadata.get("batch_total", "UNKNOWN"),
+            "batch_asset_ids": metadata.get("batch_asset_ids", []),
+            "retry_of_failed_assets": metadata.get("retry_of_failed_assets", False),
+            "correlation_id": correlation_id or "UNKNOWN",
+            "assets": assets,
+            "read_counts": {
+                "snapshot_requests": snapshot_requests,
+                "available_snapshots": available_snapshots,
+                "candles_returned_this_request": candles_returned,
+                "cache": cache,
+                "per_asset_snapshot_request_limit": 7,
+                "batch_snapshot_request_limit": TREND_RANKING_MAX_ASSETS * 7,
+                "batch_candle_limit": TREND_RANKING_MAX_ASSETS * 7 * 100,
+            },
+            "provider": "MT5_READ_ONLY", "external_provider_calls": 0,
+            "scanner_scores_used": False, "execution_authority": "NONE",
+        }
+
+    def panel_trend_ranking(self, assets: list[dict[str, Any]],
+                            correlation_id: str = "",
+                            scan_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Rank one explicit, bounded MT5 batch using factual OHLC only."""
+        allowed_classes = {"FOREX", "METALS", "CRYPTO", "INDICES", "COMMODITIES",
+                           "STOCKS", "ETF", "OTHER", "OTHER_UNKNOWN"}
+        normalized = []
+        seen = set()
+        if not isinstance(assets, list) or not 1 <= len(assets) <= TREND_RANKING_MAX_ASSETS:
+            return _envelope("golden.panel.trend_ranking", {
+                "ok": False, "status": "INVALID_BATCH_SIZE", "assets": [],
+                "maximum_assets": TREND_RANKING_MAX_ASSETS,
+                "reason": "BATCH_MUST_CONTAIN_1_TO_4_IDENTITIES",
+                "execution_authority": "NONE"}, "market_readonly.py",
+                correlation_id=correlation_id)
+        for row in assets:
+            if not isinstance(row, dict):
+                continue
+            provider = str(row.get("provider") or "").strip().upper()
+            symbol = str(row.get("provider_symbol") or "").strip()[:64]
+            asset_id = str(row.get("provider_asset_id") or "").strip()[:96]
+            kind = str(row.get("asset_class") or "").strip().upper()[:24]
+            if (provider != "MT5" or not symbol.isascii()
+                    or not symbol.replace(".", "").replace("_", "").replace("-", "").isalnum()
+                    or asset_id != f"mt5:{symbol}" or kind not in allowed_classes):
+                continue
+            if asset_id in seen:
+                continue
+            seen.add(asset_id)
+            normalized.append({
+                "provider": provider, "provider_asset_id": asset_id,
+                "provider_symbol": symbol, "symbol": symbol,
+                "display_symbol": str(row.get("display_symbol") or symbol)[:64],
+                "display_name": str(row.get("display_name") or symbol)[:120],
+                "asset_class": kind,
+                "asset_class_source": str(row.get("asset_class_source") or "")[:48],
+            })
+        if not normalized:
+            return _envelope("golden.panel.trend_ranking", {
+                "ok": False, "status": "INVALID_ASSET_IDENTITIES", "assets": [],
+                "reason": "CANONICAL_MT5_IDENTITIES_REQUIRED",
+                "execution_authority": "NONE"}, "market_readonly.py",
+                correlation_id=correlation_id)
+        if not self._market_data_read_enabled() or not self._mt5_market_data_read_enabled():
+            return _envelope("golden.panel.trend_ranking", {
+                "ok": False, "status": "SOURCE_DISABLED", "assets": [],
+                "reason": "MT5_MARKET_DATA_READ_DISABLED_BY_PROFILE",
+                "execution_authority": "NONE"}, "market_readonly.py",
+                correlation_id=correlation_id)
+
+        scan_metadata = scan_metadata if isinstance(scan_metadata, dict) else {}
+
+        cache_key = tuple((item["provider_asset_id"], item["asset_class"])
+                          for item in normalized)
+        now = time.monotonic()
+        with self._trend_ranking_lock:
+            if self._trend_ranking_cache:
+                cached_key, expires_at, cached_data = self._trend_ranking_cache
+                if cached_key == cache_key and now < expires_at:
+                    data = dict(cached_data)
+                    data["cache"] = "HIT"
+                    data["cache_ttl_seconds"] = 20
+                    data["snapshot_requests"] = 0
+                    data["available_snapshots"] = 0
+                    data["candles_returned"] = 0
+                    data["audit_summary"] = self._trend_ranking_audit_summary(
+                        data.get("ranked_assets", []), scan_metadata, correlation_id,
+                        0, 0, 0, "HIT")
+                    return _envelope("golden.panel.trend_ranking", data,
+                                     "market_readonly.py + GoldenReadBridge",
+                                     correlation_id=correlation_id)
+
+            from .tools.market_readonly import (
+                _TREND_COMPONENT_WEIGHTS, _TREND_TIMEFRAMES, _TREND_WEIGHTS,
+                rank_market_trend_frames,
+            )
+
+            ranked = []
+            source_failures = 0
+            snapshot_requests = 0
+            available_snapshots = 0
+            candles_returned = 0
+            for asset in normalized:
+                frames = {}
+                terminal_fingerprints = set()
+                asset_class_sources = set()
+                read_errors = []
+                for timeframe in _TREND_TIMEFRAMES:
+                    snapshot_requests += 1
+                    try:
+                        snapshot_envelope = self.panel_market_snapshot(
+                            asset["provider"], asset["provider_asset_id"],
+                            asset["provider_symbol"], asset["asset_class"],
+                            timeframe, 100, correlation_id)
+                    except Exception as exc:
+                        read_errors.append({"timeframe": timeframe,
+                                            "error_code": type(exc).__name__[:64]})
+                        snapshot_envelope = {"ok": False, "data": {
+                            "ok": False, "status": "SOURCE_UNAVAILABLE",
+                            "reason": "SNAPSHOT_READ_EXCEPTION"}}
+                    snapshot = (snapshot_envelope.get("data")
+                                if isinstance(snapshot_envelope, dict) else None)
+                    snapshot = snapshot if isinstance(snapshot, dict) else {}
+                    if snapshot.get("ok") is True:
+                        available_snapshots += 1
+                        candles = snapshot.get("candles")
+                        candles_returned += len(candles) if isinstance(candles, list) else 0
+                    provenance = snapshot.get("provenance")
+                    data_root = (provenance.get("terminal_data_root")
+                                 if isinstance(provenance, dict) else None)
+                    if isinstance(data_root, str) and data_root.strip():
+                        terminal_fingerprints.add(hashlib.sha256(
+                            data_root.strip().encode("utf-8")).hexdigest())
+                    actual = snapshot.get("asset") if isinstance(snapshot.get("asset"), dict) else {}
+                    if (snapshot.get("ok") is True
+                            and (actual.get("provider") != "MT5"
+                                 or actual.get("asset_id") != asset["provider_asset_id"]
+                                 or actual.get("provider_symbol") != asset["provider_symbol"]
+                                 or actual.get("asset_class") != asset["asset_class"]
+                                 or snapshot.get("timeframe") != timeframe)):
+                        snapshot = {"ok": False, "status": "IDENTITY_MISMATCH",
+                                    "reason": "SNAPSHOT_IDENTITY_OR_TIMEFRAME_MISMATCH"}
+                    if snapshot.get("ok") is True:
+                        class_source = str(actual.get("asset_class_source") or "").strip().upper()
+                        if class_source:
+                            asset_class_sources.add(class_source)
+                    if snapshot.get("ok") is not True:
+                        source_failures += 1
+                    frames[timeframe] = snapshot
+                ranked_row = rank_market_trend_frames(asset, frames)
+                ranked_row["asset_class_source"] = (
+                    next(iter(asset_class_sources)) if len(asset_class_sources) == 1
+                    else "INCONSISTENT_OR_UNKNOWN")
+                ranked_row["terminal_data_root_fingerprints"] = sorted(terminal_fingerprints)
+                ranked_row["read_errors"] = read_errors
+                ranked.append(ranked_row)
+
+            ranked.sort(key=lambda item: (
+                item.get("directional_score") is None,
+                -(item.get("directional_score") or 0),
+                item["asset"].get("provider_symbol", "")))
+            data = {
+                "ok": bool(ranked), "status": "AVAILABLE" if ranked else "NO_DATA",
+                "ranked_assets": ranked, "assets_evaluated": len(normalized),
+                "assets_requested": len(assets),
+                "maximum_assets_per_batch": TREND_RANKING_MAX_ASSETS,
+                "timeframes": list(_TREND_TIMEFRAMES), "candles_per_timeframe": 100,
+                "maximum_ohlc_bars": len(normalized) * len(_TREND_TIMEFRAMES) * 100,
+                "maximum_market_snapshot_reads": len(normalized) * len(_TREND_TIMEFRAMES),
+                "snapshot_requests": snapshot_requests,
+                "available_snapshots": available_snapshots,
+                "candles_returned": candles_returned,
+                "methodology": {
+                    "version": "ohlc-trend-v1",
+                    "timeframe_weights": dict(_TREND_WEIGHTS),
+                    "component_weights": dict(_TREND_COMPONENT_WEIGHTS),
+                    "score_bands": {"strong_up_min": 60, "up_min": 25,
+                                     "lateral": [-24, 24], "down_max": -25,
+                                     "strong_down_max": -60},
+                    "minimum_coverage": {"timeframes": 3, "timeframe_groups": 2},
+                    "score_semantics": "DIRECTIONAL_INTENSITY_NOT_PROBABILITY",
+                },
+                "source_failures": source_failures, "cache": "MISS",
+                "cache_ttl_seconds": 20, "read_only": True,
+                "provider_calls": 0, "scanner_scores_used": False,
+                "macro_news_inputs": "NOT_USED_UNVERIFIED_TEMPORAL_SOURCES",
+                "execution_authority": "NONE",
+                "observed_at": _now(),
+            }
+            data["audit_summary"] = self._trend_ranking_audit_summary(
+                ranked, scan_metadata, correlation_id, snapshot_requests,
+                available_snapshots, candles_returned, "MISS")
+            self._trend_ranking_cache = (cache_key, time.monotonic() + 20, data)
+        return _envelope("golden.panel.trend_ranking", data,
+                         "market_readonly.py + GoldenReadBridge",
+                         correlation_id=correlation_id)
+
+    def panel_market_update(self, provider: str, provider_asset_id: str,
+                            provider_symbol: str, asset_class: str,
+                            timeframe: str = "M15",
+                            correlation_id: str = "") -> dict[str, Any]:
+        provider = str(provider or "").strip()[:40]
+        asset_id = str(provider_asset_id or "").strip()[:96]
+        symbol = str(provider_symbol or "").strip()[:64]
+        kind = str(asset_class or "").strip().upper()[:24]
+        timeframe = str(timeframe or "M15").strip().upper()[:8]
+        if not self._market_data_read_enabled() or not self._mt5_market_data_read_enabled():
+            payload = {"ok": False, "status": "SOURCE_DISABLED",
+                       "reason": "MT5_MARKET_DATA_READ_DISABLED_BY_PROFILE"}
+        elif (provider != "MT5" or not symbol or asset_id != f"mt5:{symbol}"
+              or kind not in {"FOREX", "METALS", "CRYPTO", "INDICES", "COMMODITIES",
+                              "STOCKS", "ETF", "OTHER", "OTHER_UNKNOWN"}):
+            payload = {"ok": False, "status": "IDENTITY_MISMATCH",
+                       "reason": "MT5_PROVIDER_IDENTITY_NOT_RECONCILED"}
+        else:
+            from .tools.market_readonly import mt5_market_data_update
+            payload = mt5_market_data_update(symbol, timeframe)
+            source_status = str(payload.get("status") or "").upper()
+            provider_kind = str(payload.get("asset_class") or "").strip().upper()
+            if source_status in {"SOURCE_UNAVAILABLE", "SOURCE_DISABLED"}:
+                pass
+            elif provider_kind and provider_kind != kind:
+                payload = {"ok": False, "status": "IDENTITY_MISMATCH",
+                           "reason": "PROVIDER_CLASSIFICATION_CHANGED",
+                           "provider_symbol": symbol}
+            elif payload.get("ok") is True and not provider_kind:
+                payload = {"ok": False, "status": "IDENTITY_UNVERIFIED",
+                           "reason": "PROVIDER_CLASSIFICATION_UNAVAILABLE",
+                           "provider_symbol": symbol}
+        payload.setdefault("read_only", True)
+        payload.setdefault("execution_authority", "NONE")
+        return _envelope("golden.panel.market_update", payload,
+                         "market_data.py + market_readonly.py",
+                         correlation_id=correlation_id)
+
+    def panel_macro_news(self, symbol: str, asset_class: str,
+                         instrument: dict[str, Any] | None = None,
+                         correlation_id: str = "") -> dict[str, Any]:
+        """Project existing Golden macro/news facts without its derived trade bias."""
+        from market_data import _economic_calendar, _macro_snapshot, _market_news, _pair_news
+        from .market_read_models import normalize_events, normalize_macro, normalize_news
+
+        instrument = instrument if isinstance(instrument, dict) else {}
+        symbol = str(symbol or "").strip()[:64]
+        asset_class = str(asset_class or "").strip().upper()[:24]
+        now = _now()
+        try:
+            macro_raw = _macro_snapshot([])
+            macro_rows = normalize_macro(macro_raw.get("indicators"))[:12]
+            macro = {
+                "status": "AVAILABLE" if macro_rows else "UNAVAILABLE",
+                "observed_at": macro_raw.get("updated_at") or now,
+                "source": "FRED/BCB",
+                "freshness": UNKNOWN,
+                "facts": macro_rows,
+                "read_only": True,
+            }
+        except Exception as exc:
+            macro = {"status": "UNAVAILABLE", "observed_at": now,
+                     "source": "market_data._macro_snapshot",
+                     "freshness": UNKNOWN, "facts": [],
+                     "reason": type(exc).__name__, "read_only": True}
+
+        try:
+            rows, calendar_state = _economic_calendar()
+            currencies = {str(instrument.get(key) or "").upper()
+                          for key in ("currency_base", "currency_quote")}
+            currencies.discard("")
+            relevant = [row for row in rows if not currencies or
+                        str(row.get("currency") or "").upper() in currencies]
+            event_rows = normalize_events(relevant)[:12]
+            events = {
+                "status": "AVAILABLE" if event_rows else "UNAVAILABLE",
+                "observed_at": now,
+                "source": "Trading Economics" if calendar_state == "online" else calendar_state,
+                "freshness": UNKNOWN,
+                "facts": event_rows,
+                "read_only": True,
+            }
+        except Exception as exc:
+            events = {"status": "UNAVAILABLE", "observed_at": now,
+                      "source": "market_data._economic_calendar",
+                      "freshness": UNKNOWN, "facts": [],
+                      "reason": type(exc).__name__, "read_only": True}
+
+        try:
+            base = str(instrument.get("currency_base") or "").upper()
+            quote = str(instrument.get("currency_quote") or "").upper()
+            if asset_class == "FOREX" and base and quote:
+                rows, news_source = _pair_news(base, quote)
+            else:
+                rows, news_source = _market_news()
+            news_rows = normalize_news(rows)[:8]
+            news = {"status": "AVAILABLE" if news_rows else "UNAVAILABLE",
+                    "observed_at": now, "source": news_source or "UNKNOWN",
+                    "freshness": UNKNOWN, "facts": news_rows,
+                    "read_only": True}
+        except Exception as exc:
+            news = {"status": "UNAVAILABLE", "observed_at": now,
+                    "source": "market_data news cache", "freshness": UNKNOWN,
+                    "facts": [], "reason": type(exc).__name__, "read_only": True}
+
+        payload = {
+            "ok": True, "status": "AVAILABLE",
+            "symbol": symbol, "asset_class": asset_class,
+            "macro": macro, "economic_events": events, "news": news,
+            "observed_at": now, "correlation_id": str(correlation_id or "")[:120],
+            "read_only": True, "execution_authority": "NONE",
+        }
+        return _envelope("golden.panel.factual_context", payload,
+                         "market_data.py", correlation_id=correlation_id)
 
     def market_context(self, symbol: str = "XAUUSD", timeframe: str = "M15") -> dict[str, Any]:
         def read():

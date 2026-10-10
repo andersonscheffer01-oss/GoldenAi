@@ -5,7 +5,7 @@
 | Source | Purpose | Authority | Refresh/cache | Failure behavior | Provenance state |
 |---|---|---|---|---|---|
 | MetaTrader 5 | Broker quotes, ticks, candles, levels, technical context | Broker-specific truth for traded symbols | Tick 500 ms; chart 15 s; overview request | `MT5 desconectado`/empty component | Source and `updated_at` present; no snapshot id |
-| CoinGecko | Bitcoin/Ethereum public market cards | Public crypto fallback/source | Request cache is not persisted in `market_data.py` | Empty crypto rows and source offline | Source/status present |
+| MT5 crypto instruments | Crypto contract discovery, quotes, ticks, candles and technical context | Sole current crypto market-data source | Queried from the selected MT5 terminal | Explicit source unavailable; no external fallback | Exact MT5 identity, timestamps and snapshot provenance |
 | FRED | US rates, inflation expectation, broad USD | Official macro series | Macro cache 900 s | Series omitted; error collected | Series id/source/date present |
 | Banco Central do Brasil | Selic and IPCA series | Official Brazilian macro series | Macro cache 900 s | Series omitted; error collected | Series id/source/date present |
 | Google News RSS | Gold/macro and pair news | Aggregated news feed | General 60 s; pair 120 s | Empty list/source may remain blank | Title/link/source/published_at when parseable |
@@ -33,4 +33,7 @@ The chart uses a 500 ms tick loop and a 15 s candle loop while the tab is visibl
 
 ## Static audit limits
 
-No live sample was taken in this gate because the backend was not started and MT5 was not touched. Runtime freshness, provider availability and cross-panel value equality therefore remain unverified. The map is based on source contracts and explicit error paths.
+The paragraphs above preserve the original static-audit scope. A later F2R2 runtime observation verified the approved terminal/data-root identity and dynamically enumerated MT5 crypto symbols. That observation found broker epochs ahead of system UTC; the adapter correctly classifies freshness as `UNKNOWN`, so it is not evidence of usable live analysis until the source-time anomaly is resolved.
+# Current crypto policy
+
+Crypto discovery and snapshots are MT5-only. External crypto-provider code was removed from the active path; older parity/audit reports retain their original historical observations and are not current architecture.

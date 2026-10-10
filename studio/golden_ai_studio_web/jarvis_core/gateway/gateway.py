@@ -37,6 +37,9 @@ from .cors import (
     is_cors_allowed_origin, build_cors_headers, cors_preflight_response,
     add_cors_to_response, CORSConfig,
 )
+from ..lifecycle import (
+    CORE_SHUTDOWN_PATH, schedule_graceful_shutdown, server_is_serving,
+)
 
 logger = logging.getLogger("jarvis.gateway")
 
@@ -127,7 +130,9 @@ class Gateway:
 
     def __init__(self, service, host: str = "127.0.0.1", port: int = 8766,
                  extra_hosts: Optional[list] = None, ssl_context=None,
-                 auth_manager: Optional[AuthManager] = None):
+                 auth_manager: Optional[AuthManager] = None,
+                 runtime_metadata_provider=None, lifecycle_controller=None,
+                 lifecycle_server=None):
         self.service = service
         self.host = host
         self.port = port
@@ -137,6 +142,9 @@ class Gateway:
         # canonical server supplies it; standalone Gateway callers retain the
         # historical default.
         self.auth = auth_manager or AuthManager()
+        self._runtime_metadata_provider = runtime_metadata_provider
+        self._lifecycle_controller = lifecycle_controller
+        self._lifecycle_server = lifecycle_server
         self.sessions = SessionManager()
         self.idempotency = IdempotencyCache()
         self._device_pairing = None
@@ -145,6 +153,7 @@ class Gateway:
         self._app = web.Application(middlewares=[self._make_cors_middleware()])
         self._app.router.add_get("/ws", self._handle_websocket)
         self._app.router.add_get("/health", self._handle_health)
+        self._app.router.add_post(CORE_SHUTDOWN_PATH, self._handle_core_shutdown)
         self._app.router.add_post("/pairing/code", self._handle_pairing_code)
         self._app.router.add_post("/pairing/confirm", self._handle_pairing_confirm)
         self._app.router.add_get("/devices", self._handle_list_devices)
@@ -372,12 +381,40 @@ class Gateway:
                 "connections": len(_active_connections),
                 "sessions": self.sessions.count(),
                 "service_state": status.get("state", "unknown"),
+                "runtime_profile": self.service.runtime_profile.name,
+                **(self._runtime_metadata_provider()
+                   if self._runtime_metadata_provider else {}),
             })
         except Exception as e:
             return web.json_response(
                 {"ok": False, "error": "Health check failed"},
                 status=500,
             )
+
+    async def _handle_core_shutdown(self, request: web.Request) -> web.Response:
+        if self._lifecycle_controller is None or self._lifecycle_server is None:
+            return web.json_response({"ok": False, "error": "LIFECYCLE_UNAVAILABLE"},
+                                     status=503)
+        if not server_is_serving(self._lifecycle_server):
+            return web.json_response({"ok": False, "error": "CORE_NOT_SERVING"},
+                                     status=503)
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        result = self._lifecycle_controller.authorize_shutdown(
+            payload,
+            source_ip=request.remote or "unknown",
+            authorization=request.headers.get("Authorization", ""),
+            origin=request.headers.get("Origin", ""),
+            sec_fetch_site=request.headers.get("Sec-Fetch-Site", ""),
+            content_type=request.headers.get("Content-Type", ""),
+        )
+        status = int(result.pop("_http_status", 200))
+        response = web.json_response(result, status=status)
+        if status == 202:
+            schedule_graceful_shutdown(self._lifecycle_server)
+        return response
 
     # ─── WebSocket Handler ─────────────────────────────────────
 
@@ -530,7 +567,14 @@ class Gateway:
         self, ws: web.WebSocketResponse, msg: GatewayMessage, source_ip: str
     ) -> Optional[tuple]:
         token = msg.payload.get("token", "")
-        state = self.auth.authenticate(token, source_ip)
+        read_only_device_verification = (
+            msg.payload.get("read_only_verification") is True
+            and source_ip in {"127.0.0.1", "::1"}
+        )
+        state = self.auth.authenticate(
+            token, source_ip,
+            update_device_last_seen=not read_only_device_verification,
+        )
 
         if state.authenticated:
             await self._send(ws, msg.reply(MessageType.AUTH_OK, {

@@ -34,7 +34,9 @@ import secrets
 import string
 import time
 import threading
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -111,6 +113,8 @@ class DevicePairingService:
         self._device_token_map: Dict[str, str] = {}  # token_hash → device_id
         self._cleanup_thread: Optional[threading.Thread] = None
         self._running = False
+        self._audit_log = None
+        self._runtime_metadata_provider = None
 
         # Load existing devices
         self._load_devices()
@@ -132,6 +136,11 @@ class DevicePairingService:
         if self._cleanup_thread:
             self._cleanup_thread.join(timeout=5)
         logger.info("Device pairing service stopped")
+
+    def set_audit_context(self, audit_log, runtime_metadata_provider=None) -> None:
+        """Attach the canonical audit sink for registry write attribution."""
+        self._audit_log = audit_log
+        self._runtime_metadata_provider = runtime_metadata_provider
 
     # ─── Pairing Code Management ──────────────────────────────
 
@@ -253,7 +262,11 @@ class DevicePairingService:
             self._pairing_codes.pop(used_code, None)
 
             # Persist
-            self._save_devices()
+            self._save_devices(
+                operation="device.pair",
+                device_id=device_id,
+                fields_changed=("device_record_added",),
+            )
 
             logger.info(f"Device paired: {device_id} ({device_name})")
             return {
@@ -266,10 +279,13 @@ class DevicePairingService:
 
     # ─── Device Token Authentication ──────────────────────────
 
-    def verify_device_token(self, token: str) -> Optional[Device]:
+    def verify_device_token(
+        self, token: str, *, update_last_seen: bool = True
+    ) -> Optional[Device]:
         """Verify a device token and return the device if valid.
 
         Returns None if token is invalid, revoked, or unknown.
+        Set update_last_seen=False for authenticated read-only validation.
         """
         if not token:
             return None
@@ -289,25 +305,38 @@ class DevicePairingService:
                 logger.warning(f"Revoked device attempted auth: {device_id}")
                 return None
 
-            # Update last_seen
-            device.last_seen = time.time()
-            self._save_devices()
+            if update_last_seen:
+                device.last_seen = time.time()
+                self._save_devices(
+                    operation="device.verify_token",
+                    device_id=device.device_id,
+                    fields_changed=("last_seen",),
+                    update_last_seen_requested=True,
+                )
 
             return device
 
-    def authenticate_device(self, token: str, source_ip: str = "") -> bool:
+    def authenticate_device(
+        self, token: str, source_ip: str = "", *, update_last_seen: bool = True
+    ) -> bool:
         """Authenticate a device token. Returns True if valid.
 
         Called by AuthManager to validate device tokens.
         """
-        device = self.verify_device_token(token)
+        device = self.verify_device_token(token, update_last_seen=update_last_seen)
         if device is None:
             return False
 
         with self._lock:
-            device.ip_address = source_ip
-            device.last_seen = time.time()
-            self._save_devices()
+            if update_last_seen:
+                device.ip_address = source_ip
+                device.last_seen = time.time()
+                self._save_devices(
+                    operation="device.authenticate",
+                    device_id=device.device_id,
+                    fields_changed=("ip_address", "last_seen"),
+                    update_last_seen_requested=True,
+                )
 
         return True
 
@@ -326,7 +355,11 @@ class DevicePairingService:
             # Remove from token map
             self._device_token_map.pop(device.token_hash, None)
 
-            self._save_devices()
+            self._save_devices(
+                operation="device.revoke",
+                device_id=device.device_id,
+                fields_changed=("revoked", "revoked_at"),
+            )
             logger.info(f"Device revoked: {device_id}")
             return True
 
@@ -370,7 +403,8 @@ class DevicePairingService:
 
     # ─── Persistence ──────────────────────────────────────────
 
-    def _save_devices(self) -> None:
+    def _save_devices(self, *, operation: str, device_id: str,
+                      fields_changed, update_last_seen_requested=None) -> None:
         """Save devices to JSON file."""
         try:
             store_path = Path(self._data_dir) / "device_registry.json"
@@ -390,8 +424,56 @@ class DevicePairingService:
                     "capabilities": device.capabilities,
                 }
             store_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            self._audit_registry_save(
+                store_path=store_path,
+                operation=operation,
+                device_id=device_id,
+                fields_changed=fields_changed,
+                update_last_seen_requested=update_last_seen_requested,
+            )
         except Exception as e:
             logger.error(f"Failed to save devices: {e}")
+
+    def _audit_registry_save(self, *, store_path: Path, operation: str,
+                             device_id: str, fields_changed,
+                             update_last_seen_requested=None) -> None:
+        if self._audit_log is None:
+            logger.warning("Registry save attribution unavailable")
+            return
+        try:
+            runtime = (self._runtime_metadata_provider()
+                       if self._runtime_metadata_provider else {})
+            fingerprint = hashlib.sha256(
+                str(device_id).encode("utf-8")
+            ).hexdigest()[:16]
+            self._audit_log.add(
+                task_id="registry-write-" + uuid.uuid4().hex,
+                command="device_registry_save",
+                tool="device_registry",
+                risk=("HIGH" if operation in {"device.pair", "device.revoke"}
+                      else "LOW"),
+                status="DEVICE_REGISTRY_SAVED",
+                result={"file": store_path.name,
+                        "fields_changed": sorted(set(fields_changed))},
+                envelope={
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "surface": "device_pairing",
+                    "operation": operation,
+                    "action": "DEVICE_REGISTRY_SAVE",
+                    "status": "DEVICE_REGISTRY_SAVED",
+                    "runtime_profile": runtime.get("runtime_profile", ""),
+                    "metadata": {
+                        "pid": os.getpid(),
+                        "runtime_instance_id": runtime.get("runtime_instance_id", ""),
+                        "device_fingerprint": fingerprint,
+                        "registry_file": store_path.name,
+                        "fields_changed": sorted(set(fields_changed)),
+                        "update_last_seen_requested": update_last_seen_requested,
+                    },
+                },
+            )
+        except Exception as exc:
+            logger.error("Registry save audit failed (%s)", type(exc).__name__)
 
     def _load_devices(self) -> None:
         """Load devices from JSON file."""

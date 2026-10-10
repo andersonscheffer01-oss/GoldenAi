@@ -43,8 +43,8 @@ def _bounded(value: Any, depth: int = 0) -> Any:
     if isinstance(value, dict):
         return {str(k)[:100]: _bounded(v, depth + 1)
                 for k, v in list(value.items())[:200]}
-    if isinstance(value, list):
-        return [_bounded(item, depth + 1) for item in value[:200]]
+    if isinstance(value, (list, tuple)):
+        return [_bounded(item, depth + 1) for item in list(value)[:200]]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)[:500]
@@ -253,6 +253,8 @@ class ResultEvidence:
     parser_version: str
     test_run_id: str = "NOT_PRESENT"
     robot_id: str = "NOT_PRESENT"
+    fixture_id: str = "NOT_PRESENT"
+    display_name: str = "NOT_PRESENT"
     symbol: str = "NOT_PRESENT"
     timeframe: str = "NOT_PRESENT"
     period: dict[str, Any] = field(default_factory=dict)
@@ -377,7 +379,8 @@ def parse_result_json(path: Path | str, artifact_id: Optional[str] = None) -> Re
         "initial_balance", "initial_deposit", "total_pnl", "profit", "gross_profit",
         "gross_loss", "max_drawdown", "drawdown", "relative_drawdown",
         "total_trades", "trades", "wins", "losses", "win_rate", "profit_factor",
-        "expected_payoff", "sharpe", "return_pct",
+        "expected_payoff", "sharpe", "return_pct", "bars", "total_bars", "ticks",
+        "total_ticks", "deterministic_tick_count",
     )
     metrics = {key: _bounded(stats[key]) for key in supported_metrics if key in stats}
     parameters = parsed.get("parameters") if isinstance(parsed.get("parameters"), dict) else "NOT_PRESENT"
@@ -387,6 +390,7 @@ def parse_result_json(path: Path | str, artifact_id: Optional[str] = None) -> Re
                 for key in metadata_keys if stats.get(key, parsed.get(key)) is not None}
     fields = {
         "test_run_id": ("test_run_id",), "robot_id": ("robot_id", "robot"),
+        "fixture_id": ("fixture_id",), "display_name": ("display_name", "name"),
         "symbol": ("symbol",), "timeframe": ("timeframe",),
     }
     values = {name: next((stats.get(key, parsed.get(key)) for key in keys
@@ -404,6 +408,7 @@ def parse_result_json(path: Path | str, artifact_id: Optional[str] = None) -> Re
         evidence_id="result_" + raw_hash[:24], artifact_id=artifact_id or "artifact_" + raw_hash[:24],
         artifact_hash=raw_hash, parser_version=PARSER_VERSION,
         test_run_id=str(values["test_run_id"]), robot_id=str(values["robot_id"]),
+        fixture_id=str(values["fixture_id"]), display_name=str(values["display_name"]),
         symbol=str(values["symbol"]), timeframe=str(values["timeframe"]),
         period=period, model=str(stats.get("model") or "NOT_PRESENT"),
         parameters=parameters,
@@ -431,6 +436,8 @@ def reconcile_result(manifest: GoldenTestRunManifest, result: ResultEvidence,
     mismatches = []
     if result.robot_id not in {"NOT_PRESENT", manifest.identity.robot_id}:
         mismatches.append("robot_id")
+    if result.fixture_id not in {"NOT_PRESENT", manifest.identity.robot_id}:
+        mismatches.append("fixture_id")
     if (manifest.tester.symbol != "NOT_PRESENT" and result.symbol != "NOT_PRESENT" and
             manifest.tester.symbol != result.symbol):
         mismatches.append("symbol")

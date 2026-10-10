@@ -622,6 +622,21 @@ class RobotCatalogStore:
              row["first_seen_at"] if row else now, now),
         )
 
+    def save_fixture(self, record: "RobotRecord") -> None:
+        """Persist one explicitly archived fixture without replacing a scan."""
+        now = time.time()
+        with self._connection:
+            self._connection.execute(
+                "INSERT INTO robot_records(robot_id, payload_json, first_seen_at, last_seen_at, updated_at) "
+                "VALUES(?, ?, ?, ?, ?) ON CONFLICT(robot_id) DO UPDATE SET payload_json=excluded.payload_json, "
+                "last_seen_at=excluded.last_seen_at, updated_at=excluded.updated_at",
+                (record.robot_id, json.dumps(record.to_dict(detail=True), ensure_ascii=True),
+                 record.discovered_at or now, record.last_seen_at or now, now),
+            )
+            for artifact in (record.source_artifacts + record.compiled_artifacts +
+                             record.parameter_presets):
+                self._save_artifact(record.robot_id, artifact, now)
+
     def save_production_association(self, record: "RobotRecord",
                                     evidence_items: list[dict[str, Any]]) -> None:
         """Atomically persist a production association through the catalog owner."""
@@ -1103,11 +1118,55 @@ class RobotCatalogReadModel:
             item = _bounded(dict(evidence))
             item.setdefault("robot_id", str(robot_id))
             item.setdefault("evidence_kind", "COMPILE")
-            if item not in record.compile_evidence:
-                record.compile_evidence.append(item)
+            evidence_id = str(item.get("evidence_id") or "")
+            record.compile_evidence = [existing for existing in record.compile_evidence
+                                       if not evidence_id or existing.get("evidence_id") != evidence_id]
+            record.compile_evidence.append(item)
             if self._store:
                 self._store.save_evidence("COMPILE", item)
+                self._store.save_fixture(record)
             return {"ok": True, "read_only": False, "evidence": item}
+
+    def register_test_fixture(self, fixture_id: str, name: str, version: str,
+                              source_artifact: dict[str, Any],
+                              compiled_artifact: dict[str, Any] | None = None,
+                              preset_artifact: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Add one archived fixture without adding it to the operational repertoire."""
+        with self._lock:
+            fixture_id = str(fixture_id or "").strip()
+            if not fixture_id:
+                return {"ok": False, "error": "FIXTURE_ID_REQUIRED"}
+            now = time.time()
+            record = self._robots.get(fixture_id)
+            if record is None:
+                record = RobotRecord(
+                    robot_id=fixture_id, name=str(name or fixture_id), version=str(version or "UNKNOWN"),
+                    status="ARCHIVED", artifact_role="EA", discovered_at=now, last_seen_at=now,
+                    known_limitations=["TEST FIXTURE ONLY", "NOT_OPERATIONAL_REPERTOIRE"],
+                )
+                self._robots[fixture_id] = record
+            record.status = "ARCHIVED"
+            record.known_limitations = list(dict.fromkeys(
+                record.known_limitations + ["TEST FIXTURE ONLY", "NOT_OPERATIONAL_REPERTOIRE"]))
+            record.source_artifacts = _unique_dicts(record.source_artifacts + [_bounded(source_artifact)],
+                                                    "artifact_id")
+            if compiled_artifact:
+                record.compiled_artifacts = _unique_dicts(
+                    record.compiled_artifacts + [_bounded(compiled_artifact)], "artifact_id")
+            if preset_artifact:
+                record.parameter_presets = _unique_dicts(
+                    record.parameter_presets + [_bounded(preset_artifact)], "artifact_id")
+            if not any(claim.field == "fixture_only" for claim in record.provenance):
+                record.provenance.append(EvidenceClaim(
+                    claim_id=f"{fixture_id}:fixture_only", field="fixture_only", value=True,
+                    evidence_type="USER_DEFINED", fact_source="USER_ASSERTION",
+                    source_artifact_id=str(source_artifact.get("artifact_id") or ""),
+                    source_ref=str(source_artifact.get("relative_path") or ""),
+                    confidence="HIGH", reason="explicitly isolated Strategy Tester test fixture",
+                ))
+            if self._store:
+                self._store.save_fixture(record)
+            return {"ok": True, "fixture": record.to_dict(detail=True)}
 
     def record_test_run(self, robot_id: str, manifest: dict[str, Any],
                         result: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -1131,6 +1190,7 @@ class RobotCatalogReadModel:
             record.latest_test_status = str(item["status"])
             if self._store:
                 self._store.save_evidence("TEST_RUN", item)
+                self._store.save_fixture(record)
             return {"ok": True, "read_only": False, "test_run": item}
 
     def associate_production_evidence(self, plan: dict[str, Any]) -> dict[str, Any]:

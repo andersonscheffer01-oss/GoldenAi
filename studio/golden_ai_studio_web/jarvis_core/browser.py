@@ -193,11 +193,15 @@ def classify_page_barrier(page: Optional[dict[str, Any]] = None,
         "somente necessários", "somente necessarios", "consent",
     )):
         return "COOKIE_CONSENT"
-    if (any(marker in haystack for marker in ("privacy policy", "política de privacidade"))
-            and any(marker in haystack for marker in (
-                "consent", "agree", "concordo", "preferences", "preferências",
-                "accept", "aceitar", "reject", "rejeitar", "continue", "continuar",
-            ))):
+    if (any(marker in haystack for marker in (
+            "privacy preferences", "privacy choices", "your privacy choices",
+            "consent preferences", "manage your consent", "we value your privacy",
+            "preferências de privacidade", "suas escolhas de privacidade",
+            "gerenciar consentimento",
+        )) and any(marker in haystack for marker in (
+            "consent", "agree", "concordo", "preferences", "preferências",
+            "accept", "aceitar", "reject", "rejeitar", "continue", "continuar",
+        ))):
         return "PRIVACY_CONSENT"
     if any(marker in haystack for marker in (
         "network error", "não foi possível carregar", "unable to load",

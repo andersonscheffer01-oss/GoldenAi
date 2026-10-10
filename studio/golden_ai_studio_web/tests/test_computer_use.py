@@ -108,6 +108,40 @@ def test_hotkey_safety_blocks_high_impact_combination():
     assert "bloqueado" in result["error"]
 
 
+def test_keyboard_type_uses_unicode_clipboard_fallback(monkeypatch):
+    calls = []
+
+    class FakeKeyboard:
+        def write(self, value, interval=0):
+            calls.append(("write", value, interval))
+
+        def hotkey(self, *keys):
+            calls.append(("hotkey", keys))
+
+    class FakeClipboard:
+        def __init__(self):
+            self.value = "previous"
+
+        def paste(self):
+            return self.value
+
+        def copy(self, value):
+            calls.append(("copy", value))
+            self.value = value
+
+    keyboard = FakeKeyboard()
+    clipboard = FakeClipboard()
+    monkeypatch.setattr(tools, "_pyautogui", lambda: keyboard)
+    monkeypatch.setattr(tools, "_pyperclip", lambda: clipboard)
+
+    result = tools.keyboard_type("Versão atual", interval=0.03)
+
+    assert result["ok"] is True
+    assert result["input_method"] == "unicode_clipboard_paste"
+    assert ("hotkey", ("ctrl", "v")) in calls
+    assert calls[-1] == ("copy", "previous")
+
+
 def test_security_manager_is_canonical_and_high_tools_confirm(tmp_path):
     service = JarvisService(str(tmp_path))
     high_names = {"mouse_click", "keyboard_type", "keyboard_press",

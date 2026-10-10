@@ -32,6 +32,29 @@ class HttpPerimeter:
     """Classify and authenticate HTTP requests before route dispatch."""
 
     PUBLIC_LOCAL = frozenset({("GET", "/health")})
+    READ_ONLY_DESKTOP_ROUTES = frozenset({
+        ("POST", "/api/jarvis/golden/symbol-discovery"),
+        ("POST", "/api/jarvis/golden/market-data"),
+        ("POST", "/api/jarvis/golden/market-live"),
+        ("POST", "/api/jarvis/golden/market-intelligence"),
+        ("POST", "/api/jarvis/golden/panel-analysis"),
+        # Authenticated Desktop-only scan snapshots, including a bounded local DB save.
+        # The ToolRegistry separately classifies SAVE as LOCAL_MUTATION.
+        ("POST", "/api/jarvis/golden/trend-scan"),
+        ("GET", "/api/status"),
+        ("GET", "/api/capabilities"),
+        ("GET", "/api/security/status"),
+        ("GET", "/api/desktop/status"),
+        ("GET", "/api/mt5/status"),
+        ("GET", "/api/jarvis/providers/status"),
+        ("GET", "/api/jarvis/brain/status"),
+        ("GET", "/api/jarvis/memory/status"),
+        ("GET", "/api/jarvis/readiness"),
+        ("GET", "/api/jarvis/orchestrator/status"),
+        ("GET", "/api/jarvis/skills/status"),
+        ("GET", "/api/jarvis/voice/status"),
+        ("GET", "/api/jarvis/voice-service/status"),
+    })
     HIGH_RISK_EXACT = frozenset({
         "/api/chat", "/api/jarvis/chat", "/api/agent", "/api/audio",
         "/api/video", "/api/document",
@@ -58,11 +81,21 @@ class HttpPerimeter:
         "/api/risk/", "/api/jarvis/voice-service/",
     )
 
+    MARKET_READ_ROUTES = frozenset({
+        ("POST", "/api/jarvis/golden/symbol-discovery"),
+        ("POST", "/api/jarvis/golden/market-data"),
+        ("POST", "/api/jarvis/golden/market-live"),
+        ("POST", "/api/jarvis/golden/market-intelligence"),
+        ("POST", "/api/jarvis/golden/panel-analysis"),
+    })
+
     def __init__(self, auth_manager: Optional[AuthManager] = None,
-                 audit_log: Any = None, lan_config: Any = None) -> None:
+                 audit_log: Any = None, lan_config: Any = None,
+                 runtime_profile_provider=None) -> None:
         self.auth_manager = auth_manager or AuthManager()
         self.audit_log = audit_log
         self.lan_config = lan_config
+        self.runtime_profile_provider = runtime_profile_provider
 
     @staticmethod
     def path_only(path: str) -> str:
@@ -83,6 +116,31 @@ class HttpPerimeter:
     @staticmethod
     def _is_loopback(source_ip: str) -> bool:
         return str(source_ip or "").strip() in {"127.0.0.1", "::1", "[::1]", "unknown"}
+
+    @staticmethod
+    def _is_read_only_desktop_route(method: str, path: str) -> bool:
+        return (str(method or "GET").upper(), HttpPerimeter.path_only(path)) in (
+            HttpPerimeter.READ_ONLY_DESKTOP_ROUTES
+        )
+
+    def _read_only_route_enabled(self, method: str, path: str) -> bool:
+        if self.runtime_profile_provider is None:
+            return False
+        try:
+            profile = self.runtime_profile_provider()
+        except Exception:
+            return False
+        if profile is None or not getattr(profile, "web_enabled", False):
+            return False
+        if (method, path) in self.MARKET_READ_ROUTES:
+            market_enabled = bool(
+                getattr(profile, "market_data_read_enabled", False)
+                and getattr(profile, "mt5_market_data_read_enabled", False))
+            if path == "/api/jarvis/golden/panel-analysis":
+                return bool(market_enabled and getattr(profile, "ai_enabled", False)
+                            and getattr(profile, "audit_enabled", False))
+            return market_enabled
+        return bool(getattr(profile, "security_enabled", False))
 
     def set_lan_config(self, lan_config: Any) -> None:
         self.lan_config = lan_config
@@ -163,10 +221,34 @@ class HttpPerimeter:
             return HttpAuthDecision(False, 401, "AUTH_MALFORMED", "Malformed authorization", context)
 
         token = raw[7:]
-        state = self.auth_manager.authenticate(token, source_ip=str(source_ip or "unknown"))
+        read_only_desktop = self._is_read_only_desktop_route(method, path)
+        if read_only_desktop and not self._read_only_route_enabled(method, path):
+            self._audit(context, "READ_ONLY_DESKTOP_DENIED", 403,
+                        "read-only route disabled by runtime profile")
+            return HttpAuthDecision(False, 403, "READ_ONLY_DISABLED_BY_PROFILE",
+                                    "Read-only route disabled by runtime profile", context)
+        if read_only_desktop and not self._is_loopback(source_ip):
+            self._audit(context, "READ_ONLY_DESKTOP_DENIED", 403,
+                        "loopback Desktop identity required")
+            return HttpAuthDecision(False, 403, "LOCAL_DESKTOP_REQUIRED",
+                                    "Loopback Desktop identity required", context)
+
+        state = self.auth_manager.authenticate(
+            token,
+            source_ip=str(source_ip or "unknown"),
+            update_device_last_seen=not read_only_desktop,
+        )
         if not state.authenticated:
             self._audit(context, "AUTH_FAILURE", 401, "invalid or expired authorization")
             return HttpAuthDecision(False, 401, "AUTH_INVALID", "Authentication failed", context)
+
+        if read_only_desktop and (
+                not state.client_info or
+                str(state.client_info.get("device_type", "")).casefold() != "desktop"):
+            self._audit(context, "READ_ONLY_DESKTOP_DENIED", 403,
+                        "existing Desktop device identity required")
+            return HttpAuthDecision(False, 403, "DESKTOP_IDENTITY_REQUIRED",
+                                    "Existing Desktop identity required", context)
 
         context["actor_id"] = "authenticated_client"
         if state.client_info and state.client_info.get("device_id"):

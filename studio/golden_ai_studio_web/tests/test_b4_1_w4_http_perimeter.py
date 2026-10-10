@@ -18,17 +18,19 @@ for _path in (GOLDEN_ROOT, STUDIO_ROOT):
         sys.path.insert(0, str(_path))
 
 from jarvis_core.audit import AuditLog
-from jarvis_core.gateway.auth import AuthManager
+from jarvis_core.gateway.auth import AuthManager, AuthState
 from jarvis_core.gateway.gateway import Gateway
 from jarvis_core.http_perimeter import HttpPerimeter
 from jarvis_core.models import Risk, Tool
 from jarvis_core.security import SecurityManager
+from jarvis_core.runtime_profile import WEB_AI_SAFE_PROFILE
 
 
 def _perimeter(tmp_path, token="wave4-fixture-token"):
     return HttpPerimeter(
         auth_manager=AuthManager(_token=token),
         audit_log=AuditLog(tmp_path / "audit.db"),
+        runtime_profile_provider=lambda: WEB_AI_SAFE_PROFILE,
     ), token
 
 
@@ -103,6 +105,84 @@ def test_route_classes_cover_canonical_legacy_stream_and_high_risk_paths(tmp_pat
     assert perimeter.route_class("POST", "/api/mt5/auto_trade") == "AUTHENTICATED_AND_AUTHORIZED"
 
 
+class _DesktopAuthSpy:
+    def __init__(self, authenticated=True):
+        self.authenticated = authenticated
+        self.update_last_seen = None
+
+    def authenticate(self, _token, source_ip="unknown", *, update_device_last_seen=True):
+        self.update_last_seen = update_device_last_seen
+        if not self.authenticated:
+            return AuthState(authenticated=False)
+        return AuthState(authenticated=True, client_info={
+            "device_id": "desktop-fixture", "device_type": "desktop"})
+
+
+def test_panel_analysis_is_exact_read_only_desktop_route_with_audit_and_no_last_seen(tmp_path):
+    audit = AuditLog(tmp_path / "audit.db")
+    auth = _DesktopAuthSpy()
+    perimeter = HttpPerimeter(
+        auth_manager=auth, audit_log=audit,
+        runtime_profile_provider=lambda: WEB_AI_SAFE_PROFILE)
+
+    result = perimeter.authorize(
+        "POST", "/api/jarvis/golden/panel-analysis",
+        _headers("desktop-fixture-token", **{"X-Correlation-ID": "panel-auth-corr"}),
+        source_ip="127.0.0.1")
+
+    assert result.allowed is True
+    assert auth.update_last_seen is False
+    assert result.context["correlation_id"] == "panel-auth-corr"
+    rows = audit.recent(1)
+    assert rows[0]["status"] == "AUTH_SUCCESS"
+    assert rows[0]["audit_envelope"]["correlation_id"] == "panel-auth-corr"
+
+
+@pytest.mark.parametrize("token", [None, "invalid"])
+def test_panel_analysis_rejects_missing_or_invalid_auth(tmp_path, token):
+    auth = _DesktopAuthSpy(authenticated=False)
+    perimeter = HttpPerimeter(
+        auth_manager=auth, audit_log=AuditLog(tmp_path / "audit.db"),
+        runtime_profile_provider=lambda: WEB_AI_SAFE_PROFILE)
+
+    result = perimeter.authorize(
+        "POST", "/api/jarvis/golden/panel-analysis", _headers(token),
+        source_ip="127.0.0.1")
+
+    assert result.allowed is False
+    assert result.status_code == 401
+    assert auth.update_last_seen is (None if token is None else False)
+
+
+def test_panel_analysis_requires_market_ai_and_audit_profile_permissions(tmp_path):
+    from dataclasses import replace
+
+    for profile in (
+            replace(WEB_AI_SAFE_PROFILE, market_data_read_enabled=False),
+            replace(WEB_AI_SAFE_PROFILE, mt5_market_data_read_enabled=False),
+            replace(WEB_AI_SAFE_PROFILE, ai_enabled=False),
+            replace(WEB_AI_SAFE_PROFILE, audit_enabled=False)):
+        perimeter = HttpPerimeter(
+            auth_manager=_DesktopAuthSpy(),
+            audit_log=AuditLog(tmp_path / (profile.name + str(id(profile)) + ".db")),
+            runtime_profile_provider=lambda profile=profile: profile)
+        result = perimeter.authorize(
+            "POST", "/api/jarvis/golden/panel-analysis",
+            _headers("desktop-fixture-token"), source_ip="127.0.0.1")
+        assert result.allowed is False
+        assert result.code == "READ_ONLY_DISABLED_BY_PROFILE"
+
+
+def test_panel_analysis_read_only_classification_does_not_spread_to_other_posts(tmp_path):
+    perimeter, _ = _perimeter(tmp_path)
+    assert perimeter._is_read_only_desktop_route(
+        "POST", "/api/jarvis/golden/panel-analysis")
+    assert not perimeter._is_read_only_desktop_route(
+        "POST", "/api/jarvis/golden/panel-analysis/extra")
+    assert not perimeter._is_read_only_desktop_route("POST", "/api/jarvis/chat")
+    assert not perimeter._is_read_only_desktop_route("POST", "/api/mt5/auto_trade")
+
+
 def test_authentication_does_not_replace_security_manager_approval(tmp_path):
     perimeter, token = _perimeter(tmp_path)
     authenticated = perimeter.authorize("POST", "/api/mt5/auto_trade", _headers(token))
@@ -121,7 +201,9 @@ def test_gateway_reuses_the_same_auth_manager(tmp_path):
     gateway = Gateway(object(), auth_manager=auth)
     perimeter = HttpPerimeter(auth_manager=auth, audit_log=AuditLog(tmp_path / "audit.db"))
     assert gateway.auth is perimeter.auth_manager
-    assert perimeter.authorize("GET", "/api/status", _headers("shared-wave4-token")).allowed
+    assert perimeter.authorize(
+        "POST", "/api/market/analyze", _headers("shared-wave4-token")
+    ).allowed
 
 
 def test_cors_is_origin_bound_and_never_wildcard(tmp_path):

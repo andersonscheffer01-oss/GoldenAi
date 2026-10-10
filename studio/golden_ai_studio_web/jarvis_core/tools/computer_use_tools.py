@@ -332,12 +332,31 @@ def screenshot(region: Optional[Any] = None) -> str:
 
 
 def keyboard_type(text: str, interval: float = 0.1) -> dict[str, Any]:
-    """Digita texto; o serviço classifica como MEDIUM."""
+    """Enter text, using a controlled paste fallback for Unicode characters."""
     try:
         value = str(text)
         interval = max(0.0, min(float(interval), 1.0))
-        _pyautogui().write(value, interval=interval)
-        return {"ok": True, "length": len(value), "interval": interval}
+        pyautogui = _pyautogui()
+        if value.isascii():
+            pyautogui.write(value, interval=interval)
+            method = "keyboard"
+        else:
+            # pyautogui.write cannot produce characters outside its keyboard
+            # map.  Paste through the existing clipboard boundary, then
+            # restore the user's previous clipboard value when possible.
+            clipboard = _pyperclip()
+            previous = clipboard.paste()
+            clipboard.copy(value)
+            try:
+                pyautogui.hotkey("ctrl", "v")
+            finally:
+                try:
+                    clipboard.copy(previous)
+                except Exception:
+                    pass
+            method = "unicode_clipboard_paste"
+        return {"ok": True, "length": len(value), "interval": interval,
+                "input_method": method}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 

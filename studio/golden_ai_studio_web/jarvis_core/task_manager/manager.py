@@ -1,4 +1,6 @@
 import re
+import hashlib
+import threading
 import time
 import uuid
 from dataclasses import replace
@@ -49,6 +51,200 @@ class TaskManager:
                 run_id, record_audit=False))
         self._shutdown_requested = False
         self._shutdown_complete = False
+        self._monitor_lock = threading.RLock()
+
+    # The monitor is represented by one canonical background-task record per
+    # actor. Its execution loop is intentionally owned by a later integration;
+    # these methods only establish durable, race-safe lifecycle state.
+    MONITOR_TASK_TYPE = "golden_trend_monitor"
+    MONITOR_STATES = {"STOPPED", "STARTING", "RUNNING", "PAUSED", "BACKOFF", "ERROR"}
+
+    @classmethod
+    def _monitor_task_id(cls, actor_id):
+        actor = str(actor_id or "").strip()
+        if not actor.startswith("device:"):
+            raise ValueError("actor_id do monitor deve ser uma identidade device")
+        digest = hashlib.sha256(actor.encode("utf-8")).hexdigest()[:32]
+        return f"monitor:{digest}"
+
+    def _monitor_task(self, actor_id):
+        task_id = self._monitor_task_id(actor_id)
+        task = self.database.get_background_task(task_id)
+        if task is None or task.task_type != self.MONITOR_TASK_TYPE:
+            return None
+        if task.security_scope.get("actor_id") != str(actor_id):
+            return None
+        return task
+
+    @staticmethod
+    def _monitor_config(task):
+        config = dict(task.trigger_config or {}) if task else {}
+        state = str(config.get("monitor_state") or "STOPPED").upper()
+        return config, state if state in TaskManager.MONITOR_STATES else "ERROR"
+
+    def monitor_status(self, actor_id):
+        """Return durable monitor state without starting work or reading MT5."""
+        with self._monitor_lock:
+            task = self._monitor_task(actor_id)
+            if task is None:
+                return {"ok": True, "found": False, "actor_id": str(actor_id),
+                        "monitor_state": "STOPPED", "scan_state": "UNKNOWN",
+                        "mt5_availability": "UNKNOWN", "candle_freshness": "UNKNOWN"}
+            config, state = self._monitor_config(task)
+            return {
+                "ok": True,
+                "found": True, "task_id": task.task_id, "actor_id": str(actor_id),
+                "monitor_state": state,
+                "scan_state": config.get("scan_state", "UNKNOWN"),
+                "mt5_availability": config.get("mt5_availability", "UNKNOWN"),
+                "candle_freshness": config.get("candle_freshness", "UNKNOWN"),
+                "last_confirmed_batch": config.get("last_confirmed_batch"),
+                "scan_id": config.get("scan_id", ""),
+                "base_revision": config.get("base_revision"),
+                "next_cycle_at": config.get("next_cycle_at"),
+                "recoverable_error": config.get("recoverable_error"),
+                "authorized_universe_count": config.get("authorized_universe_count", 31),
+                "batch_size": config.get("batch_size", 4),
+                "enabled": bool(task.enabled),
+            }
+
+    def start_market_monitor(self, actor_id, authorized_universe_count=31,
+                             batch_size=4, next_cycle_at=None, scan_id="",
+                             base_revision=None):
+        """Create or resume the single durable monitor record for an actor."""
+        with self._monitor_lock:
+            actor = str(actor_id)
+            task_id = self._monitor_task_id(actor)
+            task = self._monitor_task(actor)
+            now = time.time()
+            if task is None:
+                config = {
+                    "monitor_schema_version": 1, "monitor_state": "STARTING",
+                    "scan_state": "UNKNOWN", "mt5_availability": "UNKNOWN",
+                    "candle_freshness": "UNKNOWN", "authorized_universe_count": int(authorized_universe_count),
+                    "batch_size": min(4, max(1, int(batch_size))),
+                    "scan_id": str(scan_id or ""),
+                    "base_revision": base_revision,
+                    "last_confirmed_batch": None, "next_cycle_at": next_cycle_at,
+                    "recoverable_error": None,
+                }
+                task = BackgroundTask(
+                    task_id=task_id,
+                    user_request="Monitoramento GoldenAI read-only",
+                    task_type=self.MONITOR_TASK_TYPE,
+                    trigger_type=TriggerType.CONDITION,
+                    trigger_config=config, status=BackgroundTaskStatus.SCHEDULED,
+                    created_at=now, updated_at=now, next_run_at=None,
+                    enabled=False, security_scope={"actor_id": actor,
+                                                   "read_only": True,
+                                                   "execution_authority": "NONE"})
+                self.database.create_background_task(task)
+            else:
+                config, _ = self._monitor_config(task)
+                config.update({"monitor_state": "STARTING",
+                               "authorized_universe_count": int(authorized_universe_count),
+                               "batch_size": min(4, max(1, int(batch_size))),
+                               "scan_id": str(scan_id or config.get("scan_id") or ""),
+                               "base_revision": base_revision if base_revision is not None
+                               else config.get("base_revision"),
+                               "next_cycle_at": next_cycle_at,
+                               "recoverable_error": None})
+                self.database.update_background_task(task_id, trigger_config=config,
+                                                     status=BackgroundTaskStatus.SCHEDULED,
+                                                     enabled=False)
+            config["monitor_state"] = "RUNNING"
+            self.database.update_background_task(task_id, trigger_config=config,
+                                                 status=BackgroundTaskStatus.SCHEDULED,
+                                                 enabled=False)
+            return self.monitor_status(actor)
+
+    def pause_market_monitor(self, actor_id, reason="operator_requested"):
+        return self._set_market_monitor_state(actor_id, "PAUSED", reason=reason)
+
+    def resume_market_monitor(self, actor_id):
+        return self._set_market_monitor_state(actor_id, "RUNNING")
+
+    def stop_market_monitor(self, actor_id, reason="operator_requested"):
+        return self._set_market_monitor_state(actor_id, "STOPPED", reason=reason)
+
+    def _set_market_monitor_state(self, actor_id, state, reason=None):
+        if state not in self.MONITOR_STATES:
+            raise ValueError("estado de monitor inválido")
+        with self._monitor_lock:
+            task = self._monitor_task(actor_id)
+            if task is None:
+                return {"found": False, "monitor_state": "STOPPED"}
+            config, _ = self._monitor_config(task)
+            config["monitor_state"] = state
+            if reason:
+                config["state_reason"] = str(reason)[:200]
+            self.database.update_background_task(
+                task.task_id, trigger_config=config,
+                status=(BackgroundTaskStatus.PAUSED if state == "PAUSED"
+                        else BackgroundTaskStatus.SCHEDULED),
+                enabled=False)
+            return self.monitor_status(actor_id)
+
+    def process_market_monitor_batch(self, actor_id, assets, rank_batch,
+                                     persist_scan, batch_index=None,
+                                     next_cycle_at=None):
+        """Run one bounded canonical ranking batch, then persist its cursor.
+
+        ``rank_batch`` and ``persist_scan`` are injected by JarvisService so
+        this coordinator does not gain a second market reader or persistence
+        authority. No concurrent batch is started by this method.
+        """
+        if not callable(rank_batch) or not callable(persist_scan):
+            raise TypeError("monitor handlers must be callable")
+        batch = list(assets or [])
+        if not 1 <= len(batch) <= 4:
+            return {"ok": False, "status": "INVALID_BATCH_SIZE"}
+        with self._monitor_lock:
+            task = self._monitor_task(actor_id)
+            if task is None:
+                return {"ok": False, "status": "MONITOR_NOT_FOUND"}
+            config, state = self._monitor_config(task)
+            if state != "RUNNING":
+                return {"ok": False, "status": "MONITOR_NOT_RUNNING",
+                        "monitor_state": state}
+            if batch_index is None:
+                batch_index = int(config.get("next_batch_index") or 0)
+            try:
+                ranking = rank_batch(batch, batch_index=batch_index)
+                if not isinstance(ranking, dict) or ranking.get("ok") is False:
+                    raise RuntimeError(str((ranking or {}).get("error_code") or
+                                           (ranking or {}).get("status") or "RANKING_FAILED"))
+                if str(ranking.get("status") or "").upper() == "NO_NEW_CANDLES":
+                    config.update({"next_cycle_at": next_cycle_at,
+                                   "scan_state": "WAITING_FOR_NEW_CANDLES"})
+                    self.database.update_background_task(task.task_id,
+                                                         trigger_config=config)
+                    return {"ok": True, "status": "NO_NEW_CANDLES",
+                            "monitor_state": "RUNNING", "batch_index": batch_index}
+                persisted = persist_scan(ranking, batch_index=batch_index)
+                if not isinstance(persisted, dict) or not persisted.get("persisted"):
+                    raise RuntimeError(str((persisted or {}).get("error_code") or
+                                           (persisted or {}).get("status") or "PERSISTENCE_FAILED"))
+            except Exception as exc:
+                config.update({"monitor_state": "BACKOFF",
+                               "recoverable_error": str(exc)[:120],
+                               "next_cycle_at": next_cycle_at})
+                self.database.update_background_task(task.task_id,
+                                                     trigger_config=config)
+                return {"ok": False, "status": "BACKOFF",
+                        "error_code": "MONITOR_BATCH_FAILED",
+                        "monitor_state": "BACKOFF"}
+            config.update({"monitor_state": "RUNNING",
+                           "scan_state": "BATCH_PERSISTED",
+                           "last_confirmed_batch": batch_index,
+                           "next_batch_index": batch_index + 1,
+                           "next_cycle_at": next_cycle_at,
+                           "recoverable_error": None})
+            self.database.update_background_task(task.task_id,
+                                                 trigger_config=config)
+            return {"ok": True, "status": "BATCH_PERSISTED",
+                    "monitor_state": "RUNNING", "batch_index": batch_index,
+                    "next_batch_index": batch_index + 1}
 
     def create(self, plan):
         plan = PlannerContracts.validate(plan)
@@ -623,6 +819,7 @@ class TaskManager:
         if self._shutdown_complete:
             return
         self._shutdown_requested = True
+        self._stop_market_monitors_for_shutdown()
         self.scheduler.stop(wait=False)
         self.runner.shutdown(wait=False)
 
@@ -631,6 +828,7 @@ class TaskManager:
         if self._shutdown_complete:
             return
         self._shutdown_requested = True
+        self._stop_market_monitors_for_shutdown()
         self.scheduler.stop(wait=True)
         self.runner.shutdown(wait=True)
         self._shutdown_complete = True
@@ -641,6 +839,17 @@ class TaskManager:
             self.finalize_shutdown()
         else:
             self.request_shutdown()
+
+    def _stop_market_monitors_for_shutdown(self):
+        """Persist a clean STOPPED state without dispatching a scan."""
+        with self._monitor_lock:
+            for task in self.database.list_background_tasks(limit=1000, enabled=None):
+                if task.task_type != self.MONITOR_TASK_TYPE:
+                    continue
+                actor = task.security_scope.get("actor_id")
+                if actor:
+                    self._set_market_monitor_state(actor, "STOPPED",
+                                                    reason="core_shutdown")
 
     @staticmethod
     def _validate_persistence(plan):

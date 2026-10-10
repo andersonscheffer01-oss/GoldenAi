@@ -192,7 +192,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
           <button class="btn-gold" onclick="scannerRadar()" style="background:linear-gradient(135deg,#1a8a4a,#2ecc71);">🎯 Radar</button>
           <button class="btn-gold" onclick="scannerPerformance()" style="background:linear-gradient(135deg,#e67e22,#f39c12);">📊 Performance</button>
           <button class="btn-gold" onclick="scannerStatistics()" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">📈 Statistics</button>
-          <button class="btn-gold" id="autoTradeBtn" onclick="toggleAutoTrade()" style="background:var(--bg3);color:var(--text2);">🤖 AUTO-TRADE: OFF</button>
+          <button class="btn-gold" id="autoTradeBtn" disabled title="Execução legada permanece bloqueada" style="background:var(--bg3);color:var(--text2);opacity:.65;cursor:not-allowed;">🤖 AUTO-TRADE: OFF · BLOQUEADO</button>
         </div>
       </div>
       <div class="form-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:15px;">
@@ -378,6 +378,20 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 let allRobots = [];
 let currentFilter = 'all';
 
+async function dashboardPost(path, payload) {
+  return fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload || {})});
+}
+function dashboardEscape(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+  });
+}
+function dashboardState(data, fallback) {
+  const reason = data && (data.reason || data.error || data.status || data.availability) || fallback || 'UNAVAILABLE';
+  const message = reason === 'LEGACY_ROUTE_FROZEN' ? 'Recurso operacional legado bloqueado.' : reason;
+  return '<div style="color:var(--text2);padding:18px;">' + dashboardEscape(message) + '</div>';
+}
+
 async function securityData(){const r=await fetch('/api/security/status');return r.json()}
 function closeSecurityPanel(){document.getElementById('securityModal').style.display='none'}
 async function setSecurityMode(mode){const r=await fetch('/api/security/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});const d=await r.json();if(!d.ok)return alert(d.error||'Falha ao alterar modo');renderSecurityPanel(await securityData())}
@@ -533,36 +547,36 @@ loadJarvisHistory();
 // ═══ LOAD ROBOTS ═══
 async function loadRobots() {
   try {
-    const r = await fetch('/api/mt5/list_robots');
+    const r = await dashboardPost('/api/jarvis/golden/robots');
     const d = await r.json();
-    if (d.ok) { allRobots = d.robots; renderStats(); renderRobots(); }
-    else { document.getElementById('robotGrid').innerHTML = '<div style="color:var(--red);grid-column:1/-1;">' + d.error + '</div>'; }
+    const model = d.data || d;
+    if (d.ok) { allRobots = model.robots || []; renderStats(); renderRobots(); }
+    else { document.getElementById('robotGrid').innerHTML = dashboardState(d, 'Catálogo indisponível'); }
   } catch(e) { document.getElementById('robotGrid').innerHTML = '<div style="color:var(--red);grid-column:1/-1;">Erro: ' + e.message + '</div>'; }
 }
 
 function renderStats() {
   document.getElementById('totalEAs').textContent = allRobots.length;
-  document.getElementById('compiledEAs').textContent = allRobots.filter(r => r.compiled).length;
-  document.getElementById('totalLines').textContent = allRobots.reduce((a, r) => a + r.lines, 0).toLocaleString();
-  document.getElementById('totalInputs').textContent = allRobots.reduce((a, r) => a + r.inputs, 0);
+  document.getElementById('compiledEAs').textContent = allRobots.filter(r => (r.compiled_artifacts || []).length).length;
+  document.getElementById('totalLines').textContent = '—';
+  document.getElementById('totalInputs').textContent = allRobots.reduce((a, r) => a + (r.parameter_set_count || 0), 0);
   document.getElementById('robotCount').textContent = allRobots.length + ' robôs';
 }
 
 function renderRobots() {
   let filtered = allRobots;
-  if (currentFilter === 'compiled') filtered = filtered.filter(r => r.compiled);
-  if (currentFilter === 'notCompiled') filtered = filtered.filter(r => !r.compiled);
+  if (currentFilter === 'compiled') filtered = filtered.filter(r => (r.compiled_artifacts || []).length);
+  if (currentFilter === 'notCompiled') filtered = filtered.filter(r => !(r.compiled_artifacts || []).length);
   const q = document.getElementById('searchBox').value.toLowerCase();
   if (q) filtered = filtered.filter(r => r.name.toLowerCase().includes(q) || (r.description || '').toLowerCase().includes(q));
   if (!filtered.length) { document.getElementById('robotGrid').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2);grid-column:1/-1;">Nenhum robô encontrado</div>'; return; }
   document.getElementById('robotGrid').innerHTML = filtered.map(r => {
-    const mod = new Date(r.modified * 1000).toLocaleDateString('pt-BR');
-    return '<div class="robot-card ' + (r.compiled ? 'compiled' : 'not-compiled') + '" onclick="showDetails(\'' + r.name.replace(/'/g, "\\'") + '\')">' +
-      '<div class="robot-name">' + (r.compiled ? '⚡' : '📝') + ' ' + r.name +
-      (r.compiled ? ' <span style="color:var(--green);font-size:10px;">EX5</span>' : ' <span style="color:var(--red);font-size:10px;">NO EX5</span>') + '</div>' +
-      (r.description ? '<div class="robot-desc">' + r.description + '</div>' : '') +
-      '<div style="font-size:11px;color:var(--text2);">' + mod + '</div>' +
-      '<div class="robot-stats"><span class="robot-stat green">' + r.lines + ' linhas</span><span class="robot-stat blue">' + r.functions + ' funções</span><span class="robot-stat gold">' + r.inputs + ' inputs</span><span class="robot-stat">' + r.size_kb + ' KB</span></div></div>';
+    const compiled = (r.compiled_artifacts || []).length > 0;
+    return '<div class="robot-card ' + (compiled ? 'compiled' : 'not-compiled') + '" onclick="showDetails(\'' + dashboardEscape(r.robot_id) + '\')">' +
+      '<div class="robot-name">' + (compiled ? '⚡' : '📝') + ' ' + dashboardEscape(r.name) +
+      (compiled ? ' <span style="color:var(--green);font-size:10px;">ARTEFATO OBSERVADO</span>' : ' <span style="color:var(--text2);font-size:10px;">SEM BINÁRIO REGISTRADO</span>') + '</div>' +
+      '<div style="font-size:11px;color:var(--text2);">' + dashboardEscape(r.classification) + ' · ' + dashboardEscape(r.status) + '</div>' +
+      '<div class="robot-stats"><span class="robot-stat blue">' + dashboardEscape(r.strategy_family || 'Família desconhecida') + '</span><span class="robot-stat gold">' + (r.parameter_set_count || 0) + ' conjuntos</span><span class="robot-stat">' + (r.test_run_count || 0) + ' runs</span></div></div>';
   }).join('');
 }
 
@@ -572,17 +586,13 @@ async function showDetails(name) {
   document.getElementById('detailsTitle').textContent = '📋 ' + name;
   document.getElementById('detailsContent').innerHTML = '⏳ Carregando...';
   try {
-    const r = await fetch('/api/mt5/robot_details', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+    const r = await dashboardPost('/api/jarvis/golden/robot', {robot_id:name});
     const d = await r.json();
-    if (!d.ok) { document.getElementById('detailsContent').innerHTML = '<div style="color:var(--red);">' + d.error + '</div>'; return; }
-    let h = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">' +
-      '<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--green);">' + d.lines + '</div><div style="font-size:11px;color:var(--text2);">Linhas</div></div>' +
-      '<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--blue);">' + d.functions.length + '</div><div style="font-size:11px;color:var(--text2);">Funções</div></div>' +
-      '<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--gold);">' + d.inputs.length + '</div><div style="font-size:11px;color:var(--text2);">Inputs</div></div>' +
-      '<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center;"><div style="font-size:20px;font-weight:700;">' + d.size_kb + ' KB</div><div style="font-size:11px;color:var(--text2);">Tamanho</div></div></div>';
-    if (d.description) h += '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:12px;"><b>📝 Descrição:</b> ' + d.description + '</div>';
-    if (d.inputs.length) { h += '<div style="margin-bottom:12px;"><b>⚙️ Parâmetros (' + d.inputs.length + '):</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">'; d.inputs.forEach(i => h += '<span class="robot-stat gold">' + i + '</span>'); h += '</div></div>'; }
-    if (d.functions.length) { h += '<div><b>🔧 Funções (' + d.functions.length + '):</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">'; d.functions.forEach(f => h += '<span class="robot-stat blue">' + f + '()</span>'); h += '</div></div>'; }
+    const robot = (d.data || d).robot;
+    if (!d.ok || !robot) { document.getElementById('detailsContent').innerHTML = dashboardState(d, 'Detalhes indisponíveis'); return; }
+    let h = '<div><b>Identidade:</b> ' + dashboardEscape(robot.robot_id) + ' · ' + dashboardEscape(robot.classification) + ' · ' + dashboardEscape(robot.status) + '</div>';
+    h += '<div style="margin-top:10px;"><b>Fontes:</b> ' + (robot.source_artifacts || []).length + ' · <b>Binários:</b> ' + (robot.compiled_artifacts || []).length + ' · <b>Backtests:</b> ' + (robot.backtest_count || 0) + '</div>';
+    h += '<div style="margin-top:10px;color:var(--text2);"><b>Limitações conhecidas:</b> ' + dashboardEscape((robot.known_limitations || []).join('; ')) + '</div>';
     document.getElementById('detailsContent').innerHTML = h;
     panel.scrollIntoView({behavior:'smooth'});
   } catch(e) { document.getElementById('detailsContent').innerHTML = '<div style="color:var(--red);">Erro: ' + e.message + '</div>'; }
@@ -598,15 +608,15 @@ function setFilter(f) {
 // ═══ LOAD ROBOTS INTO BACKTEST DROPDOWN ═══
 async function loadRobotsForBacktest() {
   try {
-    const r = await fetch('/api/mt5/list_robots');
+    const r = await dashboardPost('/api/jarvis/golden/robots');
     const d = await r.json();
-    if (d.ok && d.robots) {
+    const robots = (d.data || d).robots || [];
+    if (d.ok) {
       const sel = document.getElementById('btRobot');
-      d.robots.forEach(r => {
+      robots.forEach(r => {
         const opt = document.createElement('option');
-        opt.value = r.name;
-        const comp = r.compiled ? '✅' : '📝';
-        opt.textContent = comp + ' ' + r.name + ' (' + r.lines + ' linhas)';
+        opt.value = r.robot_id;
+        opt.textContent = (r.compiled_artifacts && r.compiled_artifacts.length ? '✅ ' : '📝 ') + r.name;
         sel.appendChild(opt);
       });
     }
@@ -623,52 +633,16 @@ async function analyzeRobot() {
   if (!name) { alert('Selecione um robô primeiro!'); return; }
   const div = document.getElementById('robotAnalysis');
   div.style.display = 'block';
-  div.innerHTML = '<div style="color:var(--text2);">⏳ Analisando ' + name + '...</div>';
+  div.innerHTML = '<div style="color:var(--text2);">⏳ Consultando catálogo Jarvis...</div>';
   try {
-    const r = await fetch('/api/mt5/analyze_robot', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name}) });
+    const r = await dashboardPost('/api/jarvis/golden/robot', {robot_id:name});
     const d = await r.json();
-    if (d.ok) {
-      // Salvar parâmetros do robô para o backtest
-      currentRobotParams = d.indicator_params || {};
-      // Preencher campos automaticamente
-      document.getElementById('btSymbol').value = d.symbol || 'XAUUSD';
-      document.getElementById('btTimeframe').value = d.timeframe || 'M15';
-      document.getElementById('btSL').value = d.sl || 500;
-      document.getElementById('btTP').value = d.tp || 1000;
-      document.getElementById('btLot').value = d.lot || 0.01;
-      // Selecionar estratégia detectada
-      const stratSel = document.getElementById('btStrategy');
-      for (let i = 0; i < stratSel.options.length; i++) {
-        if (stratSel.options[i].value === d.strategy) { stratSel.selectedIndex = i; break; }
-      }
-      // Mostrar análise
-      let indicators = '';
-      if (d.indicators) {
-        const ind = d.indicators;
-        const active = [];
-        if (ind.iMA) active.push('EMA/SMA');
-        if (ind.iRSI) active.push('RSI');
-        if (ind.iBands) active.push('Bollinger');
-        if (ind.iMACD) active.push('MACD');
-        if (ind.iATR) active.push('ATR');
-        if (ind.iStochastic) active.push('Estocástico');
-        if (ind.iADX) active.push('ADX');
-        if (ind.SMC_FVG) active.push('SMC/FVG');
-        if (ind.Candle_Patterns) active.push('Padrões Candle');
-        if (ind.S_R_Zonas) active.push('S/R Zonas');
-        indicators = active.join(' + ') || 'Nenhum detectado';
-      }
-      div.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">' +
-        '<div><span style="color:var(--gold);font-weight:600;">📋 Estratégia Detectada:</span><br><span style="color:var(--green);">' + d.strategy_name + '</span></div>' +
-        '<div><span style="color:var(--gold);font-weight:600;">📊 Ativo:</span> ' + d.symbol + ' | <b>TF:</b> ' + d.timeframe + '</div>' +
-        '<div><span style="color:var(--gold);font-weight:600;">⚙️ SL:</span> ' + d.sl + ' | <b>TP:</span> ' + d.tp + ' | <b>Lote:</span> ' + d.lot + '</div>' +
-        '</div>' +
-        '<div style="margin-top:8px;"><span style="color:var(--gold);font-weight:600;">🔧 Indicadores:</span> <span style="color:var(--text);">' + indicators + '</span></div>' +
-        '<div style="margin-top:4px;font-size:11px;color:var(--text2);">' + d.lines + ' linhas | ' + d.functions + ' funções | ' + d.inputs + ' inputs' + (d.description ? ' | ' + d.description : '') + '</div>' +
-        '<div style="margin-top:8px;font-size:11px;color:var(--blue);">✅ Parâmetros preenchidos automaticamente! Clique em "🚀 Rodar Backtest" para simular.</div>';
-    } else {
-      div.innerHTML = '<div style="color:var(--red);">❌ ' + d.error + '</div>';
-    }
+    const robot = (d.data || d).robot;
+    if (!d.ok || !robot) { div.innerHTML = dashboardState(d, 'Detalhes indisponíveis'); return; }
+    currentRobotParams = {};
+    div.innerHTML = '<div style="color:var(--text2);">Catálogo somente leitura: ' + dashboardEscape(robot.name) +
+      '<br>Identidade: ' + dashboardEscape(robot.robot_id) + ' · ' + dashboardEscape(robot.classification) +
+      '<br>Parâmetros não aplicados. Análise operacional/MT5 desabilitada neste perfil.</div>';
   } catch(e) { div.innerHTML = '<div style="color:var(--red);">❌ Erro: ' + e.message + '</div>'; }
 }
 
@@ -1073,9 +1047,7 @@ async function runFullAnalysis() {
     
     // Botoes de acao
     html += '<div style="display:flex;gap:12px;margin-top:16px;">';
-    if (d.direction !== 'NONE') {
-      html += '<button class="btn-gold" onclick="executeFullAnalysisTrade()" style="background:var(--green);color:#0D0D0D;">⚡ Executar Trade</button>';
-    }
+    if (d.direction !== 'NONE') html += '<button class="btn-gold" disabled title="Trading bloqueado" style="opacity:.6;cursor:not-allowed;">Trading bloqueado</button>';
     html += '<button class="btn-gold" onclick="runFullAnalysis()" style="background:var(--blue);color:#fff;">🔄 Nova Análise</button>';
     html += '</div>';
     
@@ -1089,40 +1061,12 @@ async function runFullAnalysis() {
 }
 
 async function executeFullAnalysisTrade() {
-  if (!lastFullAnalysis || lastFullAnalysis.direction === 'NONE') return;
-  const a = lastFullAnalysis;
-  if (!confirm('Executar ' + a.direction + ' ' + a.symbol + '?\nEntrada: MERCADO\nSL: ' + a.stop_loss + '\nTP: ' + a.take_profit_1 + '\nR:R: ' + a.risk_reward)) return;
-  try {
-    // Usar entry=null para entrar a mercado (preco atual)
-    const r = await fetch('/api/mt5/auto_trade', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        symbol: a.symbol,
-        analysis: JSON.stringify({
-          direcao: a.direction,
-          entrada: null,
-          stop_loss: a.stop_loss,
-          take_profit: a.take_profit_1,
-          rr_ratio: a.risk_reward
-        }),
-        auto_execute: true,
-        mode: 'day'
-      })
-    });
-    const d = await r.json();
-    if (d.ok) {
-      alert('Trade executado! Ticket: ' + (d.execution?.ticket || 'N/A'));
-    } else {
-      alert('Erro: ' + (d.execution?.error || d.error || 'Desconhecido'));
-    }
-  } catch(e) {
-    alert('Erro: ' + e.message);
-  }
+  return;
 }
 
 // ═══ AUTO TRADE ═══
 async function executeAutoTrade() {
+  return;
   if (!lastAnalysis) { alert('Faça uma análise primeiro!'); return; }
   const symbol = document.getElementById('btSymbol').value;
   const res = document.getElementById('btResult');
@@ -1397,11 +1341,14 @@ async function loadStrategies() {
   const grid = document.getElementById('strategyGrid');
   grid.innerHTML = '<div style="color:var(--gold);grid-column:1/-1;">Carregando 47 estrategias...</div>';
   try {
-    const r = await fetch('/api/strategy_manager/list', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const r = await dashboardPost('/api/jarvis/golden/strategies');
     const d = await r.json();
     if (!d.ok) throw new Error(d.error);
-    allStrategies = d.strategies;
-    renderStrategyStats(d.summary, d.modes);
+    const model = d.data || d;
+    allStrategies = (model.strategies || []).map(s => ({...s, tier:s.tier || 'C'}));
+    renderStrategyStats({enabled:'—',total:allStrategies.length,disabled:'—'}, {scalp:false,day:false,swing:false});
+    ['modeScalp','modeDay','modeSwing'].forEach(id => { const el=document.getElementById(id); if(el) el.disabled=true; });
+    document.querySelectorAll('#panelStrategies button[onclick^="applyPreset"]').forEach(el => { el.disabled=true; });
     renderStrategies();
     strategiesLoaded = true;
   } catch(e) {
@@ -1412,15 +1359,10 @@ async function loadStrategies() {
 function renderStrategyStats(summary, modes) {
   var el = document.getElementById('strategyStats');
   if (!el) return;
-  var scalpOn = allStrategies.filter(function(s){return s.mode==='scalp'&&s.enabled;}).length;
-  var dayOn = allStrategies.filter(function(s){return s.mode==='day'&&s.enabled;}).length;
-  var swingOn = allStrategies.filter(function(s){return s.mode==='swing'&&s.enabled;}).length;
   var cards = [
-    {v: summary.enabled+'/'+summary.total, l:'Ativas/Total', c:'var(--gold)'},
-    {v: scalpOn, l:'Scalp ON', c:'var(--green)'},
-    {v: dayOn, l:'Day ON', c:'var(--blue)'},
-    {v: swingOn, l:'Swing ON', c:'#a855f7'},
-    {v: summary.disabled, l:'Desativadas', c:'var(--red)'}
+    {v: summary.total, l:'Estratégias catalogadas', c:'var(--gold)'},
+    {v: '—', l:'Estado de ativação', c:'var(--text2)'},
+    {v: '—', l:'Modos ativos', c:'var(--text2)'}
   ];
   var h = '';
   cards.forEach(function(c){
@@ -1437,8 +1379,7 @@ function renderStrategies() {
   var grid = document.getElementById('strategyGrid');
   var filtered = allStrategies;
   var q = document.getElementById('strategySearch') ? document.getElementById('strategySearch').value.toLowerCase() : '';
-  if (strategyFilter === 'on') filtered = filtered.filter(function(s){return s.enabled;});
-  else if (strategyFilter === 'off') filtered = filtered.filter(function(s){return !s.enabled;});
+  if (strategyFilter === 'on' || strategyFilter === 'off') filtered = [];
   else if (strategyFilter === 'A') filtered = filtered.filter(function(s){return s.tier==='A';});
   else if (strategyFilter === 'B') filtered = filtered.filter(function(s){return s.tier==='B';});
   else if (strategyFilter === 'C') filtered = filtered.filter(function(s){return s.tier==='C';});
@@ -1462,8 +1403,8 @@ function renderStrategies() {
     html += '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;border-left:3px solid '+c1+';opacity:'+op+';padding:12px;margin-bottom:8px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
     html += '<div><span style="font-size:11px;color:'+c1+';font-weight:600;">'+icon+' '+s.mode.toUpperCase()+'</span>';
-    html += ' <span style="font-size:10px;color:'+c2+';margin-left:6px;">Tier '+s.tier+'</span></div>';
-    html += '<button onclick="toggleStrategy(\''+s.id+'\','+(!s.enabled)+')" style="background:'+bg+';color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">'+(s.enabled?'ON':'OFF')+'</button>';
+    html += ' <span style="font-size:10px;color:'+c2+';margin-left:6px;">Tier '+dashboardEscape(s.tier)+'</span></div>';
+    html += '<span style="font-size:10px;color:var(--text2);">SOMENTE LEITURA</span>';
     html += '</div>';
     html += '<div style="font-size:13px;font-weight:600;margin:6px 0 2px;">'+s.name+'</div>';
     html += '<div style="font-size:11px;color:var(--text2);line-height:1.3;">'+(s.description||'')+'</div>';
@@ -1486,31 +1427,15 @@ function filterStrategies(filter) {
 }
 
 async function toggleStrategy(id, enabled) {
-  try {
-    var response = await fetch('/api/strategy_manager/toggle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({strategy_id: id, enabled: enabled})});
-    var result = await response.json();
-    if (!result.ok) { if (result.approval_required) alert('Ação aguardando aprovação. Abra Segurança para aprovar.'); else alert(result.error || 'Ação não executada.'); return; }
-    var s = allStrategies.find(function(x){return x.id===id;});
-    if (s) s.enabled = enabled;
-    renderStrategies();
-    // Update stats
-    var onCount = allStrategies.filter(function(s){return s.enabled;}).length;
-    renderStrategyStats({enabled:onCount, total:allStrategies.length, disabled:allStrategies.length - onCount}, {});
-  } catch(e) { alert('Erro: ' + e.message); }
+  return;
 }
 
 async function toggleMode(mode) {
-  var btn = document.getElementById('mode' + mode.charAt(0).toUpperCase() + mode.slice(1));
-  var isOn = btn && btn.classList.contains('active');
-  try {
-    var response = await fetch('/api/strategy_manager/toggle_mode', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode: mode, enabled: !isOn})});
-    var result = await response.json();
-    if (!result.ok) { if (result.approval_required) alert('Ação aguardando aprovação. Abra Segurança para aprovar.'); else alert(result.error || 'Ação não executada.'); return; }
-    loadStrategies();
-  } catch(e) { alert('Erro: ' + e.message); }
+  return;
 }
 
 async function applyPreset(preset) {
+  return;
   try {
     var response = await fetch('/api/strategy_manager/preset', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({preset: preset})});
     var result = await response.json();
@@ -1670,31 +1595,32 @@ async function scannerScanAll() {
   res.innerHTML = '<div style="color:var(--text2);padding:20px;">⏳ Scannear 28 setups em todos os ativos...</div>';
   try {
     const body = sym ? {symbol: sym} : {};
-    const r = await fetch('/api/scanner/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const r = await dashboardPost('/api/jarvis/golden/scanner', {...body, limit:30});
     const d = await r.json();
-    if (!d.ok) { res.innerHTML = '<div style="color:var(--red);">❌ ' + (d.error || 'Erro') + '</div>'; return; }
+    const model = d.data || d;
+    if (!d.ok || model.status === 'SOURCE_DISABLED') { res.innerHTML = dashboardState(model, 'Scanner indisponível'); return; }
     
-    if (d.scan) {
+    if (model.scan) {
       // Ativo unico
-      document.getElementById('scannerStatus').innerHTML = '🟢 ' + d.scan.symbol + ' | Preco: ' + d.scan.price + ' | Regime: ' + d.scan.regime + ' (' + d.scan.regime_score + '/100) | ' + d.scan.scan_time;
-      res.innerHTML = renderSingleScan(d.scan);
-    } else if (d.scans) {
+      document.getElementById('scannerStatus').textContent = model.scan.symbol + ' | Scanner read model';
+      res.innerHTML = renderSingleScan(model.scan);
+    } else if (model.scans) {
       // Multiplos ativos
       let html = '<div class="stats-grid" style="margin-bottom:15px;">';
-      d.scans.forEach(s => {
+      model.scans.forEach(s => {
         const color = (s.best_setup && s.best_setup.level_label) ? (s.best_setup.level_label === 'OPORTUNIDADE' ? 'var(--green)' : s.best_setup.level_label === 'PRE_ENTRADA' ? 'var(--gold)' : 'var(--dim)') : 'var(--red)';
         html += '<div class="stat-card" style="border-left:3px solid ' + color + ';">'; html += '<div style="font-size:14px;font-weight:600;">' + s.symbol + '</div>'; html += '<div class="stat-value" style="font-size:18px;color:' + color + ';">' + (s.best_setup ? s.best_setup.readiness + '%' : '0%') + '</div>'; html += '<div class="stat-label">' + (s.best_setup ? s.best_setup.name : 'Nenhum setup') + '</div>';        html += '<div style="font-size:11px;color:var(--dim);">' + s.regime + ' | ' + (s.best_setup ? s.best_setup.level_label : 'N/A') + '</div>'; html += '</div>';
       });
       html += '</div>';
       
       // Detalhes por ativo
-      d.scans.forEach(s => {
+      model.scans.forEach(s => {
         html += renderRadarSymbol(s);
       });
       
-      document.getElementById('scannerStatus').innerHTML = '🟢 ' + d.scans.length + ' ativos scannados | ' + new Date().toLocaleTimeString();
+      document.getElementById('scannerStatus').textContent = model.scans.length + ' observações do Jarvis Scanner';
       res.innerHTML = html;
-    }
+    } else { res.innerHTML = dashboardState(model, 'Scanner sem dados disponíveis'); }
   } catch(e) { res.innerHTML = '<div style="color:var(--red);">❌ ' + e.message + '</div>'; }
 }
 
@@ -1703,23 +1629,15 @@ async function loadRiskStatus() {
   var el = document.getElementById('riskStatus');
   if (!el) return;
   try {
-    var r = await fetch('/api/risk/status', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var r = await dashboardPost('/api/jarvis/golden/risk');
     var d = await r.json();
-    if (!d.ok) { el.innerHTML = ''; return; }
-    var color = d.allowed ? 'var(--green)' : 'var(--red)';
-    var icon = d.allowed ? '🟢' : '🔴';
-    var html = '<div style="background:var(--bg2);border:1px solid ' + color + ';border-radius:10px;padding:10px 14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">';
-    html += '<div style="font-size:13px;font-weight:700;color:' + color + ';">' + icon + ' RISK: ' + (d.allowed ? 'OK' : d.reason) + '</div>';
-    html += '<div style="font-size:11px;color:var(--dim);">Balance: $' + (d.account_balance||0).toFixed(2) + '</div>';
-    html += '<div style="font-size:11px;color:var(--dim);">Risk/Trade: ' + d.risk_per_trade_pct + '%</div>';
-    html += '<div style="font-size:11px;color:var(--dim);">Daily PnL: ' + d.daily_pnl_r + 'R</div>';
-    html += '<div style="font-size:11px;color:var(--dim);">Positions: ' + d.positions_count + '/' + d.max_positions + '</div>';
-    html += '<div style="font-size:11px;color:var(--dim);">Losses: ' + d.consecutive_losses + '</div>';
-    if (d.news_status && d.news_status.near_news) {
-      html += '<div style="font-size:11px;color:var(--red);font-weight:600;">NEWS: ' + d.news_status.event_name + ' em ' + d.news_status.minutes_until + 'min</div>';
+    const model = d.data || d;
+    if (!d.ok || model.status === 'SOURCE_DISABLED' || model.availability === 'SOURCE_DISABLED') {
+      el.innerHTML = dashboardState(model, 'Risco indisponível no perfil atual');
+      return;
     }
-    html += '</div>';
-    el.innerHTML = html;
+    el.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text2);font-size:12px;">' +
+      'Risco em modo observação · nenhuma decisão de execução é autorizada. Fonte: ' + dashboardEscape(model.source || 'Jarvis Core') + '</div>';
   } catch(e) { el.innerHTML = ''; }
 }
 loadRiskStatus();
@@ -1734,29 +1652,36 @@ let autoTradeMinReadiness = 70;
 async function scannerPerformance() {
   var el = document.getElementById('scannerResults');
   if (!el) return;
-  el.innerHTML = '<div style="color:var(--gold);font-size:13px;padding:10px;">📡 Escaneando todos os ativos para montar performance por estratégia...</div>';
+  el.innerHTML = '<div style="color:var(--gold);font-size:13px;padding:10px;">Lendo performance histórica pelo Jarvis Core...</div>';
   try {
-    var r = await fetch('/api/scanner/performance', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var r = await dashboardPost('/api/jarvis/golden/statistics');
     var d = await r.json();
-    if (!d.ok || !d.strategies) { el.innerHTML = '<div style="color:var(--red)">Erro ao buscar performance</div>'; return; }
-    var strategies = d.strategies;
-    var totalSetups = d.total_setups || 0;
-    var totalPairs = d.total_pairs || 0;
+    if (!d.ok) { el.innerHTML = dashboardState(d, 'Performance indisponível'); return; }
+    var snapshot = d.data || d;
+    var strategies = Object.entries(snapshot.strategy_performance || {}).map(function(entry) {
+      var stats = entry[1];
+      return {name:entry[0], mode:entry[0].indexOf('SCALP') >= 0 ? 'scalp' : entry[0].indexOf('SWING') >= 0 ? 'swing' : 'day',
+        tier:stats.status || 'INCONCLUSIVO',
+        avg_score:stats.expectancy_r, avg_rr:stats.profit_factor, avg_confluence:stats.win_rate,
+        conditions_avg:stats.max_drawdown_r, pairs_active:stats.total, pairs_detail:[]};
+    });
+    var totalSetups = strategies.length;
+    var totalPairs = strategies.reduce(function(n,s){return n+s.pairs_active;},0);
 
     // Sort by avg_score descending
     strategies.sort(function(a,b) { return b.avg_score - a.avg_score; });
 
     var html = '<div style="margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap;">';
-    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;"><span style="font-size:11px;color:var(--dim);">Total Setups</span><div style="font-size:18px;font-weight:700;color:var(--gold);">' + totalSetups + '</div></div>';
-    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;"><span style="font-size:11px;color:var(--dim);">Ativos Monitorados</span><div style="font-size:18px;font-weight:700;color:var(--green);">' + totalPairs + '</div></div>';
-    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;"><span style="font-size:11px;color:var(--dim);">Estratégias Ativas</span><div style="font-size:18px;font-weight:700;color:var(--purple);">' + strategies.length + '</div></div>';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;"><span style="font-size:11px;color:var(--dim);">Estratégias históricas</span><div style="font-size:18px;font-weight:700;color:var(--gold);">' + totalSetups + '</div></div>';
+    html += '<div style="background:var(--bg3);padding:8px 14px;border-radius:8px;"><span style="font-size:11px;color:var(--dim);">Trades no journal</span><div style="font-size:18px;font-weight:700;color:var(--green);">' + totalPairs + '</div></div>';
+    html += '<div style="font-size:11px;color:var(--text2);align-self:center;">Trade Journal · leitura histórica · sem MT5</div>';
     html += '</div>';
 
     // Tier labels
-    var tierA = strategies.filter(function(s){return s.tier==='A';});
-    var tierB = strategies.filter(function(s){return s.tier==='B';});
-    var tierC = strategies.filter(function(s){return s.tier==='C';});
-    var tierOther = strategies.filter(function(s){return s.tier!=='A'&&s.tier!=='B'&&s.tier!=='C';});
+    var tierA = strategies.filter(function(s){return s.tier==='VALIDADA';});
+    var tierB = strategies.filter(function(s){return s.tier==='EM_TESTE';});
+    var tierC = strategies.filter(function(s){return s.tier==='FRACA'||s.tier==='NEGATIVA';});
+    var tierOther = strategies.filter(function(s){return s.tier==='INCONCLUSIVO';});
 
     function renderTier(title, color, icon, strats) {
       if (!strats.length) return '';
@@ -1765,7 +1690,7 @@ async function scannerPerformance() {
       strats.forEach(function(s) {
         var modeIcon = s.mode==='scalp'?'⚡':s.mode==='day'?'📊':'📈';
         var modeColor = s.mode==='scalp'?'var(--green)':s.mode==='day'?'var(--purple)':'var(--gold)';
-        var scoreColor = s.avg_score>=60?'var(--green)':s.avg_score>=40?'var(--gold)':'var(--text3)';
+        var scoreColor = s.avg_score>0?'var(--green)':s.avg_score===0?'var(--gold)':'var(--red)';
         var rrColor = s.avg_rr>=2?'var(--green)':s.avg_rr>=1?'var(--gold)':'var(--red)';
         h += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;">';
         h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
@@ -1775,22 +1700,18 @@ async function scannerPerformance() {
         h += '<div style="font-size:11px;color:' + modeColor + ';">' + s.mode.toUpperCase() + '</div></div>';
         h += '</div>';
         h += '<div style="text-align:right;"><div style="font-size:18px;font-weight:700;color:' + scoreColor + ';">' + s.avg_score + '</div>';
-        h += '<div style="font-size:10px;color:var(--dim);">score médio</div></div>';
+        h += '<div style="font-size:10px;color:var(--dim);">expectancy (R)</div></div>';
         h += '</div>';
         // Stats row
         h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px;">';
-        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:' + rrColor + ';">' + s.avg_rr.toFixed(1) + '</div><div style="font-size:9px;color:var(--dim);">R:R médio</div></div>';
-        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:var(--text);">' + s.pairs_active + '/' + totalPairs + '</div><div style="font-size:9px;color:var(--dim);">pares ativos</div></div>';
-        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:var(--text);">' + s.avg_confluence + '%</div><div style="font-size:9px;color:var(--dim);">confluência</div></div>';
-        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:' + (s.conditions_avg>=3?'var(--green)':'var(--gold)') + ';">' + s.conditions_avg.toFixed(1) + '/4</div><div style="font-size:9px;color:var(--dim);">condições</div></div>';
+        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:' + rrColor + ';">' + s.avg_rr.toFixed(2) + '</div><div style="font-size:9px;color:var(--dim);">profit factor</div></div>';
+        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:var(--text);">' + s.pairs_active + '</div><div style="font-size:9px;color:var(--dim);">trades</div></div>';
+        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:var(--text);">' + s.avg_confluence.toFixed(1) + '%</div><div style="font-size:9px;color:var(--dim);">win rate</div></div>';
+        h += '<div style="text-align:center;"><div style="font-size:12px;font-weight:700;color:var(--red);">' + s.conditions_avg.toFixed(1) + 'R</div><div style="font-size:9px;color:var(--dim);">drawdown</div></div>';
         h += '</div>';
         // Pairs with direction
         h += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
-        s.pairs_detail.forEach(function(p) {
-          var dirColor = p.direction==='BUY'?'var(--green)':p.direction==='SELL'?'var(--red)':'var(--dim)';
-          var dirIcon = p.direction==='BUY'?'▲':p.direction==='SELL'?'▼':'—';
-          h += '<span style="background:var(--bg3);padding:2px 8px;border-radius:4px;font-size:11px;color:' + dirColor + ';">' + p.symbol + ' ' + dirIcon + ' ' + p.score + '</span>';
-        });
+        h += '<span style="font-size:10px;color:var(--text2);">Histórico agregado; não representa sinais atuais.</span>';
         h += '</div>';
         h += '</div>';
       });
@@ -1798,10 +1719,10 @@ async function scannerPerformance() {
       return h;
     }
 
-    html += renderTier('Tier A — Principais', 'var(--green)', '🥇', tierA);
-    html += renderTier('Tier B — Condições Específicas', 'var(--gold)', '🥈', tierB);
-    html += renderTier('Tier C — Oportunidade Especial', 'var(--purple)', '🥉', tierC);
-    html += renderTier('Outros', 'var(--dim)', '📋', tierOther);
+    html += renderTier('Validadas no histórico', 'var(--green)', '✓', tierA);
+    html += renderTier('Em teste no histórico', 'var(--gold)', '~', tierB);
+    html += renderTier('Fracas/negativas no histórico', 'var(--red)', '!', tierC);
+    html += renderTier('Amostra inconclusiva', 'var(--dim)', '?', tierOther);
 
     el.innerHTML = html;
   } catch(e) {
@@ -1814,9 +1735,10 @@ async function scannerStatistics() {
   if (!el) return;
   el.innerHTML = '<div style="color:var(--gold);font-size:13px;padding:10px;">📊 Carregando estatisticas detalhadas...</div>';
   try {
-    var r = await fetch('/api/statistics/full', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    var r = await dashboardPost('/api/jarvis/golden/statistics');
     var d = await r.json();
-    if (!d.ok) { el.innerHTML = '<div style="color:var(--red)">Erro: ' + (d.error||'') + '</div>'; return; }
+    if (!d.ok) { el.innerHTML = dashboardState(d, 'Estatísticas indisponíveis'); return; }
+    d = d.data || d;
     
     var html = '';
     
@@ -2093,62 +2015,15 @@ async function runRobustness() {
 }
 
 function toggleAutoTrade() {
-  autoTradeEnabled = !autoTradeEnabled;
-  var btn = document.getElementById('autoTradeBtn');
-  if (!btn) return;
-  if (autoTradeEnabled) {
-    btn.style.background = 'var(--green)';
-    btn.style.color = '#000';
-    btn.innerHTML = '🤖 AUTO-TRADE: ON (Score>' + autoTradeMinScore + ')';
-    startAutoTrade();
-  } else {
-    btn.style.background = 'var(--bg3)';
-    btn.style.color = 'var(--text2)';
-    btn.innerHTML = '🤖 AUTO-TRADE: OFF';
-    if (autoTradeInterval) { clearInterval(autoTradeInterval); autoTradeInterval = null; }
-  }
+  autoTradeEnabled = false;
+  if (autoTradeInterval) clearInterval(autoTradeInterval);
+  autoTradeInterval = null;
 }
 
 function startAutoTrade() {
+  autoTradeEnabled = false;
   if (autoTradeInterval) clearInterval(autoTradeInterval);
-  autoTradeInterval = setInterval(async function() {
-    if (!autoTradeEnabled) return;
-    try {
-      var r = await fetch('/api/scanner/radar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
-      var d = await r.json();
-      if (!d.ok) return;
-      d.radar.forEach(async function(s) {
-        var validationOk = s.validation && s.validation.status === 'VALIDADA';
-        var auditOk = s.audit && s.audit.auto_trade_eligible === true;
-        if (s.score_total >= autoTradeMinScore && s.best_readiness >= autoTradeMinReadiness && s.best_level === 'OPORTUNIDADE' && s.best_direction !== 'NEUTRO' && validationOk && auditOk) {
-          // Executar trade automatico
-          var bestSetupObj = (typeof s.best_setup === 'object' && s.best_setup) ? s.best_setup : null;
-          var bestSetupName = s.best_setup_name || (bestSetupObj ? bestSetupObj.name : (s.best_setup || ''));
-          var bestSetupId = s.best_setup_id || (bestSetupObj ? bestSetupObj.setup_id : '');
-          var analysis = {
-            direcao: s.best_direction,
-            direction: s.best_direction,
-            entrada: null,
-            entry: null,
-            stop_loss: null,
-            take_profit: null,
-            take_profit_1: null,
-            symbol: s.symbol,
-            mode: s.best_mode,
-            setup: bestSetupName,
-            setup_name: bestSetupName,
-            strategy_id: bestSetupId
-          };
-          var tr = await fetch('/api/mt5/auto_trade', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({analysis:JSON.stringify(analysis), symbol:s.symbol, auto_execute:true, mode:s.best_mode})});
-          var td = await tr.json();
-          if (td.ok) {
-            var log = document.getElementById('autoTradeLog');
-            if (log) log.innerHTML = '<div style="color:var(--green);font-size:12px;padding:4px 0;">🤖 ' + new Date().toLocaleTimeString() + ' | ' + s.symbol + ' ' + s.best_direction + ' ' + bestSetupName + ' Score:' + s.score_total + '</div>' + log.innerHTML;
-          }
-        }
-      });
-    } catch(e) {}
-  }, 30000); // Scan a cada 30 segundos
+  autoTradeInterval = null;
 }
 
 async function scannerRadar() {
@@ -2156,14 +2031,16 @@ async function scannerRadar() {
   document.getElementById('scannerStatus').innerHTML = '📡 Radar multi-ativo (22 ativos)...';
   res.innerHTML = '<div style="color:var(--text2);padding:20px;">⏳ Varrendo 22 ativos em 28 setups...</div>';
   try {
-    const r = await fetch('/api/scanner/radar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) });
+    const r = await dashboardPost('/api/jarvis/golden/radar', {symbol:document.getElementById('scannerSymbol').value, timeframe:'M15'});
     const d = await r.json();
-    if (!d.ok) { res.innerHTML = '<div style="color:var(--red);">❌ ' + (d.error || 'Erro') + '</div>'; return; }
-    
-    // Header
-    document.getElementById('scannerStatus').innerHTML = '\uD83D\uDFE2 Radar atualizado | ' + d.radar.length + ' ativos | ' + new Date().toLocaleTimeString();
-    window._radarData = d.radar;
-    renderRadarTable(d.radar, window._radarFilter || 'all');
+    const model = d.data || d;
+    if (!d.ok) { res.innerHTML = dashboardState(d, 'Radar indisponível'); return; }
+    const assets = model.market_map || [];
+    document.getElementById('scannerStatus').textContent = 'Radar Macro · leitura canônica · ' + assets.length + ' observações';
+    if (!assets.length) { res.innerHTML = dashboardState(model, 'Nenhum dado de mercado disponível'); return; }
+    res.innerHTML = '<div class="stats-grid">' + assets.map(function(asset) {
+      return '<div class="stat-card"><div class="stat-label">' + dashboardEscape(asset.group || 'Mercado') + '</div><div class="stat-value" style="font-size:18px;">' + dashboardEscape(asset.symbol) + '</div><div class="stat-label">' + dashboardEscape(asset.price == null ? 'Preço indisponível' : asset.price) + '</div></div>';
+    }).join('') + '</div><div style="font-size:11px;color:var(--text2);">Fonte: ' + dashboardEscape(model.source || 'Jarvis Radar read model') + ' · atualização: ' + dashboardEscape(model.updated_at || 'UNKNOWN') + '</div>';
   } catch(e) { res.innerHTML = '<div style="color:var(--red);">❌ ' + e.message + '</div>'; }
 }
 
@@ -2274,7 +2151,7 @@ function openAssetDetail(idx) {
   var canTrade = s.alert_level === 'OPORTUNIDADE' || s.alert_level === 'PRE_ENTRADA';
   modal += '<div style="display:flex;gap:10px;margin-top:15px;">';
   if (canTrade) {
-    modal += '<button onclick="executeTradeFromModal(\'' + s.symbol + '\',\'' + s.best_direction + '\',\'' + (s.best_mode||'') + '\',\'' + bestSetupName + '\',\'' + bestSetupId + '\')" style="flex:1;background:var(--green);color:#000;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">\u26A1 ENTRAR NO TRADE</button>';
+    modal += '<button disabled title="Trading bloqueado" style="flex:1;background:var(--bg3);color:var(--text2);border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:not-allowed;">Trading bloqueado</button>';
   }
   modal += '<button onclick="runDeepAnalysis(\'' + s.symbol + '\',\'' + (s.best_mode||'day') + '\')" style="flex:1;background:var(--blue);color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">\uD83D\uDD2C Analise Profunda (Multi-Layer)</button>';
   modal += '</div>';
@@ -2287,6 +2164,7 @@ function openAssetDetail(idx) {
 }
 
 async function executeTradeFromModal(symbol, direction, mode, setup, strategyId) {
+  return;
   var el = document.getElementById('tradeResult');
   if (!el) return;
   el.innerHTML = '<div style="color:var(--gold);font-size:13px;">⏳ Executando ' + direction + ' ' + symbol + '...</div>';
@@ -2594,13 +2472,14 @@ function renderCompare(results) {
 // ═══ INIT ═══
 async function loadStrategyCatalog() {
   try {
-    const r = await fetch('/api/strategy_catalog', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const r = await dashboardPost('/api/jarvis/golden/strategies');
     const d = await r.json();
-    if (!d.ok || !d.strategies) return;
+    const model = d.data || d;
+    if (!d.ok || !model.strategies) return;
     const backtest = document.getElementById('btStrategy');
     const compare = document.getElementById('cmpStrategies');
     const validation = document.getElementById('valStrategy');
-    const radar = d.strategies.filter(s => s.kind === 'radar');
+    const radar = model.strategies.filter(s => s.kind === 'radar');
     if (radar.length) {
       const group = document.createElement('optgroup');
       group.label = 'Radar (47 setups)';
@@ -2621,7 +2500,7 @@ async function loadStrategyCatalog() {
       });
     }
     compare.innerHTML = '';
-    d.strategies.forEach(s => {
+    model.strategies.forEach(s => {
       const label = document.createElement('label');
       label.style.cssText = 'display:block;padding:3px 4px;font-size:11px;cursor:pointer;white-space:nowrap;';
       const o = document.createElement('input');

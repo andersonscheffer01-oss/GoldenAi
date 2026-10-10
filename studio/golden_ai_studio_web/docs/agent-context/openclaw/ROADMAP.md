@@ -31,7 +31,7 @@
 ### Current Jarvis Components
 - `plugins/plugin_loader.py` (192 linhas, file-based)
 - `plugins/PluginRegistry` (básico)
-- 3 plugins existentes: crypto_price, system_info
+- Legacy inventory recorded 3 plugins at audit time; the external `crypto_price` plugin has since been retired. Current crypto reads use canonical MT5 read-only data.
 
 ### OpenClaw References
 - `src/plugins/` (1122 files)

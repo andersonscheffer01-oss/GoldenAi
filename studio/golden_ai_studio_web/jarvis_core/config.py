@@ -39,6 +39,9 @@ def resolve_api_key(env_var: str, json_key: str) -> Optional[str]:
 
     Retorna a chave encontrada ou None.  Nunca imprime o valor.
     """
+    if os.environ.get("JARVIS_TEST_MODE") == "1":
+        return os.environ.get(f"TEST_{env_var}", "").strip() or None
+
     env_val = os.environ.get(env_var, "").strip()
     if env_val:
         return env_val

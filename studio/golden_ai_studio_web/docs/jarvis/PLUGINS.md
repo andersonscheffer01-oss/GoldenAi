@@ -11,7 +11,6 @@
 plugins/
 ├── plugin_loader.py    # Registry único (estendido com V2)
 ├── __init__.py         # Exporta tipos V2
-├── crypto_price.py     # Plugin existente (compatível)
 ├── system_info.py      # Plugin existente (compatível)
 └── backups/            # Backups antes de alterações
 ```
@@ -19,6 +18,8 @@ plugins/
 **UM registry oficial:** `PluginRegistry` em `plugins/plugin_loader.py`
 
 **NÃO existe segundo sistema paralelo.**
+
+The former external crypto-price plugin is retired; crypto market reads are owned by the canonical Jarvis MT5 read-only path.
 
 ---
 

@@ -1212,8 +1212,9 @@ function wireHudPointer() {
 // --------------------------------------------------- CONFIRMATION DIALOG ---
 let _confirmToken = null;
 let _confirmProcessing = false;
+let _confirmHttpHandlers = null;
 
-function showConfirmationDialog(msg) {
+function showConfirmationDialog(msg, httpHandlers = null) {
   const dialog = $("#confirmDialog");
   const riskEl = $("#confirmRisk");
   const actionEl = $("#confirmAction");
@@ -1224,6 +1225,7 @@ function showConfirmationDialog(msg) {
 
   _confirmToken = msg.token || null;
   _confirmProcessing = false;
+  _confirmHttpHandlers = httpHandlers;
 
   const risk = (msg.risk || "MEDIUM").toUpperCase();
   riskEl.textContent = risk;
@@ -1239,11 +1241,26 @@ function showConfirmationDialog(msg) {
   setState("alert");
 }
 
+window.requestJarvisHttpConfirmation = function(options) {
+  if (!options || typeof options.token !== "string" || !options.token
+      || typeof options.onApprove !== "function") return false;
+  const dialog = $("#confirmDialog");
+  if (!dialog || !$("#confirmApprove") || !$("#confirmDeny")) return false;
+  showConfirmationDialog({
+    token: options.token,
+    risk: "MEDIUM",
+    action: options.action || "Ação read-only",
+    message: options.message || "Confirmação humana necessária.",
+  }, options);
+  return true;
+};
+
 function hideConfirmationDialog() {
   const dialog = $("#confirmDialog");
   dialog.hidden = true;
   _confirmToken = null;
   _confirmProcessing = false;
+  _confirmHttpHandlers = null;
   setState("idle");
 }
 
@@ -1261,6 +1278,20 @@ function wireConfirmationDialog() {
     statusEl.className = "confirmStatus";
 
     try {
+      if (_confirmHttpHandlers) {
+        const handlers = _confirmHttpHandlers;
+        const result = await handlers.onApprove(_confirmToken);
+        if (result?.ok !== true) {
+          statusEl.textContent = "Confirmação inválida, expirada ou indisponível. Nenhuma leitura foi apresentada.";
+          statusEl.className = "confirmStatus error";
+          handlers.onFailure?.(result);
+          hideConfirmationDialog();
+          return;
+        }
+        handlers.onComplete?.(result);
+        hideConfirmationDialog();
+        return;
+      }
       if (window.Gateway && window.Gateway.isAuthenticated) {
         window.Gateway.confirmAction(_confirmToken, true);
         statusEl.textContent = "Confirmado. Aguardando execução...";
@@ -1271,6 +1302,13 @@ function wireConfirmationDialog() {
         statusEl.className = "confirmStatus error";
       }
     } catch (e) {
+      if (_confirmHttpHandlers) {
+        _confirmHttpHandlers.onFailure?.(null);
+        statusEl.textContent = "Confirmação indisponível. Nenhuma leitura foi apresentada.";
+        statusEl.className = "confirmStatus error";
+        hideConfirmationDialog();
+        return;
+      }
       statusEl.textContent = "Erro: " + e.message;
       statusEl.className = "confirmStatus error";
       _confirmProcessing = false;
@@ -1283,6 +1321,12 @@ function wireConfirmationDialog() {
 
   denyBtn.addEventListener("click", () => {
     if (_confirmProcessing) return;
+    if (_confirmHttpHandlers) {
+      const handlers = _confirmHttpHandlers;
+      hideConfirmationDialog();
+      handlers.onCancel?.();
+      return;
+    }
     if (_confirmToken && window.Gateway && window.Gateway.isAuthenticated) {
       window.Gateway.confirmAction(_confirmToken, false);
       addMessage("jarvis", "Ação cancelada pelo operador.");
@@ -1293,6 +1337,12 @@ function wireConfirmationDialog() {
   // Close on Escape
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("#confirmDialog").hidden) {
+      if (_confirmHttpHandlers) {
+        const handlers = _confirmHttpHandlers;
+        hideConfirmationDialog();
+        handlers.onCancel?.();
+        return;
+      }
       if (_confirmToken && window.Gateway && window.Gateway.isAuthenticated) {
         window.Gateway.confirmAction(_confirmToken, false);
       }

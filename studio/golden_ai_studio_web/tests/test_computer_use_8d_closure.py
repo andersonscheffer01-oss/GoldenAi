@@ -70,7 +70,7 @@ def test_v2_to_v5_migration_preserves_data_and_is_idempotent(tmp_path):
     assert first.get_task_run("legacy-run")["run_id"] == "legacy-run"
     assert first.get_task_approval("legacy-approval")["decision"] == "PENDING"
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version FROM task_schema_version").fetchone()[0] == 5
+        assert db.execute("SELECT version FROM task_schema_version").fetchone()[0] == 6
         assert db.execute("SELECT COUNT(*) FROM background_tasks").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM task_runs").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM task_approvals").fetchone()[0] == 1
@@ -79,7 +79,7 @@ def test_v2_to_v5_migration_preserves_data_and_is_idempotent(tmp_path):
     second = TaskDatabase(path)
     assert second.get_background_task("legacy-task").task_id == "legacy-task"
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version FROM task_schema_version").fetchone()[0] == 5
+        assert db.execute("SELECT version FROM task_schema_version").fetchone()[0] == 6
 
 
 def test_e2e_master_flow_and_restart_durability(tmp_path):

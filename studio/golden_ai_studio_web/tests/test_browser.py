@@ -780,3 +780,13 @@ def test_4d_barrier_classifier_ignores_hidden_consent_controls():
          {"ref": "e2", "text": "Rejeitar", "visible": False}],
     )
     assert barrier == "NONE"
+
+
+def test_4d_barrier_classifier_does_not_block_search_results_for_footer_privacy_text():
+    barrier = classify_page_barrier(
+        {"url": "https://duckduckgo.com/?q=Python", "title": "Python at DuckDuckGo",
+         "text": "Python.org results Privacy Policy Continue"},
+        [{"ref": "e1", "text": "Python 3.14.7", "visible": True,
+          "role": "link"}],
+    )
+    assert barrier == "NONE"

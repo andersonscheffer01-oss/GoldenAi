@@ -98,11 +98,15 @@ class DesktopIdentityManager:
         self._http_post_override = http_post
         self._validator_override = validator
 
-    def ensure_identity(self):
+    def ensure_identity(self, *, allow_pairing=True):
         token = self.store.load_token()
         if token and self._validate(token):
             print("[JARVIS-DESKTOP] Device identity: reused; auth=ok", flush=True)
             return token
+        if not allow_pairing:
+            raise DesktopIdentityError(
+                "A identidade Desktop existente não foi validada; pairing não iniciado."
+            )
         if token:
             self.store.clear()
             print("[JARVIS-DESKTOP] Device identity: rejected; repairing", flush=True)
@@ -162,7 +166,10 @@ class DesktopIdentityManager:
             async with session.ws_connect(
                     GATEWAY_WS_URL, ssl=self.ssl_context, timeout=5) as ws:
                 await ws.send_json({"version": 1, "id": request_id,
-                                    "type": "auth", "payload": {"token": token}})
+                                    "type": "auth", "payload": {
+                                        "token": token,
+                                        "read_only_verification": True,
+                                    }})
                 message = await asyncio.wait_for(ws.receive(), timeout=5)
                 if message.type != aiohttp.WSMsgType.TEXT:
                     return False

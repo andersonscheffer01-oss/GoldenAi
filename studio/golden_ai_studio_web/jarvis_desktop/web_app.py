@@ -21,6 +21,8 @@ def build_parser():
     parser = argparse.ArgumentParser(prog="JARVIS")
     parser.add_argument("--hidden", action="store_true",
                         help="Inicia somente na bandeja do sistema.")
+    parser.add_argument("--require-existing-identity", action="store_true",
+                        help="Valida a identidade salva sem iniciar pairing.")
     return parser
 
 
@@ -39,7 +41,12 @@ def main(argv=None):
         return 0
     boot_log("BOOT_04_SINGLE_INSTANCE_OK SINGLE_INSTANCE_ROLE=PRIMARY")
 
-    launcher = CoreLauncher()
+    launcher = CoreLauncher(
+        runtime_profile="web-ai-safe",
+        required_capabilities=("golden_market_live",),
+    )
+    identity_manager = DesktopIdentityManager(launcher._ssl_context())
+    launcher.lifecycle_token = identity_manager.store.load_token() or ""
     boot_log("BOOT_05_QAPPLICATION_START")
     try:
         launcher.ensure_online()
@@ -50,7 +57,10 @@ def main(argv=None):
         return 1
 
     try:
-        device_token = DesktopIdentityManager(launcher._ssl_context()).ensure_identity()
+        device_token = identity_manager.ensure_identity(
+            allow_pairing=not args.require_existing_identity
+        )
+        launcher.lifecycle_token = device_token
     except DesktopIdentityError as exc:
         instance.close()
         launcher.stop_owned_core()

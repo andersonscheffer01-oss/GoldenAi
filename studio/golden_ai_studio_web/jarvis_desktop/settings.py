@@ -45,3 +45,7 @@ def candidate_origins() -> tuple[str, ...]:
 def ui_url(origin: str) -> str:
     return origin.rstrip("/") + "/jarvis_ui/jarvis.html"
 
+
+def market_url(origin: str) -> str:
+    """Return the existing Golden Radar surface used by the Market window."""
+    return origin.rstrip("/") + "/market.html"

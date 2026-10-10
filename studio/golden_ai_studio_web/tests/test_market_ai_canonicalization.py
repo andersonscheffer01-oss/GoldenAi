@@ -55,12 +55,8 @@ def test_market_context_snapshot_preserves_asset_timeframe_and_provenance():
         "provenance": {"price": "MT5"},
         "observed_at": "2026-09-29T12:00:00+00:00",
     }
-    service.golden_scanner_snapshot = lambda symbol, limit: {
-        "ok": True,
-        "data": {"results": [{"symbol": symbol, "market_regime": "TREND"}]},
-        "provenance": {"scanner": "golden_bridge"},
-        "observed_at": "2026-09-29T12:00:01+00:00",
-    }
+    scanner_calls = []
+    service.golden_scanner_snapshot = lambda *args: scanner_calls.append(args)
 
     result = service.market_context_snapshot(
         {"symbol": "EURUSD", "timeframe": "H1"})
@@ -73,7 +69,9 @@ def test_market_context_snapshot_preserves_asset_timeframe_and_provenance():
     assert context["timeframe"] == "H1"
     assert context["freshness"] == "CACHED"
     assert context["provenance"]["market"]["price"] == "MT5"
-    assert context["source_timestamps"]["scanner"]
+    assert "scanner" not in context["source_timestamps"]
+    assert result["scanner"] == {"status": "NOT_USED"}
+    assert scanner_calls == []
 
 
 def test_market_conversations_are_isolated_and_share_one_brain_boundary():

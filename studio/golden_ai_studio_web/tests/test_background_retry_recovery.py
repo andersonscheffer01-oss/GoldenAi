@@ -45,7 +45,7 @@ def test_schema_v3_migrates_task_run_provenance_additively(tmp_path):
     migrated = TaskDatabase(path)
     with sqlite3.connect(path) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(task_runs)")}
-        assert db.execute("SELECT version FROM task_schema_version").fetchone()[0] == 5
+        assert db.execute("SELECT version FROM task_schema_version").fetchone()[0] == 6
     assert {"source_run_id", "attempt_kind", "attempt", "recovery_count"} <= columns
     assert migrated.path == path
 
