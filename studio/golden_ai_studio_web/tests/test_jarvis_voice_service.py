@@ -60,6 +60,7 @@ class VoiceServiceLifecycleTest(unittest.TestCase):
         from jarvis_core.service import JarvisService
         self.service = JarvisService(self.temp.name)
         self.vs = VoiceService()
+        self.vs.configure_conversation_profile(mode="local")
         self.vs.enabled = True
 
     def tearDown(self):
@@ -100,6 +101,7 @@ class VoiceServicePipelineTest(unittest.TestCase):
         from jarvis_core.service import JarvisService
         self.service = JarvisService(self.temp.name)
         self.vs = VoiceService()
+        self.vs.configure_conversation_profile(mode="local")
         self.vs.service = self.service
         self.vs._voice = MagicMock()
         self.spoken = []
@@ -181,9 +183,22 @@ class SpeakNowTest(unittest.TestCase):
 
     def test_speak_now_calls_speak(self):
         vs = VoiceService()
+        vs.configure_conversation_profile(mode="local")
         vs._speak = lambda text: True
         result = vs.speak_now("teste de voz")
         self.assertTrue(result["ok"])
+
+    def test_default_voice_mode_is_gemini_live(self):
+        vs = VoiceService()
+        self.assertEqual("gemini_live", vs.conversation_profile()["requested_mode"])
+
+    def test_speak_now_blocks_local_tts_when_gemini_is_requested(self):
+        vs = VoiceService()
+        vs.configure_conversation_profile(mode="gemini_live")
+        vs._speak = lambda text: self.fail("TTS local não deveria ser chamado")
+        result = vs.speak_now("resposta do Jarvis")
+        self.assertFalse(result["ok"])
+        self.assertEqual("LOCAL_TTS_BLOCKED_BY_GEMINI_MODE", result["error"])
 
 
 class WakeStripTest(unittest.TestCase):
@@ -259,6 +274,7 @@ class VoiceEventTest(unittest.TestCase):
         self.service = JarvisService(self.temp.name)
         self.service.dry_run = True
         self.vs = VoiceService()
+        self.vs.configure_conversation_profile(mode="local")
         self.vs.service = self.service
         self.vs._voice = MagicMock()
         self.spoken = []

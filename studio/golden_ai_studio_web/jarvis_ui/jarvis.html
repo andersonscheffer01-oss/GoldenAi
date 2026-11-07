@@ -5,8 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="src/fonts.css">
-<link rel="stylesheet" href="src/styles.css?v=20260928-b3-runtime-reconcile">
-<link rel="stylesheet" href="src/desktop-shell.css?v=20261007-market-score-detail-1">
+<link rel="stylesheet" href="src/styles.css?v=20261018-gemini-ptt-session-2">
+<link rel="stylesheet" href="src/desktop-shell.css?v=20261012-operational-regions-7">
 <link rel="stylesheet" href="lib/github-dark.min.css">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0a0a0f">
@@ -98,7 +98,7 @@
 
     <div id="thinkingBar" hidden>
       <span class="tl"></span><span class="tl"></span><span class="tl"></span>
-      <span id="thinkingText">processando</span>
+      <span id="thinkingText">pensando…</span>
     </div>
   </main>
 
@@ -114,7 +114,7 @@
   <footer id="bottomBar">
     <div id="quickChips"></div>
     <form id="inputRow" autocomplete="off">
-      <button type="button" id="micBtn" class="roundBtn" title="Falar (espaço)">
+      <button type="button" id="micBtn" class="roundBtn ptt-muted" title="Microfone mudo — clique para falar" aria-label="Microfone mudo" aria-pressed="false" data-ptt="off">
         <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
       </button>
       <input id="cmdInput" placeholder="Fale ou digite um comando, senhor..." autocomplete="off" spellcheck="false">
@@ -132,11 +132,12 @@
 <div id="golden" aria-hidden="true">
 
     <header id="d2Topbar" aria-label="Golden Jarvis Desktop">
-      <div class="d2Brand"><span class="d2BrandMark" aria-hidden="true">G</span><span><b>JARVIS</b><small>GOLDENAI WORKSPACE</small></span></div>
+      <div class="d2Brand"><span class="d2BrandMark" aria-hidden="true">G</span><span class="d2BrandDefault"><b>JARVIS</b><small>GOLDENAI WORKSPACE</small></span><span class="d2MarketBrand"><b>GOLDENAI</b><small>INTELIGÊNCIA DE MERCADO</small></span></div>
       <div class="d2TopStatus">
         <span class="d2Mode"><i aria-hidden="true"></i>MODO <b>ANÁLISE</b></span>
         <span class="d2LiveLock">LIVE NÃO AUTORIZADO</span>
         <span class="d2DemoBadge">PAINEL · LEITURA SOMENTE</span>
+        <span class="d2MarketTopCount" data-market-top-count>UNIVERSO NÃO CONSULTADO</span>
         <span id="d2GatewaySlot" aria-label="Estado do Gateway"></span>
       </div>
       <span id="d2SettingsSlot"></span>
@@ -299,6 +300,13 @@
         </div>
 
         <div id="gPills" class="gPills"></div>
+        <section class="jarvisExperienceStrip" aria-label="Estado da experiência Jarvis">
+          <article><span>VOZ</span><b id="jarvisExperienceVoice">LOCAL · DISABLED</b></article>
+          <article><span>PERSONALIDADE</span><b id="jarvisExperiencePersona">EQUILIBRADO</b></article>
+          <article><span>MICROFONE</span><b id="jarvisExperienceMic">NÃO CONSULTADO</b></article>
+          <article><span>COMPUTER USE</span><b id="jarvisExperienceComputer">ESC DESATIVADO</b></article>
+          <article><span>WHATSAPP</span><b id="jarvisExperienceWhatsapp">PENDING_CONFIGURATION</b></article>
+        </section>
       </div>
 
       <div class="gView" data-view="pesquisa" hidden>
@@ -513,20 +521,22 @@
       </section>
 
       <section class="gView d2View d2DonorView d2AnalysisView" data-view="d2-analysis" hidden aria-labelledby="d2AnalysisTitle">
-        <div class="d2AnalysisToolbar"><div class="d2SymbolChoices" role="group" aria-label="Ativo da análise"><button type="button" data-d2-symbol="XAU/USD" aria-pressed="true">XAU/USD</button><button type="button" data-d2-symbol="EUR/USD" aria-pressed="false">EUR/USD</button><button type="button" data-d2-symbol="GBP/USD" aria-pressed="false">GBP/USD</button><button type="button" data-d2-symbol="BTC/USD" aria-pressed="false">BTC/USD</button></div><div class="d2AnalysisState"><b id="d2AnalysisTitle">ANÁLISE GOLDENAI</b><span>FONTE NÃO CONSULTADA · SEM SNAPSHOT</span></div><button type="button" class="d2ScanButton" disabled title="A varredura analítica ainda não está conectada a esta view"><span class="d2BoltIcon" aria-hidden="true">ϟ</span> SOLICITAR ANÁLISE</button></div>
-        <div class="d2AudioSummary"><div class="d2AudioGlyph">≋</div><div><b>Resumo de análise</b><span>Conteúdo de áudio indisponível</span></div><span class="d2AudioQuality">GOLDENAI · SEM SÍNTESE</span><button type="button" disabled title="Voice/áudio não inicializado nesta fase">▶</button><time>—</time></div>
-        <div class="d2AnalysisColumns">
-          <div class="d2AnalysisPrimary">
-            <section class="d2DonorSurface d2ThesisPanel"><header class="d2DonorSectionTitle"><b>◉ &nbsp; Tese Operacional &amp; Evidências</b><span class="d2MutedTag">AGUARDANDO DADOS</span></header><div class="d2AnalysisSummary"><div><span>VIÉS</span><strong>—</strong><small>Não avaliado</small></div><div><span>CONFIANÇA</span><strong>—</strong><small>Sem cálculo</small></div><div><span>CONFLUÊNCIA</span><strong>—</strong><small>Sem validação</small></div><div><span>PERÍODO</span><strong>—</strong><small>Não selecionado</small></div></div><div class="d2ThesisEmpty"><b>Sem tese de mercado canônica</b><p>Não há snapshot, scanner ou evidência de contexto disponível nesta sessão.</p></div><div class="d2EvidenceRows"><div><span>TENDÊNCIA</span><b>Não consultada</b></div><div><span>MACRO / EVENTOS</span><b>Não consultados</b></div><div><span>VOLATILIDADE</span><b>Não calculada</b></div><div><span>PROVENIÊNCIA</span><b>Sem snapshot ID</b></div></div></section>
-            <section class="d2DonorSurface d2ParametersPanel"><header class="d2DonorSectionTitle"><b>▣ &nbsp; Parâmetros Analíticos</b><span class="d2MutedTag">NÃO DISPONÍVEIS</span></header><div class="d2ParameterRows"><div><span>ENTRADA</span><b>—</b><small>Sem análise</small></div><div><span>STOP LOSS</span><b>—</b><small>Não calculado</small></div><div><span>ALVO</span><b>—</b><small>Não calculado</small></div></div><div class="d2ReadOnlyFooter">VALORES DEMONSTRATIVOS DO TEMPLATE REMOVIDOS</div></section>
-            <section class="d2DonorSurface d2ProtectionPanel"><header class="d2DonorSectionTitle"><b>Régua de Proteção</b><span class="d2MutedTag">SEM POSIÇÃO SELECIONADA</span></header><div class="d2ProtectionSteps"><div><i>01</i><b>Break-even</b><span>Indisponível</span></div><div><i>02</i><b>Parcial</b><span>Indisponível</span></div><div><i>03</i><b>Trailing</b><span>Indisponível</span></div><div><i>04</i><b>Encerramento</b><span>Indisponível</span></div></div></section>
+        <div class="d2AnalysisToolbar d2InstitutionalHeader"><div class="d2AnalysisState"><b id="d2AnalysisTitle">ANÁLISE GOLDENAI — REGIÕES OPERACIONAIS</b><span>RESULTADO CANÔNICO DA ANÁLISE SOLICITADA NO PAINEL</span></div><div class="d2SymbolChoices" role="group" aria-label="Ativo da análise"><span class="d2MutedTag">ATIVO NÃO SELECIONADO</span></div><button type="button" class="d2ScanButton" data-analysis-request>USAR ANÁLISE DO PAINEL</button></div>
+        <section class="d2AnalysisSummary d2AnalysisKpis"><div><span>VIÉS PRINCIPAL</span><strong>—</strong><small>Não avaliado</small></div><div><span>HORIZONTE MAIS ALINHADO</span><strong>—</strong><small>Sem evidência suficiente</small></div><div><span>CONFIANÇA DO CENÁRIO</span><strong>—</strong><small>Não é probabilidade de acerto</small></div><div><span>TIMEFRAME</span><strong>—</strong><small>Não selecionado</small></div><div><span>MELHOR REGIÃO ATIVA</span><strong data-analysis-best-region>—</strong><small>Entrada condicionada à análise</small></div></section>
+        <div class="d2AnalysisWorkspace">
+          <div class="d2AnalysisMainStack">
+            <section class="d2DonorSurface d2ParametersPanel d2OperationalMap"><header class="d2DonorSectionTitle"><b>MAPA DE REGIÕES OPERACIONAIS</b><span class="d2MutedTag">CENÁRIOS CONDICIONAIS · SEM ORDENS</span></header><div class="d2OperationalTable" role="table" aria-label="Regiões operacionais da análise GoldenAI"><div class="d2OperationalHeader" role="row"><span role="columnheader">REGIÃO / ESTRATÉGIA</span><span role="columnheader">DIREÇÃO</span><span role="columnheader">HORIZONTES</span><span role="columnheader">ENTRADA</span><span role="columnheader">STOP</span><span role="columnheader">TAKE 1</span><span role="columnheader">TAKE 2</span><span role="columnheader">TAKE 3</span><span role="columnheader">TAKE 4</span><span role="columnheader">ATIVAR BE</span><span role="columnheader">PROB.</span><span role="columnheader">R/R</span><span role="columnheader">STATUS</span></div><div class="d2OperationalRows" data-analysis-region-rows role="rowgroup"><div class="d2OperationalEmpty" role="row"><b>SEM REGIÃO OPERACIONAL CONFIRMADA</b><small>Solicite a análise no Painel. Entrada, stop, alvos, breakeven e probabilidade só aparecem quando retornados pela fonte canônica.</small></div></div></div></section>
+            <section class="d2DonorSurface d2ThesisPanel d2AiReading"><header class="d2DonorSectionTitle"><b>LEITURA DA IA</b><span class="d2MutedTag">AGUARDANDO DADOS</span></header><div class="d2ThesisEmpty"><b>Sem resultado canônico para a seleção</b><p>A análise solicitada no Painel aparecerá aqui automaticamente.</p></div><div class="d2EvidenceRows"><div><span>TENDÊNCIA</span><b>Não consultada</b></div><div><span>ROMPIMENTO</span><b>Não consultado</b></div><div><span>VOLATILIDADE</span><b>Não calculada</b></div><div><span>SNAPSHOT</span><b>Sem snapshot ID</b></div></div><div class="d2AudioSummary"><div class="d2AudioGlyph">≋</div><div><b>Resumo da análise</b><span data-analysis-summary>Nenhuma análise canônica selecionada.</span></div><span class="d2AudioQuality">SOMENTE ANÁLISE</span><button type="button" disabled>▶</button><time>—</time></div></section>
           </div>
-          <div class="d2AnalysisSecondary">
-            <section class="d2DonorSurface d2ChecklistPanel"><header class="d2DonorSectionTitle"><b>☷ &nbsp; Checklist Quantitativo</b><span class="d2MutedTag">0 / 8 VERIFICADOS</span></header><div class="d2CriteriaList"><div><i>01</i><span><b>Tendência Multitemporal</b><small>Sem dados de timeframe</small></span><em>—</em></div><div><i>02</i><span><b>Notícias e contexto macro</b><small>Fonte macro não consultada</small></span><em>—</em></div><div><i>03</i><span><b>Estrutura de mercado</b><small>Sem série de preços</small></span><em>—</em></div><div><i>04</i><span><b>Rompimento institucional</b><small>Não avaliado</small></span><em>—</em></div><div><i>05</i><span><b>Ritmo / Price Action</b><small>Sem observação</small></span><em>—</em></div><div><i>06</i><span><b>Volume</b><small>Não consultado</small></span><em>—</em></div><div><i>07</i><span><b>Volatilidade ATR</b><small>Não calculada</small></span><em>—</em></div><div><i>08</i><span><b>Médias e momentum</b><small>Não avaliado</small></span><em>—</em></div></div></section>
-            <section class="d2DonorSurface d2DispersionPanel"><header class="d2DonorSectionTitle"><div><b>Dispersão e Volatilidade Intraday</b><p>Pressão compradora vs vendedora</p></div><span class="d2MutedTag">SEM SÉRIE</span></header><div class="d2DispersionChart"><div class="d2ChartGrid" aria-hidden="true"></div><div class="d2DonorEmpty"><b>Gráfico indisponível</b><p>Nenhum ponto foi plotado sem série de mercado.</p></div></div><footer class="d2ChartLegend"><span>FONTE · NÃO CONSULTADA</span><b>SEM DADOS</b></footer></section>
-          </div>
+          <aside class="d2AnalysisSideStack">
+            <section class="d2DonorSurface d2HorizonConfluencePanel"><header class="d2DonorSectionTitle"><b>CONFLUÊNCIA POR HORIZONTE</b><span class="d2MutedTag">EVIDÊNCIA TÉCNICA REAL</span></header><div class="d2HorizonMatrix" data-analysis-horizon-matrix>
+              <article class="d2HorizonColumn" data-horizon-column="SCALPER"><header><b>SCALPER</b><span>M1 / M5</span><em data-horizon-best>—</em></header><div class="d2HorizonMetricRows"><div><span>Tendência</span><b data-horizon-metric="trend">—</b></div><div><span>Estrutura</span><b data-horizon-metric="structure">—</b></div><div><span>Momentum</span><b data-horizon-metric="momentum">—</b></div><div><span>Volatilidade</span><b data-horizon-metric="volatility">—</b></div><div><span>Fluxo</span><b data-horizon-metric="flow">—</b></div><div><span>Timing</span><b data-horizon-metric="timing">—</b></div><div><span>Liquidez</span><b data-horizon-metric="liquidity">—</b></div><div><span>Sentimento</span><b data-horizon-metric="sentiment">—</b></div></div><footer><span>SCORE FINAL</span><strong data-horizon-score>—</strong></footer></article>
+              <article class="d2HorizonColumn" data-horizon-column="DAY_TRADE"><header><b>DAY TRADE</b><span>M15 / H1</span><em data-horizon-best>—</em></header><div class="d2HorizonMetricRows"><div><span>Tendência</span><b data-horizon-metric="trend">—</b></div><div><span>Estrutura</span><b data-horizon-metric="structure">—</b></div><div><span>Momentum</span><b data-horizon-metric="momentum">—</b></div><div><span>Volatilidade</span><b data-horizon-metric="volatility">—</b></div><div><span>Fluxo</span><b data-horizon-metric="flow">—</b></div><div><span>Timing</span><b data-horizon-metric="timing">—</b></div><div><span>Liquidez</span><b data-horizon-metric="liquidity">—</b></div><div><span>Sentimento</span><b data-horizon-metric="sentiment">—</b></div></div><footer><span>SCORE FINAL</span><strong data-horizon-score>—</strong></footer></article>
+              <article class="d2HorizonColumn" data-horizon-column="SWING"><header><b>SWING TRADE</b><span>H4 / D1</span><em data-horizon-best>—</em></header><div class="d2HorizonMetricRows"><div><span>Tendência</span><b data-horizon-metric="trend">—</b></div><div><span>Estrutura</span><b data-horizon-metric="structure">—</b></div><div><span>Momentum</span><b data-horizon-metric="momentum">—</b></div><div><span>Volatilidade</span><b data-horizon-metric="volatility">—</b></div><div><span>Fluxo</span><b data-horizon-metric="flow">—</b></div><div><span>Timing</span><b data-horizon-metric="timing">—</b></div><div><span>Liquidez</span><b data-horizon-metric="liquidity">—</b></div><div><span>Sentimento</span><b data-horizon-metric="sentiment">—</b></div></div><footer><span>SCORE FINAL</span><strong data-horizon-score>—</strong></footer></article>
+            </div></section>
+          </aside>
         </div>
-        <footer class="d2AnalysisProvenance"><span>ORIGEM <b>NÃO CONSULTADA</b></span><span>SNAPSHOT <b>—</b></span><span>FRESCOR <b>DESCONHECIDO</b></span><span>PROVENIÊNCIA <b>NÃO DISPONÍVEL</b></span><button type="button" class="d2TextAction" data-d2-route="radar">ABRIR RADAR GOLDENAI →</button></footer>
+        <footer class="d2AnalysisProvenance"><span>ORIGEM <b>NÃO CONSULTADA</b></span><span>SNAPSHOT <b>—</b></span><span>FRESCOR <b>DESCONHECIDO</b></span><span>PROVENIÊNCIA <b>NÃO DISPONÍVEL</b></span></footer>
       </section>
 
       <section class="gView d2View d2DonorView d2OperationsView" data-view="d2-operations" hidden aria-labelledby="d2OperationsTitle">
@@ -574,19 +584,21 @@
 
       <section class="gView d2View d2DonorView d2MarketIntelligenceView" data-view="d2-market-intelligence" hidden aria-labelledby="d2MarketIntelligenceTitle">
         <div class="d2MarketIntelligenceHeading"><div><span class="d2Eyebrow">ANÁLISE QUANTITATIVA MULTITEMPORAL · MT5 · LEITURA SOMENTE</span><h1 id="d2MarketIntelligenceTitle">Inteligência de Mercado</h1><p>Score direcional é intensidade de tendência, não probabilidade, sinal ou autorização de trading.</p></div><span class="d2MutedTag" data-trend-ranking-batch>Nenhuma varredura de mercado consultada.</span></div>
-        <section class="d2MarketLeaders"><article><b>MAIORES TENDÊNCIAS DE ALTA</b><div data-trend-ranking-up>Nenhuma varredura de mercado consultada.</div></article><article><b>MAIORES TENDÊNCIAS DE BAIXA</b><div data-trend-ranking-down>Nenhuma varredura de mercado consultada.</div></article></section>
+        <section class="d2MarketLeaders"><article class="is-positive"><b>TENDÊNCIA MAIS FORTE</b><div data-trend-ranking-up>Nenhuma varredura de mercado consultada.</div></article><article class="is-negative"><b>PRESSÃO VENDEDORA</b><div data-trend-ranking-down>Nenhuma varredura de mercado consultada.</div></article><article class="is-confluence"><b>MAIOR CONFLUÊNCIA</b><div data-trend-ranking-confluence>UNAVAILABLE</div></article><article class="is-coverage"><b>ATIVOS ANALISADOS</b><div data-trend-ranking-coverage>UNAVAILABLE</div></article></section>
         <section class="d2DonorSurface d2TrendRanking d2MarketRanking" data-trend-ranking aria-labelledby="d2MarketRankingTitle">
-          <div class="d2TrendMonitorControl"><button type="button" class="d2TextAction" data-trend-monitor-start>INICIAR MONITORAMENTO</button><span data-trend-monitor-status role="status">MONITORAMENTO NAO CONSULTADO</span></div>
-          <header class="d2TrendRankingHeader"><div><b id="d2MarketRankingTitle">VARREDURA DO UNIVERSO CONGELADO</b><small data-market-ranking-counts>Nenhuma varredura de mercado consultada.</small></div><button type="button" class="d2TextAction" data-trend-ranking-run>CONSULTAR LOTE</button></header>
+          <div class="d2MarketTabs" role="tablist" aria-label="Visões de mercado"><button type="button" role="tab" aria-selected="true">Screener personalizado</button><button type="button" role="tab" aria-selected="false" disabled title="Sem dados canônicos de setups e alertas nesta varredura">Setup e alertas</button><button type="button" role="tab" aria-selected="false" disabled title="Sem contrato de padrões gráficos nesta varredura">Padrões gráficos</button><button type="button" role="tab" aria-selected="false" disabled title="Matriz multitemporal disponível no screener">Multi-Timeframe</button></div>
+          <header class="d2TrendRankingHeader"><div><b id="d2MarketRankingTitle">RANKING DE TENDÊNCIAS · GOLDENAI</b><small data-market-ranking-counts>Nenhuma varredura de mercado consultada.</small><span data-trend-ranking-status role="status">Catálogo consultado somente por ação explícita · todos os ativos são avaliados em lotes MT5 somente leitura.</span><small data-trend-scan-persistence>Persistência não verificada.</small></div><div class="d2TrendRankingActions"><button type="button" class="d2TextAction d2MarketSweep" data-trend-ranking-sweep hidden>AVALIAR TODOS</button><button type="button" class="d2TextAction d2MarketNextBatch" data-trend-ranking-next hidden>PRÓXIMO LOTE</button><button type="button" class="d2TextAction" data-trend-ranking-run>CONSULTAR LOTE</button></div></header>
           <progress class="d2TrendRankingProgress" data-trend-ranking-progress max="100" value="0" aria-label="Progresso da varredura">0%</progress>
-          <div class="d2TrendRankingControls"><label>UNIVERSO DA PRÓXIMA VARREDURA<select data-trend-class-select aria-label="Classe para a próxima varredura"><option value="ALL">TODOS</option></select></label><button type="button" class="d2TextAction" data-trend-scan-recover>RECUPERAR VARREDURA</button><span data-trend-ranking-status role="status">Catálogo consultado somente por ação explícita · no máximo 4 ativos por clique.</span><small data-trend-scan-persistence>Persistência não verificada.</small></div>
-          <div class="d2MarketFilters" role="group" aria-label="Filtros locais da matriz"><label>CLASSE<select data-market-filter-class><option value="ALL">TODAS</option><option value="FOREX">FOREX</option><option value="INDICES">ÍNDICES</option><option value="STOCKS">AÇÕES</option><option value="ETF">ETFs</option><option value="CRYPTO">CRYPTO</option><option value="COMMODITIES">COMMODITIES</option><option value="METALS">METAIS</option><option value="OTHER_UNKNOWN">OUTROS / DESCONHECIDOS</option></select></label><label>TENDÊNCIA<select data-market-filter-trend><option value="ALL">TODAS</option><option>ALTA FORTE</option><option>ALTA</option><option>LATERAL</option><option>BAIXA</option><option>BAIXA FORTE</option></select></label><label>ESTADO<select data-market-filter-state><option value="ALL">TODOS OS ESTADOS</option><option value="EVALUATED">AVALIADOS</option><option value="PENDING">PENDENTES</option><option value="INSUFFICIENT">INSUFICIENTES</option><option value="FAILED">FALHOS</option></select></label></div>
+          <nav class="d2MarketCategoryTabs" aria-label="Categorias de ativos"><button type="button" data-market-quick-class="ALL" aria-pressed="true">TODOS</button><button type="button" data-market-quick-class="FOREX">FOREX</button><button type="button" data-market-quick-class="INDICES">ÍNDICES</button><button type="button" data-market-quick-class="METALS">METAIS</button><button type="button" data-market-quick-class="COMMODITIES">ENERGIA</button><button type="button" data-market-quick-class="CRYPTO">CRYPTO</button></nav>
+          <div class="d2MarketFilters" role="group" aria-label="Filtros locais da matriz"><label>CLASSE<select data-market-filter-class><option value="ALL">TODAS</option><option value="FOREX">FOREX</option><option value="INDICES">ÍNDICES</option><option value="STOCKS">AÇÕES</option><option value="ETF">ETFs</option><option value="CRYPTO">CRYPTO</option><option value="COMMODITIES">COMMODITIES</option><option value="METALS">METAIS</option><option value="OTHER_UNKNOWN">OUTROS / DESCONHECIDOS</option></select></label><label>MERCADO<select data-market-filter-state><option value="ALL">TODOS</option><option value="EVALUATED">AVALIADOS</option><option value="PENDING">PENDENTES</option><option value="INSUFFICIENT">INSUFICIENTES</option><option value="FAILED">FALHOS</option><option value="OUTSIDE">FORA DO SCAN</option></select></label><label>DIREÇÃO<select data-market-filter-trend><option value="ALL">TODAS</option><option>ALTA FORTE</option><option>ALTA</option><option>LATERAL</option><option>BAIXA</option><option>BAIXA FORTE</option></select></label><label>ORDENAR<select data-market-sort><option value="STRENGTH">FORÇA</option><option value="SYMBOL">ATIVO A–Z</option><option value="UP">MAIORES ALTAS</option><option value="DOWN">MAIORES BAIXAS</option></select></label><label class="d2MarketSearch">BUSCAR ATIVO<input type="search" data-market-search placeholder="Buscar ativo..." autocomplete="off" aria-label="Buscar ativo no scan carregado"></label><span data-market-visible-count role="status">0 ativos exibidos</span></div>
+          <details class="d2MarketScanControls"><summary>Varredura e monitor</summary><div class="d2TrendMonitorControl"><button type="button" class="d2TextAction" data-trend-monitor-start>INICIAR MONITORAMENTO CONTÍNUO</button><label>INTERVALO<select data-trend-monitor-interval aria-label="Intervalo do monitor"><option value="15">15 s</option><option value="30">30 s</option><option value="60" selected>60 s</option><option value="120">2 min</option><option value="300">5 min</option></select></label><span data-trend-monitor-status role="status">MONITORAMENTO NÃO CONSULTADO</span></div><div class="d2TrendRankingControls"><label>UNIVERSO DA PRÓXIMA VARREDURA<select data-trend-class-select aria-label="Classe para a próxima varredura"><option value="ALL">TODOS</option></select></label><button type="button" class="d2TextAction" data-trend-scan-recover>RECUPERAR VARREDURA</button></div></details>
           <small class="d2TrendRankingExcluded" data-trend-ranking-excluded hidden></small><details class="d2TrendRankingExcludedDetails" data-trend-ranking-excluded-details hidden><summary>IDENTIDADES EXCLUÍDAS E MOTIVOS</summary><ul data-trend-ranking-excluded-list></ul></details>
-          <div class="d2MarketMatrixWrap"><table class="d2MarketMatrix"><thead><tr><th>ATIVO</th><th>M1</th><th>M5</th><th>M15</th><th>M30</th><th>H1</th><th>H4</th><th>D1</th><th>TENDÊNCIA GERAL</th><th>SCORE</th><th>COBERTURA</th><th>QUALIDADE</th><th>SCALP</th><th>DAY</th><th>SWING</th></tr></thead><tbody data-trend-ranking-rows><tr><td colspan="15">Nenhuma varredura de mercado consultada.</td></tr></tbody></table></div>
-          <section class="d2MarketAssetDetail" data-market-asset-detail hidden aria-label="Detalhamento técnico do ativo selecionado"><header><div><small>DETALHAMENTO TÉCNICO · DADOS DA VARREDURA ATUAL</small><b data-market-asset-detail-title></b></div><button type="button" class="d2TextAction" data-market-asset-detail-close aria-label="Fechar detalhamento do ativo">FECHAR</button></header><div data-market-asset-detail-body></div></section>
+          <div class="d2MarketMainGrid"><div class="d2MarketMatrixWrap"><table class="d2MarketMatrix"><thead><tr><th>#</th><th>ATIVO</th><th>SCORE</th><th>DIREÇÃO</th><th>M1</th><th>M5</th><th>M15</th><th>M30</th><th>H1</th><th>H4</th><th>D1</th><th>SCALP</th><th>DAY</th><th>SWING</th><th>COBERTURA</th><th>ESTADO</th></tr></thead><tbody data-trend-ranking-rows><tr class="d2MarketEmptyState"><td colspan="16"><strong>Nenhuma varredura consultada</strong><span>Ainda não há resultado canônico para exibir.</span></td></tr></tbody></table></div>
+          <section class="d2MarketAssetDetail" data-market-asset-detail hidden aria-label="Detalhamento técnico do ativo selecionado"><header><div><small>ANÁLISE DETALHADA</small><b data-market-asset-detail-title>Selecione um ativo</b></div><button type="button" class="d2TextAction" data-market-asset-detail-close aria-label="Limpar seleção do ativo">LIMPAR</button></header><div data-market-asset-detail-body><p class="d2MarketAssetDetailEmpty">Nenhum ativo avaliado selecionado. Fonte, cobertura e leitura técnica aparecerão somente para resultados disponíveis.</p></div></section></div>
           <div class="d2TrendRankingLocalPages"><button type="button" class="d2TextAction" data-trend-ranking-previous disabled>ATIVOS ANTERIORES</button><button type="button" class="d2TextAction" data-trend-ranking-more disabled>1/1 · PRÓXIMOS ATIVOS</button></div>
-          <footer class="d2TrendRankingFooter"><span>Horizontes indicam apenas alinhamento técnico; freshness/UTC desconhecidos permanecem UNKNOWN.</span><div><button type="button" class="d2TextAction" data-trend-ranking-pause hidden>PAUSAR</button><button type="button" class="d2TextAction" data-trend-ranking-retry hidden>RETENTAR FALHOS</button><button type="button" class="d2TextAction" data-trend-ranking-next hidden>PRÓXIMO LOTE</button></div></footer>
+          <footer class="d2TrendRankingFooter"><span>Horizontes indicam apenas alinhamento técnico; freshness/UTC desconhecidos permanecem UNKNOWN.</span><div><button type="button" class="d2TextAction" data-trend-ranking-pause hidden>PAUSAR</button><button type="button" class="d2TextAction" data-trend-ranking-retry hidden>RETENTAR FALHOS</button></div></footer>
         </section>
+        <div class="d2MarketOperationalFooter" aria-label="Estado da varredura"><span>GOLDENAI · MT5 SOMENTE LEITURA</span><span data-market-footer-progress>0 avaliados · 0 pendentes</span><span data-market-footer-source>Fonte ainda não consultada</span><span data-market-footer-persistence>Persistência não verificada</span></div>
       </section>
 
       <section class="gView d2View" data-view="d2-backtests" hidden aria-labelledby="d2BacktestsTitle">
@@ -596,8 +608,9 @@
       </section>
 
       <section class="gView d2View" data-view="d2-security" hidden aria-labelledby="d2SecurityTitle">
-        <div class="d2ViewHeading"><div><span>AUTORIDADE CANÔNICA</span><h1 id="d2SecurityTitle">Segurança</h1></div><span class="d2StateTag is-muted">ESTADO NÃO CONSULTADO</span></div>
-        <section class="d2Surface"><header><b>POLÍTICA E APROVAÇÕES</b><span>SECURITY MANAGER</span></header><div class="d2EmptyState">Aguardando projeção canônica de segurança e AuditLog</div></section>
+        <div class="d2ViewHeading"><div><span>AUTORIDADE CANÔNICA</span><h1 id="d2SecurityTitle">Segurança / Configuração</h1></div><span class="d2StateTag is-muted">ESTADOS REAIS · LOCAL</span></div>
+        <section class="d2Surface d2SecurityIntro"><header><b>CENTRAL DE CONFIGURAÇÕES</b><span>SECURITY MANAGER · VOICE SERVICE · DPAPI</span></header><p>Configurações autorizadas e diagnósticos canônicos. Nenhum segredo é exibido nesta interface.</p></section>
+        <div id="d2SecuritySettingsHost" aria-label="Central de configurações"></div>
       </section>
     </section>
 
@@ -660,25 +673,103 @@
       </div>
       <div class="modalBody">
 
+        <nav class="settingsTabs" role="tablist" aria-label="Configurações do Jarvis">
+          <button type="button" class="settingsTab" data-settings-tab="key" role="tab">CHAVE</button>
+          <button type="button" class="settingsTab" data-settings-tab="voice" role="tab">VOZ E JEITO</button>
+          <button type="button" class="settingsTab" data-settings-tab="audio" role="tab">MICROFONE E SOM</button>
+          <button type="button" class="settingsTab" data-settings-tab="whatsapp" role="tab">WHATSAPP</button>
+          <button type="button" class="settingsTab" data-settings-tab="security" role="tab">SEGURANÇA</button>
+          <button type="button" class="settingsTab" data-settings-tab="computer" role="tab">COMPUTER USE</button>
+          <button type="button" class="settingsTab" data-settings-tab="about" role="tab">SOBRE VOCÊ</button>
+        </nav>
+
+        <div class="settingsPanel" data-settings-panel="key" role="tabpanel">
+
         <div class="fieldSection">
           <h4>INTERFACE</h4>
           <div id="themeGrid" class="themeGrid"></div>
         </div>
 
         <div class="fieldSection">
-          <h4>VOZ</h4>
+          <h4>CONEXÃO E OPERAÇÃO</h4>
+          <p class="hint">A identidade do Desktop continua protegida pelo Gateway. Estas opções não concedem acesso a MT5 ou ao mercado.</p>
           <label class="switchRow"><input type="checkbox" id="speakToggle" checked><span>Falar respostas em voz alta</span></label>
           <label class="switchRow"><input type="checkbox" id="browserTtsToggle"><span>TTS do navegador (desktop usa VoiceService)</span></label>
           <label class="switchRow"><input type="checkbox" id="wakeToggle"><span>Escuta contínua pela palavra-chave</span></label>
           <div class="row2">
-            <label class="field"><span>Voz</span><select id="voiceSelect"></select></label>
             <label class="field"><span>Palavra-chave</span><input id="wakeInput" value="jarvis"></label>
+            <label class="field"><span>Estado</span><span class="backendResult">Protegido pelo Gateway</span></label>
           </div>
+        </div>
+
+        </div>
+
+        <div class="settingsPanel" data-settings-panel="voice" role="tabpanel" hidden>
+
+        <div class="fieldSection">
+          <h4>VOZ · COMO ELE SOA</h4>
           <div class="row2">
-            <label class="field"><span>Velocidade <b id="rateVal">1.02</b></span><input type="range" id="rateRange" min="0.6" max="1.6" step="0.02" value="1.02"></label>
+            <label class="field"><span>Voz</span><select id="voiceSelect"></select></label>
+            <label class="field"><span>Modo</span><select id="voiceMode"><option value="gemini_live">Gemini Live · conexão automática</option></select></label>
             <label class="field"><span>Tom <b id="pitchVal">0.82</b></span><input type="range" id="pitchRange" min="0.4" max="1.6" step="0.02" value="0.82"></label>
           </div>
-          <button id="testVoiceBtn" class="btn">TESTAR VOZ</button>
+          <div class="row2"><label class="field"><span>Voz Gemini</span><input id="geminiVoice" value="Aoede" maxlength="32"></label><label class="field"><span>Estado</span><span id="geminiVoiceStatus" class="backendResult">Gemini Live desligado</span></label></div>
+          <div class="settingsActions"><button id="settingsGeminiSetupBtn" class="btn" type="button">DIAGNÓSTICO SETUP</button><button id="settingsGeminiStartBtn" class="btn" type="button">CONECTAR GEMINI LIVE</button><button id="settingsGeminiStopBtn" class="btn" type="button">ENCERRAR GEMINI LIVE</button></div>
+          <div id="settingsGeminiStatus" class="audioDetails" aria-live="polite">Gemini Live conecta automaticamente quando disponível.</div>
+          <div class="row2">
+            <label class="field"><span>Velocidade <b id="rateVal">1.02</b></span><input type="range" id="rateRange" min="0.6" max="1.6" step="0.02" value="1.02"></label>
+            <label class="field"><span>Prévia Gemini Live</span><div class="row2"><button id="testGeminiVoiceBtn" class="btn" type="button">TESTAR VOZ GEMINI</button><button id="stopVoicePreviewBtn" class="btn" type="button" disabled>PARAR TESTE</button></div><span id="geminiVoicePreviewStatus" class="backendResult">Requer sessão Gemini Live autorizada.</span></label>
+          </div>
+        </div>
+
+        <div class="fieldSection">
+          <h4>JEITO · COMO ELE AGE</h4>
+          <div id="personaGrid" class="personaGrid" role="radiogroup" aria-label="Personalidade do Jarvis"></div>
+        </div>
+
+        </div>
+
+        <div class="settingsPanel" data-settings-panel="audio" role="tabpanel" hidden>
+        <div class="fieldSection">
+          <h4>MICROFONE E SOM</h4>
+          <p class="hint">Selecione um endpoint real, teste blocos de áudio e calibre ruído/fala. A calibração guarda apenas números locais.</p>
+          <div class="row2">
+            <label class="field"><span>Microfone</span><select id="microphoneSelect"><option value="">Detectar microfones...</option></select></label>
+            <label class="field"><span>Diagnóstico</span><span id="microphoneResult" class="backendResult">Aguardando</span></label>
+          </div>
+          <div class="settingsActions"><button id="refreshMicrophonesBtn" class="btn">ATUALIZAR</button><button id="testMicrophoneBtn" class="btn">TESTAR MICROFONE</button><button id="calibrateMicrophoneBtn" class="btn">CALIBRAR SILÊNCIO</button></div>
+          <div id="microphoneDetails" class="audioDetails" aria-live="polite"></div>
+        </div>
+        </div>
+
+        <div class="settingsPanel" data-settings-panel="whatsapp" role="tabpanel" hidden>
+          <div class="fieldSection"><h4>WHATSAPP · BRIDGE ISOLADO</h4>
+            <p class="hint">Nenhum pareamento ou conexão externa está ativo nesta fase.</p>
+            <div class="row2"><label class="field"><span>Estado</span><span id="whatsappBridgeStatus" class="backendResult">Consultando...</span></label><label class="field"><span>Processo</span><span id="whatsappBridgeProcess" class="backendResult">—</span></label></div>
+            <div class="settingsActions"><button id="refreshWhatsappBtn" class="btn" type="button">ATUALIZAR ESTADO</button></div>
+          </div>
+        </div>
+
+        <div class="settingsPanel" data-settings-panel="security" role="tabpanel" hidden>
+          <div class="fieldSection"><h4>COFRE DPAPI</h4><p class="hint">Somente metadados. Segredos nunca são exibidos ou enviados à IA.</p><div class="row2"><label class="field"><span>Estado</span><span id="vaultStatus" class="backendResult">Consultando...</span></label><label class="field"><span>Entradas</span><span id="vaultEntries" class="backendResult">—</span></label></div><div class="settingsActions"><button id="refreshVaultBtn" class="btn" type="button">ATUALIZAR COFRE</button></div><label class="field"><span>Chave Gemini Live (cadastro local)</span><input id="geminiCredentialInput" type="password" autocomplete="off" maxlength="4096" placeholder="Cole a chave somente aqui"></label><div class="settingsActions"><button id="saveGeminiCredentialBtn" class="btn" type="button">CADASTRAR GEMINI</button></div><div id="geminiCredentialResult" class="audioDetails" aria-live="polite"></div></div>
+          <div class="fieldSection"><h4>CONTEXTO ECONÔMICO · FRED</h4><p class="hint">A chave é protegida pelo cofre DPAPI e usada somente para consultar indicadores macroeconômicos oficiais. Nenhuma ordem ou ação de trading é autorizada.</p><label class="field"><span>Chave FRED API</span><input id="fredCredentialInput" type="password" autocomplete="off" maxlength="4096" placeholder="Cole a chave FRED somente aqui"></label><div class="settingsActions"><button id="saveFredCredentialBtn" class="btn" type="button">CADASTRAR FRED</button></div><div id="fredCredentialResult" class="audioDetails" aria-live="polite"></div></div>
+          <div class="fieldSection"><h4>IMAGENS · CLOUDFLARE + FLUX.1 SCHNELL</h4><p class="hint">Cadastre o token e o Account ID do Cloudflare. O token não aparece nesta interface nem é enviado ao chat.</p><label class="field"><span>API Token Cloudflare</span><input id="cloudflareTokenInput" type="password" autocomplete="off" maxlength="4096" placeholder="Cole o token somente aqui"></label><label class="field"><span>Account ID Cloudflare</span><input id="cloudflareAccountIdInput" type="text" autocomplete="off" maxlength="100" placeholder="Account ID da conta Workers AI"></label><div class="settingsActions"><button id="saveCloudflareCredentialsBtn" class="btn" type="button">CADASTRAR CLOUDFLARE</button></div><div id="cloudflareCredentialResult" class="audioDetails" aria-live="polite"></div></div>
+          <div class="fieldSection"><h4>FALLBACK DE IMAGEM · OPENAI</h4><p class="hint">Opcional: a chave fica no cofre local e só é usada se você selecionar OpenAI ou um fallback autorizado.</p><label class="field"><span>API Key OpenAI</span><input id="openaiImageKeyInput" type="password" autocomplete="off" maxlength="4096" placeholder="Cole a chave somente aqui"></label><div class="settingsActions"><button id="saveOpenAIImageKeyBtn" class="btn" type="button">CADASTRAR OPENAI IMAGES</button></div><div id="openaiImageKeyResult" class="audioDetails" aria-live="polite"></div></div>
+        </div>
+
+        <div class="settingsPanel" data-settings-panel="computer" role="tabpanel" hidden>
+          <div class="fieldSection"><h4>COMPUTER USE · MISSÕES</h4><p class="hint">Controles usam o TaskManager e o SecurityManager canônicos.</p><div class="row2"><label class="field"><span>ID da tarefa</span><input id="computerTaskId" maxlength="120"></label><label class="field"><span>Estado ESC</span><span id="computerEscStatus" class="backendResult">Consultando...</span></label></div><div class="settingsActions"><button id="computerRefreshBtn" class="btn" type="button">ATUALIZAR</button><button id="computerPauseBtn" class="btn" type="button">PAUSAR</button><button id="computerResumeBtn" class="btn" type="button">RETOMAR</button><button id="computerCancelBtn" class="btn" type="button">CANCELAR</button></div><div id="computerDetails" class="audioDetails" aria-live="polite"></div></div>
+          <div class="fieldSection"><h4>CONFIRMAÇÕES PENDENTES</h4><div id="computerApprovals" class="audioDetails">Nenhuma consulta realizada.</div></div>
+        </div>
+
+        <div class="settingsPanel" data-settings-panel="about" role="tabpanel" hidden>
+        <div class="fieldSection">
+          <h4>SOBRE VOCÊ</h4>
+          <p class="hint">Essas informações ficam no perfil local da interface e ajudam o Jarvis a responder com o tom escolhido.</p>
+          <label class="field"><span>Como devo chamar você?</span><input id="profileNameInput" maxlength="80" placeholder="Senhor"></label>
+          <label class="field"><span>Contexto pessoal curto</span><textarea id="profileContextInput" maxlength="500" rows="4" placeholder="Preferências de comunicação, sem segredos ou credenciais."></textarea></label>
+          <button id="saveProfileBtn" class="btn">SALVAR PERFIL</button>
+        </div>
         </div>
 
         <div class="fieldSection">
@@ -714,7 +805,7 @@
 <script src="src/math-parser.js"></script>
 
 <!-- Gateway adapter: real protocol, device auth, no X-Ja-Token -->
-<script src="src/gateway-adapter.js?v=20260921-3"></script>
+<script src="src/gateway-adapter.js?v=20261020-confirmation-fix-2"></script>
 
 <!-- Command router: all commands → Gateway → JarvisService -->
 <script src="src/command-router.js"></script>
@@ -723,7 +814,7 @@
 <script src="src/telemetry-adapter.js"></script>
 
 <!-- Application (modified: uses new adapters, no brain.js direct actions) -->
-<script type="module" src="src/app.js?v=20261005-history-filters-pagination-1"></script>
-<script type="module" src="src/desktop-shell.js?v=20261008-trend-scan-persistence-1"></script>
+<script type="module" src="src/app.js?v=20261107-gemini-provider-lock-1"></script>
+  <script type="module" src="src/desktop-shell.js?v=20261107-gemini-provider-lock-1"></script>
 </body>
 </html>

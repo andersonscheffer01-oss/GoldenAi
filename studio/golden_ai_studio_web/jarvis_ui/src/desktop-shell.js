@@ -17,6 +17,33 @@ if (window.__JARVIS_DESKTOP__ === true && app && root && navigation && workspace
   const jarvis = window.jarvis;
   const analysisView = document.querySelector(".d2AnalysisView");
 
+  // On Desktop only, promote the existing settings panels into the canonical
+  // Segurança / Configuração route. The public Web UI keeps the original modal.
+  const centralizeDesktopSettings = () => {
+    const host = document.querySelector("#d2SecuritySettingsHost");
+    const modalBody = document.querySelector("#settingsModal .modalBody");
+    if (!host || !modalBody || host.dataset.mounted === "true") return;
+    host.dataset.mounted = "true";
+    modalBody.classList.add("d2CentralSettingsBody");
+    host.appendChild(modalBody);
+    const modal = document.querySelector("#settingsModal");
+    if (modal) modal.hidden = true;
+    window.addEventListener("DOMContentLoaded", () => {
+      document.querySelector('[data-settings-tab="security"]')?.click();
+    }, { once: true });
+  };
+  centralizeDesktopSettings();
+
+  // The CyberBot-inspired Jarvis surface is deliberately loaded only by the
+  // native Desktop shell.  The canonical Web UI keeps its existing markup and
+  // behavior because this import is never evaluated outside the Desktop
+  // identity injected by QWebEngine.
+  // Legacy cache key retained in this comment for downstream compatibility:
+  // import("./desktop-jarvis-experience.js?v=20261021-gemini-auto-settings-1")
+  import("./desktop-jarvis-experience.js?v=20261107-gemini-provider-lock-1")
+    .then((module) => module.mountDesktopJarvisExperience?.())
+    .catch((error) => console.warn("[JARVIS-DESKTOP] experience unavailable", error));
+
   hydrateDemoViews();
 
   if (jarvis?.applyTheme && app.dataset.theme !== "golden") {

@@ -38,6 +38,7 @@ TTS (ordem no modo auto):
 import asyncio
 import io
 import os
+import re
 import tempfile
 import threading
 import time
@@ -57,6 +58,17 @@ from .realtime_voice.state_machine import (
     VoiceStateMachine,
 )
 from .realtime_voice.audio_input import AudioInputProvider
+from .realtime_voice.audio_queue import AudioFrameQueue
+from .audio_output import SoundDeviceAudioOutputProvider
+from .voice_tts import PcmAudioChunk
+from .audio_experience import AudioExperienceManager, MicrophoneProfileStore
+from .voice_feature_flags import (
+    adaptive_microphone_enabled,
+    gemini_live_enabled,
+    snapshot as voice_feature_snapshot,
+)
+from .voice_confirmation import classify_confirmation
+from .personality_profiles import DEFAULT_PERSONALITY, get_personality, personality_instruction
 from .realtime_voice.barge_in import EchoDecision, SelfTriggerPolicy
 from .realtime_voice.wake_lifecycle import WakeLifecycle
 from .streaming import is_streaming_enabled, is_barge_in_enabled
@@ -69,6 +81,18 @@ from .streaming.barge_in_calibration import (
 )
 
 log = __import__("logging").getLogger(__name__)
+
+
+def _safe_voice_detail(value: Any) -> str:
+    """Bound diagnostics without exposing credentials or URLs."""
+    text = str(value or "")[:240]
+    text = re.sub(r"AIza[0-9A-Za-z_-]{20,}", "[REDACTED]", text)
+    return re.sub(
+        r"([?&](?:key|token|access_token|authorization)=)[^&\s]+",
+        r"\1[REDACTED]",
+        text,
+        flags=re.IGNORECASE,
+    )
 
 # Limiar RMS para ignorar audio puramente silencioso (evita gastar Whisper).
 SILENCE_RMS = 150.0
@@ -156,6 +180,41 @@ class VoiceService:
         self._utterance_source: str = ""  # "BARGE_IN" or "NORMAL"
         self._push_to_talk_requested = threading.Event()
         self._desktop_session_id: str = ""
+        profile_path = os.getenv(
+            "JARVIS_VOICE_PROFILE_PATH",
+            str(Path.home() / "AppData" / "Local" / "GoldenAI" / "voice_profiles.json"),
+        )
+        self._audio_experience = AudioExperienceManager(
+            profile_store=MicrophoneProfileStore(profile_path)
+        )
+        self._selected_microphone_id = os.getenv("JARVIS_VOICE_MICROPHONE_ID", "").strip()
+        if not self._selected_microphone_id:
+            self._selected_microphone_id = self._audio_experience.profile_store.load_selected_endpoint()
+        self._personality_id = os.getenv("JARVIS_VOICE_PERSONALITY", DEFAULT_PERSONALITY).strip().casefold() or DEFAULT_PERSONALITY
+        # Presentation preferences are kept at the VoiceService boundary.  The
+        # safe default is Gemini Live; local TTS is only available when an
+        # explicit legacy/local profile is requested and is never a fallback.
+        self._voice_name = os.getenv("JARVIS_VOICE_NAME", "Charon").strip() or "Charon"
+        self._voice_mode = "gemini_live"
+        self._gemini_live_provider = None
+        self._gemini_voice_change_pending = False
+        self._gemini_runtime_loop = None
+        self._gemini_runtime_thread: threading.Thread | None = None
+        self._gemini_runtime_ready = threading.Event()
+        self._gemini_audio_queue: asyncio.Queue[bytes] | None = None
+        self._gemini_audio_sender: asyncio.Task | None = None
+        self._gemini_audio_receiver: asyncio.Task | None = None
+        self._gemini_output = None
+        self._gemini_audio_generation = 0
+        self._gemini_audio_metrics = {
+            "frames_captured": 0, "frames_sent": 0, "bytes_sent": 0,
+            "audio_chunks_received": 0, "bytes_received": 0,
+            "input_drops": 0, "output_drops": 0,
+        }
+        self._gemini_preview_active = False
+        self._gemini_preview_text = ""
+        self._gemini_preview_watch_task: asyncio.Task | None = None
+        self._gemini_preview_turn_baseline = 0
         self._conversation_id: str = uuid.uuid4().hex  # persists across cancelled turns
         # Adapter 4 lifecycle guard.  This protects only start/stop bookkeeping;
         # it does not replace the canonical VoiceStateMachine or TurnManager.
@@ -321,7 +380,7 @@ class VoiceService:
         except Exception as exc:
             # Cancellation and the queue sentinel already make the path safe;
             # keep the failure observable without blocking shutdown forever.
-            self.last_error = f"realtime_stop: {str(exc)[:240]}"
+            self.last_error = f"realtime_stop: {_safe_voice_detail(exc)}"
 
     def _on_realtime_state_change(
         self, value: str, external: Optional[Callable[[str], None]] = None
@@ -572,12 +631,809 @@ class VoiceService:
         """Return the single provider owned by this VoiceService, if created."""
         return self._audio_input_provider
 
+    def list_microphones(self) -> list[dict[str, Any]]:
+        """List deduplicated input endpoints without opening a stream."""
+        return [endpoint.public() for endpoint in self._audio_experience.enumerate_microphones()]
+
+    def selected_microphone_id(self) -> str:
+        """Return the persisted stable endpoint without opening a stream."""
+        return str(self._selected_microphone_id or "")
+
+    def select_microphone(self, endpoint_id: str = "") -> dict[str, Any]:
+        """Select a stable endpoint for the opt-in realtime provider."""
+        value = str(endpoint_id or "").strip()[:240]
+        if not value:
+            self._selected_microphone_id = ""
+            return {"ok": True, "selected": ""}
+        endpoint = next((item for item in self._audio_experience.enumerate_microphones()
+                         if item.stable_id == value), None)
+        if endpoint is None:
+            return {"ok": False, "error": "MICROPHONE_NOT_FOUND"}
+        self._selected_microphone_id = endpoint.stable_id
+        self._audio_experience.profile_store.save_selected_endpoint(endpoint.stable_id)
+        return {"ok": True, "selected": endpoint.public()}
+
+    def configure_conversation_profile(self, *, personality: str | None = None,
+                                       voice: str | None = None,
+                                       mode: str | None = None) -> dict[str, Any]:
+        """Change presentation preferences without changing policy or tools."""
+        voice_changed = False
+        personality_changed = False
+        live_connected_before = self._is_gemini_live_connected()
+        requested_voice = None
+        if voice is not None:
+            # Validate before mutating any other preference so a bad profile
+            # update is transactional from the Desktop's perspective.
+            from .gemini_live_provider import normalize_gemini_live_voice
+            requested_voice = normalize_gemini_live_voice(voice)
+        if personality is not None:
+            requested_personality = get_personality(personality).id
+            personality_changed = requested_personality != self._personality_id
+            self._personality_id = requested_personality
+        if voice is not None:
+            # Gemini applies ``voice_name`` only during session setup.  Reject
+            # unknown values locally and never let a stale preference reach
+            # the WebSocket as a server-side 1007 invalid argument.
+            assert requested_voice is not None
+            voice_changed = requested_voice != self._voice_name
+            self._voice_name = requested_voice
+            live_provider = self._gemini_live_provider
+            if live_provider is not None:
+                config = getattr(live_provider, "config", None)
+                if config is None:
+                    config = getattr(getattr(live_provider, "provider", None), "config", None)
+                if config is not None:
+                    from dataclasses import replace
+                    owner = live_provider if hasattr(live_provider, "config") else live_provider.provider
+                    owner.config = replace(config, voice=self._voice_name)
+            if voice_changed and live_connected_before:
+                self._gemini_voice_change_pending = True
+        if mode is not None:
+            requested_mode = str(mode).casefold()
+            if requested_mode not in {"local", "gemini_live"}:
+                raise ValueError("unsupported_voice_mode")
+            self._voice_mode = requested_mode
+        result = self.conversation_profile()
+        if voice_changed and live_connected_before:
+            result["voice_change_requires_reconnect"] = True
+            result["voice_change_scope"] = "current_session_reconnect"
+        if personality_changed and live_connected_before:
+            result["personality_change_requires_reconnect"] = True
+        if live_connected_before and (voice_changed or personality_changed):
+            result["profile_change_requires_reconnect"] = True
+        return result
+
+    def _is_gemini_live_connected(self) -> bool:
+        provider = self._gemini_live_provider
+        if provider is None:
+            return False
+        return bool(getattr(provider, "connected", False)) or bool(
+            getattr(getattr(provider, "provider", None), "connected", False)
+        )
+
+    def conversation_profile(self) -> dict[str, Any]:
+        profile = get_personality(self._personality_id)
+        live_provider = self._gemini_live_provider
+        live_connected = self._is_gemini_live_connected()
+        live_attached = self._gemini_live_provider is not None
+        effective_mode = (
+            "gemini_live"
+            if live_connected
+            else "gemini_live_unavailable"
+            if self._voice_mode == "gemini_live"
+            else "local"
+        )
+        return {"personality": profile.id, "personality_label": profile.label,
+                "personality_instruction": personality_instruction(profile.id),
+                "voice": self._voice_name,
+                "requested_mode": self._voice_mode,
+                "mode": effective_mode,
+                "effective_mode": effective_mode,
+                "gemini_live_attached": live_attached,
+                "gemini_live_connected": live_connected,
+                "voice_change_requires_reconnect": bool(self._gemini_voice_change_pending)}
+
+    def _apply_personality_to_brain(self, brain: Any) -> None:
+        """Attach presentation-only voice style to the canonical Brain seam."""
+        if brain is not None:
+            setattr(brain, "_voice_style_instruction", personality_instruction(self._personality_id))
+
+    def attach_gemini_live_provider(self, provider: Any) -> dict[str, Any]:
+        """Attach an already-reviewed/injected provider; does not connect it."""
+        self._gemini_live_provider = provider
+        # The native Live transport exposes completed input/output transcripts
+        # through a bounded observer hook.  Persisting them uses the same
+        # canonical JarvisService store as text and Gateway turns.
+        nested = getattr(provider, "provider", None)
+        if nested is not None and hasattr(nested, "_event_sink"):
+            previous_sink = getattr(nested, "_event_sink", None)
+            def observe(event):
+                if callable(previous_sink):
+                    try:
+                        previous_sink(event)
+                    except Exception:
+                        pass
+                self._on_gemini_provider_event(event)
+            nested._event_sink = observe
+        return self.conversation_profile()
+
+    def _on_gemini_provider_event(self, event: Any) -> None:
+        if not isinstance(event, dict) or event.get("event") != "turn_complete":
+            return
+        heard = str(event.get("input_transcript") or "").strip()
+        response = str(event.get("output_transcript") or "").strip()
+        if self.service is None:
+            try:
+                from desktop_center import DESKTOP_CENTER
+                self.service = DESKTOP_CENTER.service
+            except Exception:
+                self.service = None
+        if not heard or self.service is None:
+            return
+        sequence = str(event.get("sequence") or "")[:32]
+        request_id = "gemini-live:%s:%s" % (self._conversation_id[:48], sequence)
+        result = {
+            "ok": bool(response), "message": response or "Sem resposta.",
+            "provider": "gemini_live", "model": str(event.get("model") or "")[:160],
+            "response_id": request_id,
+        }
+        try:
+            self.service._record_conversation_turn(
+                self._conversation_id, heard, result, source="voice",
+                surface="gemini_live", request_id=request_id,
+                response_id=request_id)
+        except Exception:
+            # Transcript persistence is best effort and must not affect audio.
+            return
+
+    def get_gemini_live_provider(self) -> Any:
+        return self._gemini_live_provider
+
+    def _ensure_gemini_runtime_loop(self) -> asyncio.AbstractEventLoop:
+        """Own one persistent asyncio loop for the Gemini duplex session."""
+        loop = self._gemini_runtime_loop
+        if loop is not None and loop.is_running() and not loop.is_closed():
+            return loop
+        self._gemini_runtime_ready.clear()
+
+        def runner() -> None:
+            runtime_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(runtime_loop)
+            self._gemini_runtime_loop = runtime_loop
+            self._gemini_runtime_ready.set()
+            runtime_loop.run_forever()
+            pending = asyncio.all_tasks(runtime_loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                runtime_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            runtime_loop.close()
+
+        self._gemini_runtime_thread = threading.Thread(
+            target=runner, name="jarvis-gemini-runtime", daemon=True)
+        self._gemini_runtime_thread.start()
+        if not self._gemini_runtime_ready.wait(timeout=5):
+            raise RuntimeError("gemini_runtime_loop_start_timeout")
+        return self._gemini_runtime_loop
+
+    def run_gemini_live(self, coroutine: Any, *, timeout: float = 15.0) -> Any:
+        """Run one Gemini operation on the persistent canonical loop."""
+        loop = self._ensure_gemini_runtime_loop()
+        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+        return future.result(timeout=max(1.0, float(timeout)))
+
+    def _enqueue_gemini_frame(self, frame: bytes) -> None:
+        """Accept one canonical mic frame on the VoiceService event loop."""
+        queue = self._gemini_audio_queue
+        if queue is None or not self.gemini_live_status().get("connected"):
+            return
+        self._gemini_audio_metrics["frames_captured"] += 1
+        try:
+            queue.put_nowait(bytes(frame))
+        except asyncio.QueueFull:
+            self._gemini_audio_metrics["input_drops"] += 1
+
+    async def _gemini_send_loop(self) -> None:
+        queue = self._gemini_audio_queue
+        provider = self._gemini_live_provider
+        if queue is None or provider is None:
+            return
+        while True:
+            frame = await queue.get()
+            try:
+                if not self.gemini_live_status().get("connected"):
+                    continue
+                await provider.send_audio(frame)
+                self._gemini_audio_metrics["frames_sent"] += 1
+                self._gemini_audio_metrics["bytes_sent"] += len(frame)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # A remote 1007/transport failure must be observable and must
+                # stop this one sender task.  Letting it escape produces
+                # ``Task exception was never retrieved`` and leaves the UI
+                # looking connected while the microphone keeps enqueueing
+                # frames.  Do not retry here: the session owner decides when
+                # a new authorized session may be created.
+                detail = ""
+                diagnostics = getattr(provider, "diagnostics", None)
+                if callable(diagnostics):
+                    try:
+                        transport = (diagnostics() or {}).get("transport", {})
+                        detail = str(transport.get("last_error", ""))[:240]
+                    except Exception:
+                        detail = ""
+                self._last_recovery = {
+                    "error": "GEMINI_LIVE_AUDIO_SEND_FAILED",
+                    **({"detail": detail} if detail else {}),
+                    "at": time.time(),
+                }
+                self.last_error = "GEMINI_LIVE_AUDIO_SEND_FAILED"
+                input_provider = self._audio_input_provider
+                if input_provider is not None and getattr(input_provider, "is_running", False):
+                    try:
+                        input_provider.stop()
+                    except Exception:
+                        pass
+                while True:
+                    try:
+                        queue.get_nowait()
+                        queue.task_done()
+                    except asyncio.QueueEmpty:
+                        break
+                log.warning("Gemini Live audio sender stopped: %s", detail or type(exc).__name__)
+                break
+            finally:
+                queue.task_done()
+
+    async def _gemini_receive_loop(self) -> None:
+        provider = self._gemini_live_provider
+        if provider is None:
+            return
+        try:
+            while True:
+                chunk = await provider.receive_audio()
+                if chunk is None:
+                    break
+                pcm = bytes(chunk)
+                if not pcm:
+                    continue
+                self._gemini_audio_metrics["audio_chunks_received"] += 1
+                self._gemini_audio_metrics["bytes_received"] += len(pcm)
+                output = self._gemini_output
+                if output is None:
+                    # Gemini opens the output stream on its first PCM block;
+                    # give the USB device a tiny settling window so the
+                    # leading syllable is not clipped by PortAudio startup.
+                    # Gemini Live delivers PCM in bursty WebSocket chunks.  A
+                    # short queue caused the PortAudio callback to alternate
+                    # between real audio and silence whenever two bursts
+                    # arrived close together, which was heard as stuttering.
+                    # Keep this buffering change local to native Gemini Live;
+                    # the regular TTS/output providers retain their defaults.
+                    output = SoundDeviceAudioOutputProvider(
+                        # Live PCM arrives in short websocket bursts.  Keep a
+                        # larger bounded reservoir and a short device-settle
+                        # prefix so PortAudio does not underflow between two
+                        # adjacent model chunks.  This is scoped to Gemini
+                        # Live; the regular TTS output contract is unchanged.
+                        # Keep roughly 2–3 seconds of short Live PCM blocks
+                        # available before the bounded drop policy is reached.
+                        # This prevents a bursty WebSocket from dropping the
+                        # beginning or middle of a word while preserving a
+                        # finite memory bound and cooperative interruption.
+                        maxsize=128, startup_silence_ms=120,
+                    )
+                    output.warm()
+                    self._gemini_output = output
+                accepted = output.enqueue(PcmAudioChunk(
+                    pcm=pcm, sample_rate=24000, channels=1,
+                    session_id=self._conversation_id,
+                    turn_id=self._current_turn_id,
+                    generation=self._gemini_audio_generation,
+                ))
+                if not accepted:
+                    self._gemini_audio_metrics["output_drops"] += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Gemini Live audio receiver stopped: %s", type(exc).__name__)
+            # Keep the public failure code stable, but retain the transport's
+            # already-sanitized diagnostic so the Desktop can distinguish a
+            # normal provider shutdown from a receive/SDK failure.  Do not
+            # expose ``str(exc)`` here: arbitrary SDK exceptions can contain
+            # URLs, headers, or other sensitive request details.
+            detail = ""
+            diagnostics = getattr(provider, "diagnostics", None)
+            if callable(diagnostics):
+                try:
+                    detail = str((diagnostics() or {}).get("transport", {}).get("last_error", ""))[:240]
+                except Exception:
+                    detail = ""
+            self._last_recovery = {
+                "error": "GEMINI_LIVE_RECEIVE_FAILED",
+                **({"detail": detail} if detail else {}),
+            }
+
+    async def start_gemini_live_audio(self, *, device: Any = None,
+                                      output: Any = None,
+                                      provider_factory: Optional[Callable[..., AudioInputProvider]] = None,
+                                      capture: bool = True) -> dict[str, Any]:
+        """Start the Gemini bridge, optionally without microphone capture."""
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED"}
+        if self._gemini_live_provider is None or not self.gemini_live_status().get("connected"):
+            return {"ok": False, "error": "GEMINI_LIVE_NOT_CONNECTED"}
+        if self._audio_input_provider is not None and self._audio_input_provider.is_running:
+            return {"ok": True, "started": False, "already_running": True,
+                    "audio": self.gemini_audio_status()}
+        if self._gemini_audio_queue is None:
+            self._gemini_audio_generation += 1
+            self._gemini_audio_queue = asyncio.Queue(maxsize=32)
+            self._gemini_output = output
+            self._gemini_audio_metrics = {k: 0 for k in self._gemini_audio_metrics}
+            self._gemini_audio_sender = asyncio.create_task(self._gemini_send_loop(), name="gemini-live-audio-sender")
+            self._gemini_audio_receiver = asyncio.create_task(self._gemini_receive_loop(), name="gemini-live-audio-receiver")
+        if not capture:
+            return {"ok": True, "started": True, "capture": False,
+                    "audio": self.gemini_audio_status()}
+        result = await self.start_gemini_live_capture(
+            device=device, provider_factory=provider_factory)
+        if not result.get("ok"):
+            await self.stop_gemini_live_audio()
+            return result
+        return {"ok": True, "started": True, "capture": True,
+                "audio": self.gemini_audio_status()}
+
+    async def start_gemini_live_capture(
+        self, *, device: Any = None,
+        provider_factory: Optional[Callable[..., AudioInputProvider]] = None,
+    ) -> dict[str, Any]:
+        """Start only the VoiceService-owned input stream for push-to-talk."""
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED"}
+        if self._gemini_live_provider is None or not self.gemini_live_status().get("connected"):
+            return {"ok": False, "error": "GEMINI_LIVE_NOT_CONNECTED"}
+        if self._gemini_audio_queue is None:
+            return {"ok": False, "error": "GEMINI_LIVE_AUDIO_BRIDGE_NOT_STARTED"}
+        if self._audio_input_provider is not None and self._audio_input_provider.is_running:
+            return {"ok": True, "started": False, "already_running": True,
+                    "audio": self.gemini_audio_status()}
+        result = await self.start_audio_input(
+            device=device, loop=asyncio.get_running_loop(),
+            on_frame=self._enqueue_gemini_frame, start_pipeline=False,
+            provider_factory=provider_factory,
+        )
+        return {**result, "capture": bool(result.get("ok")),
+                "audio": self.gemini_audio_status()}
+
+    async def stop_gemini_live_capture(self) -> dict[str, Any]:
+        """Mute only microphone capture; keep the Gemini output bridge alive."""
+        end_error = ""
+        input_provider = self._audio_input_provider
+        was_running = input_provider is not None and input_provider.is_running
+        result = await self.stop_audio_input()
+        if was_running:
+            # Stop callbacks first, drain frames already accepted by the
+            # canonical sender, then mark the Live turn complete.  Sending
+            # audio_stream_end before the queue drains can make Gemini see an
+            # empty/partial turn and is a common cause of missing replies.
+            queue = self._gemini_audio_queue
+            if queue is not None:
+                try:
+                    await asyncio.wait_for(queue.join(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    end_error = "gemini_live_audio_drain_timeout"
+            ender = getattr(self._gemini_live_provider, "end_audio", None)
+            if callable(ender):
+                try:
+                    await ender()
+                except Exception as exc:
+                    if not end_error:
+                        end_error = _safe_voice_detail(exc)
+        if end_error:
+            return {"ok": False, "error": "GEMINI_LIVE_AUDIO_END_FAILED",
+                    "detail": end_error, "stopped": bool(result.get("stopped")),
+                    "capture": False, "audio": self.gemini_audio_status()}
+        return {"ok": bool(result.get("ok")), "stopped": True,
+                "capture": False, "audio": self.gemini_audio_status()}
+
+    async def stop_gemini_live_audio(self) -> dict[str, Any]:
+        """Stop capture, sender/receiver tasks and bounded output cooperatively."""
+        preview_task = self._gemini_preview_watch_task
+        self._gemini_preview_watch_task = None
+        if preview_task is not None and not preview_task.done():
+            preview_task.cancel()
+            try:
+                await preview_task
+            except asyncio.CancelledError:
+                pass
+        for task_name in ("_gemini_audio_sender", "_gemini_audio_receiver"):
+            task = getattr(self, task_name)
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            setattr(self, task_name, None)
+        result = await self.stop_audio_input()
+        output = self._gemini_output
+        if output is not None:
+            try:
+                output.cancel("gemini_live_stop")
+            except Exception:
+                pass
+        self._gemini_audio_queue = None
+        self._gemini_output = None
+        # A text preview belongs to this audio bridge. Clear its marker when
+        # the bridge stops so a later authorized session cannot inherit a
+        # stale GEMINI_PREVIEW_IN_PROGRESS state.
+        self._gemini_preview_active = False
+        self._gemini_preview_text = ""
+        self._gemini_preview_turn_baseline = 0
+        return {"ok": bool(result.get("ok")), "stopped": True,
+                "audio": self.gemini_audio_status()}
+
+    async def interrupt_gemini_live_audio(self) -> dict[str, Any]:
+        output = self._gemini_output
+        if output is not None:
+            try:
+                output.cancel("gemini_live_interrupt")
+            except Exception:
+                pass
+            # ``cancel`` intentionally makes the sink reject future chunks.
+            # Drop the cancelled instance so the next Live turn creates a
+            # fresh stream instead of silently discarding all of its PCM.
+            self._gemini_output = None
+        result = await self.interrupt_gemini_live()
+        return {**result, "audio": self.gemini_audio_status()}
+
+    async def preview_gemini_live(self, text: str) -> dict[str, Any]:
+        """Request a short spoken preview on the already-authorized Live session.
+
+        This method never connects or starts capture.  The Desktop must have
+        an active scoped session and audio bridge first; returned PCM is then
+        handled by the existing Gemini receive/output loop.
+        """
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED"}
+        provider = self._gemini_live_provider
+        if provider is None or not self.gemini_live_status().get("connected"):
+            return {"ok": False, "error": "GEMINI_LIVE_NOT_CONNECTED"}
+        if not self.gemini_audio_status().get("bridge_active"):
+            return {"ok": False, "error": "GEMINI_LIVE_AUDIO_NOT_STARTED"}
+        prompt = str(text or "").strip()[:240]
+        if not prompt:
+            return {"ok": False, "error": "GEMINI_PREVIEW_TEXT_REQUIRED"}
+        if self._gemini_preview_active:
+            return {"ok": False, "error": "GEMINI_PREVIEW_IN_PROGRESS"}
+        sender = getattr(provider, "send_text", None)
+        if sender is None:
+            return {"ok": False, "error": "GEMINI_LIVE_TEXT_PREVIEW_UNSUPPORTED"}
+        try:
+            diagnostics = self.gemini_live_status().get("diagnostics", {})
+            provider_diagnostics = diagnostics.get("provider", {}) if isinstance(diagnostics, dict) else {}
+            transport_diagnostics = provider_diagnostics.get("transport", {}) if isinstance(provider_diagnostics, dict) else {}
+            self._gemini_preview_turn_baseline = int(
+                transport_diagnostics.get("turn_complete_events", 0) or 0
+            )
+            await sender(prompt)
+            self._gemini_preview_active = True
+            self._gemini_preview_text = prompt
+            if self._gemini_preview_watch_task is not None and not self._gemini_preview_watch_task.done():
+                self._gemini_preview_watch_task.cancel()
+            self._gemini_preview_watch_task = asyncio.create_task(
+                self._watch_gemini_preview(), name="gemini-live-preview-watch"
+            )
+            return {"ok": True, "preview_started": True,
+                    "text_length": len(prompt), "voice": self._voice_name,
+                    "audio": self.gemini_audio_status()}
+        except Exception as exc:
+            self._gemini_preview_active = False
+            self._gemini_preview_text = ""
+            return {"ok": False, "error": "GEMINI_PREVIEW_FAILED",
+                    "detail": _safe_voice_detail(exc)}
+
+    async def send_gemini_live_text(self, text: str) -> dict[str, Any]:
+        """Send typed text through the already-connected native Live session.
+
+        The existing Gemini audio bridge remains the sole output owner.  This
+        path does not create a second session, preview marker, tool call, or
+        local TTS fallback.
+        """
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED"}
+        provider = self._gemini_live_provider
+        if provider is None or not self.gemini_live_status().get("connected"):
+            return {"ok": False, "error": "GEMINI_LIVE_NOT_CONNECTED"}
+        if not self.gemini_audio_status().get("bridge_active"):
+            return {"ok": False, "error": "GEMINI_LIVE_AUDIO_NOT_STARTED"}
+        prompt = str(text or "").strip()[:2000]
+        if not prompt:
+            return {"ok": False, "error": "GEMINI_LIVE_TEXT_REQUIRED"}
+        sender = getattr(provider, "send_text", None)
+        if sender is None:
+            return {"ok": False, "error": "GEMINI_LIVE_TEXT_UNSUPPORTED"}
+        try:
+            await sender(prompt)
+            return {"ok": True, "text_sent": True,
+                    "text_length": len(prompt), "audio": self.gemini_audio_status()}
+        except Exception as exc:
+            return {"ok": False, "error": "GEMINI_LIVE_TEXT_FAILED",
+                    "detail": _safe_voice_detail(exc)}
+
+    async def _watch_gemini_preview(self) -> None:
+        """Release the one-shot preview gate after one completed Live turn."""
+        completed_turn = False
+        try:
+            for _ in range(200):
+                await asyncio.sleep(0.1)
+                if not self._gemini_preview_active:
+                    return
+                diagnostics = self.gemini_live_status().get("diagnostics", {})
+                provider_diagnostics = diagnostics.get("provider", {}) if isinstance(diagnostics, dict) else {}
+                transport = provider_diagnostics.get("transport", {}) if isinstance(provider_diagnostics, dict) else {}
+                completed = int(transport.get("turn_complete_events", 0) or 0) if isinstance(transport, dict) else 0
+                if completed > self._gemini_preview_turn_baseline:
+                    self._gemini_preview_active = False
+                    self._gemini_preview_text = ""
+                    self._gemini_preview_turn_baseline = completed
+                    completed_turn = True
+                    return
+        except asyncio.CancelledError:
+            raise
+        finally:
+            # A remote turn can finish without a transcript or audio chunk.
+            # Never leave the UI permanently locked in GEMINI_PREVIEW_IN_PROGRESS.
+            if self._gemini_preview_active and not completed_turn:
+                self._gemini_preview_active = False
+                self._gemini_preview_text = ""
+            if self._gemini_preview_watch_task is asyncio.current_task():
+                self._gemini_preview_watch_task = None
+
+    async def stop_gemini_preview(self) -> dict[str, Any]:
+        if not self._gemini_preview_active:
+            return {"ok": True, "stopped": False, "audio": self.gemini_audio_status()}
+        result = await self.interrupt_gemini_live_audio()
+        self._gemini_preview_active = False
+        self._gemini_preview_text = ""
+        return {**result, "stopped": True}
+
+    def gemini_audio_status(self) -> dict[str, Any]:
+        provider = self._audio_input_provider
+        output = self._gemini_output
+        transcription: dict[str, Any] = {}
+        live_provider = self._gemini_live_provider
+        provider_diagnostics = getattr(live_provider, "diagnostics", None)
+        if callable(provider_diagnostics):
+            try:
+                snapshot = provider_diagnostics() or {}
+                transport = snapshot.get("transport", {})
+                if not transport and isinstance(snapshot.get("provider"), dict):
+                    transport = snapshot["provider"].get("transport", {})
+                value = transport.get("transcription", {}) if isinstance(transport, dict) else {}
+                if isinstance(value, dict):
+                    transcription = dict(value)
+            except Exception:
+                transcription = {}
+        output_diagnostics: dict[str, Any] = {}
+        diagnostics = getattr(output, "diagnostics", None)
+        if callable(diagnostics):
+            try:
+                output_diagnostics = dict(diagnostics() or {})
+            except Exception:
+                output_diagnostics = {"last_error": "output_diagnostics_unavailable"}
+        return {
+            "active": bool(provider is not None and provider.is_running),
+            "capture_active": bool(provider is not None and provider.is_running),
+            "bridge_active": bool(
+                self._gemini_audio_queue is not None
+                and self._gemini_audio_receiver is not None
+                and not self._gemini_audio_receiver.done()
+            ),
+            "generation": self._gemini_audio_generation,
+            "queue_size": self._gemini_audio_queue.qsize() if self._gemini_audio_queue else 0,
+            "queue_maxsize": self._gemini_audio_queue.maxsize if self._gemini_audio_queue else 32,
+            "output_active": bool(self._gemini_output is not None and getattr(self._gemini_output, "is_active", False)),
+            "output": output_diagnostics,
+            "transcription": transcription,
+            "preview_active": bool(self._gemini_preview_active),
+            "last_error": dict(self._last_recovery) if self._last_recovery else {},
+            "metrics": dict(self._gemini_audio_metrics),
+        }
+
+    def gemini_live_system_instruction(self) -> str:
+        """Presentation-only instruction; the provider never receives tool authority."""
+        profile = get_personality(self._personality_id)
+        return (
+            "Você é a voz conversacional do Golden Jarvis. Responda em português "
+            "brasileiro. A personalidade altera apenas o estilo, nunca permissões, "
+            "segurança, confirmações ou análises financeiras. "
+            f"Estilo atual: {profile.instruction} "
+            "Não execute ferramentas diretamente; pedidos de ação retornam ao "
+            "VoiceService e ao SecurityManager canônicos."
+        )
+
+    def gemini_live_status(self) -> dict[str, Any]:
+        provider = self._gemini_live_provider
+        diagnostics = provider.diagnostics() if provider is not None and hasattr(provider, "diagnostics") else {}
+        provider_diag = diagnostics.get("provider") if isinstance(diagnostics, dict) else {}
+        return {
+            "enabled": gemini_live_enabled(),
+            "attached": provider is not None,
+            "connected": bool(getattr(provider, "connected", False))
+            or bool(getattr(getattr(provider, "provider", None), "connected", False))
+            or bool(isinstance(diagnostics, dict) and diagnostics.get("started")),
+            "requested_mode": self._voice_mode,
+            "effective_mode": self.conversation_profile()["effective_mode"],
+            "diagnostics": diagnostics,
+        }
+
+    async def setup_gemini_live_diagnostic(self, *, timeout_seconds: float = 30.0) -> dict[str, Any]:
+        """Run the explicit setup-only handshake; never starts audio tasks."""
+        provider = self._gemini_live_provider
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED",
+                    "status": self.gemini_live_status()}
+        if provider is None:
+            return {"ok": False, "error": "GEMINI_LIVE_PROVIDER_NOT_ATTACHED",
+                    "status": self.gemini_live_status()}
+        runner = getattr(provider, "setup_only", None)
+        if not callable(runner):
+            return {"ok": False, "error": "GEMINI_LIVE_SETUP_ONLY_UNSUPPORTED",
+                    "status": self.gemini_live_status()}
+        try:
+            result = await runner(timeout_seconds=min(30.0, float(timeout_seconds)))
+            return {**dict(result or {}), "status": self.gemini_live_status()}
+        except Exception as exc:
+            return {"ok": False, "error": "GEMINI_LIVE_SETUP_FAILED",
+                    "detail": _safe_voice_detail(exc),
+                    "status": self.gemini_live_status()}
+
+    async def connect_gemini_live(self) -> dict[str, Any]:
+        """Connect only after explicit flag activation; never called at startup."""
+        provider = self._gemini_live_provider
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED", "status": self.gemini_live_status()}
+        if provider is None:
+            return {"ok": False, "error": "GEMINI_LIVE_PROVIDER_NOT_ATTACHED", "status": self.gemini_live_status()}
+        try:
+            connector = getattr(provider, "start", None) or getattr(provider, "connect", None)
+            if connector is None:
+                return {"ok": False, "error": "GEMINI_LIVE_PROVIDER_INVALID", "status": self.gemini_live_status()}
+            result = await connector(system_instruction=self.gemini_live_system_instruction())
+            self._gemini_voice_change_pending = False
+            return {**dict(result or {}), "status": self.gemini_live_status()}
+        except Exception as exc:
+            return {"ok": False, "error": "GEMINI_LIVE_CONNECT_FAILED", "detail": _safe_voice_detail(exc),
+                    "status": self.gemini_live_status()}
+
+    async def disconnect_gemini_live(self) -> dict[str, Any]:
+        provider = self._gemini_live_provider
+        if provider is None:
+            return {"ok": True, "closed": False, "status": self.gemini_live_status()}
+        try:
+            if self._audio_input_provider is not None and self._audio_input_provider.is_running:
+                await self.stop_gemini_live_audio()
+            # A Desktop disconnect ends only the current Live session.  Keep
+            # the singleton provider reusable so a failed audio start or a
+            # subsequent authorized attempt does not become permanently
+            # ``gemini_live_provider_closed``.  Final process shutdown still
+            # uses the provider's permanent close path.
+            reset = getattr(provider, "disconnect", None)
+            if callable(reset):
+                await reset()
+            else:
+                await provider.close()
+            self._gemini_voice_change_pending = False
+            return {"ok": True, "closed": True, "reusable": callable(reset),
+                    "status": self.gemini_live_status()}
+        except Exception as exc:
+            return {"ok": False, "error": "GEMINI_LIVE_CLOSE_FAILED", "detail": _safe_voice_detail(exc),
+                    "status": self.gemini_live_status()}
+
+    async def reconnect_gemini_live(self) -> dict[str, Any]:
+        """Reconnect an attached Live session only when its flag is explicitly enabled."""
+        provider = self._gemini_live_provider
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED", "status": self.gemini_live_status()}
+        if provider is None:
+            return {"ok": False, "error": "GEMINI_LIVE_PROVIDER_NOT_ATTACHED", "status": self.gemini_live_status()}
+        try:
+            connector = getattr(provider, "reconnect", None)
+            if connector is None:
+                return {"ok": False, "error": "GEMINI_LIVE_RECONNECT_UNSUPPORTED",
+                        "status": self.gemini_live_status()}
+            result = await connector(system_instruction=self.gemini_live_system_instruction())
+            self._gemini_voice_change_pending = False
+            return {**dict(result or {}), "status": self.gemini_live_status()}
+        except Exception as exc:
+            return {"ok": False, "error": "GEMINI_LIVE_RECONNECT_FAILED", "detail": _safe_voice_detail(exc),
+                    "status": self.gemini_live_status()}
+
+    async def send_gemini_live_audio(self, pcm: bytes) -> dict[str, Any]:
+        provider = self._gemini_live_provider
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED"}
+        if provider is None or not self.gemini_live_status()["connected"]:
+            return {"ok": False, "error": "GEMINI_LIVE_NOT_CONNECTED"}
+        try:
+            await provider.send_audio(pcm)
+            return {"ok": True, "bytes": len(bytes(pcm or b""))}
+        except Exception as exc:
+            return {"ok": False, "error": "GEMINI_LIVE_SEND_FAILED", "detail": _safe_voice_detail(exc)}
+
+    async def receive_gemini_live_audio(self) -> dict[str, Any]:
+        provider = self._gemini_live_provider
+        if not gemini_live_enabled():
+            return {"ok": False, "error": "GEMINI_LIVE_DISABLED"}
+        if provider is None or not self.gemini_live_status()["connected"]:
+            return {"ok": False, "error": "GEMINI_LIVE_NOT_CONNECTED"}
+        try:
+            chunk = await provider.receive_audio()
+            if chunk is None:
+                return {"ok": True, "audio_complete": True, "pcm": b""}
+            return {"ok": True, "audio_complete": False, "pcm": bytes(chunk)}
+        except Exception:
+            # The canonical attachment is normally a GeminiLiveDuplexSession,
+            # so walk its provider diagnostics instead of assuming a direct
+            # transport attribute.  Only the transport-owned, redacted error
+            # is returned; the SDK exception text may contain request data.
+            diagnostics = {}
+            provider_diagnostics = getattr(provider, "diagnostics", None)
+            if callable(provider_diagnostics):
+                try:
+                    snapshot = provider_diagnostics() or {}
+                    diagnostics = snapshot.get("transport", {})
+                    if not diagnostics:
+                        nested = snapshot.get("provider", {})
+                        diagnostics = nested.get("transport", {}) if isinstance(nested, dict) else {}
+                except Exception:
+                    diagnostics = {}
+            detail = _safe_voice_detail(diagnostics.get("last_error", "")) if isinstance(diagnostics, dict) else ""
+            return {"ok": False, "error": "GEMINI_LIVE_RECEIVE_FAILED",
+                    **({"detail": detail} if detail else {}), "diagnostics": diagnostics}
+
+    async def interrupt_gemini_live(self) -> dict[str, Any]:
+        provider = self._gemini_live_provider
+        if provider is None:
+            return {"ok": True, "interrupted": False}
+        try:
+            await provider.interrupt()
+            return {"ok": True, "interrupted": True, "status": self.gemini_live_status()}
+        except Exception as exc:
+            return {"ok": False, "error": "GEMINI_LIVE_INTERRUPT_FAILED", "detail": _safe_voice_detail(exc)}
+
+    def probe_microphone(self, endpoint_id: str = "") -> dict[str, Any]:
+        """Probe one selected endpoint with a bounded real capture."""
+        endpoints = self._audio_experience.enumerate_microphones()
+        endpoint = next((item for item in endpoints if item.stable_id == str(endpoint_id)), None)
+        if endpoint is None:
+            return {"ok": False, "error": "MICROPHONE_NOT_FOUND",
+                    "available": [item.public() for item in endpoints]}
+        result = self._audio_experience.probe(endpoint)
+        result["endpoint"] = endpoint.public()
+        return result
+
+    def observe_microphone(self, endpoint_id: str, kind: str, level: float) -> dict[str, Any]:
+        """Record only confirmed numeric speech/noise evidence and thresholds."""
+        profile = self._audio_experience.profile_store.load(str(endpoint_id))
+        if not profile.observe(kind, level):
+            return {"ok": False, "error": "INVALID_CALIBRATION_SAMPLE"}
+        self._audio_experience.profile_store.save(profile)
+        return {"ok": True, "endpoint_id": profile.endpoint_id,
+                "thresholds": profile.thresholds(),
+                "sample_counts": {"speech": len(profile.speech), "noise": len(profile.noise)}}
+
     async def start_audio_input(
         self,
         *,
         device: Any = None,
         loop: Optional[Any] = None,
         provider_factory: Optional[Callable[..., AudioInputProvider]] = None,
+        on_frame: Optional[Callable[[bytes], None]] = None,
+        start_pipeline: bool = True,
         on_transcription: Optional[Callable[[str], None]] = None,
         on_state_change: Optional[Callable[[str], None]] = None,
         stt_provider: Any = None,
@@ -592,10 +1448,13 @@ class VoiceService:
         if pending_stop is not None and not pending_stop.done():
             await pending_stop
         self._realtime_stop_task = None
-        pipeline = self.get_realtime_voice_pipeline()
+        pipeline = self.get_realtime_voice_pipeline() if start_pipeline else None
+        if adaptive_microphone_enabled() and device is None:
+            device = self._selected_microphone_id or os.getenv(
+                "JARVIS_VOICE_MICROPHONE_ID", "").strip() or None
         active_stt_provider = stt_provider
         active_transcription_callback = on_transcription
-        if active_stt_provider is None and active_transcription_callback is None:
+        if start_pipeline and active_stt_provider is None and active_transcription_callback is None:
             # The explicit audio path owns the approved local provider lazily;
             # construction validates nothing and does not load or download a model.
             from .stt_faster_whisper import FasterWhisperSTTProvider
@@ -603,7 +1462,7 @@ class VoiceService:
                 initial_prompt=getattr(self._voice, "initial_prompt", "")
             )
             active_transcription_callback = self._handle_transcript_event
-        elif active_stt_provider is not None and active_transcription_callback is None:
+        elif start_pipeline and active_stt_provider is not None and active_transcription_callback is None:
             active_transcription_callback = self._handle_transcript_event
         active_loop = loop
         if active_loop is None:
@@ -624,14 +1483,16 @@ class VoiceService:
         if provider is None:
             factory = provider_factory or AudioInputProvider
             provider = factory(
-                frame_queue=pipeline.queue,
+                frame_queue=pipeline.queue if pipeline is not None else AudioFrameQueue(maxsize=32),
                 device=device,
                 loop=active_loop,
+                on_frame=on_frame,
+                deliver_to_queue=start_pipeline,
             )
             self._audio_input_provider = provider
 
-        frame_task = getattr(pipeline, "_frame_task", None)
-        if frame_task is None or frame_task.done():
+        frame_task = getattr(pipeline, "_frame_task", None) if pipeline is not None else None
+        if pipeline is not None and (frame_task is None or frame_task.done()):
             self._realtime_cancellation = VoiceCancellation()
             state_callback = lambda value: self._on_realtime_state_change(
                 value, on_state_change
@@ -648,11 +1509,36 @@ class VoiceService:
 
         result = provider.start()
         if not result.get("ok"):
-            await pipeline.stop()
+            if pipeline is not None:
+                await pipeline.stop()
             self._wake_lifecycle.cancel()
             self._voice_session.state = self._state_machine.state
             return {**result, "audio_input": provider.diagnostics()}
-        return {**result, "audio_input": provider.diagnostics()}
+        if adaptive_microphone_enabled():
+            identity = (provider.diagnostics().get("device_identity") or {}).get("stable_id", "")
+            if identity and self._audio_experience.profile_store is not None:
+                profile = self._audio_experience.profile_store.load(identity)
+                thresholds = profile.thresholds()
+                if thresholds.get("confidence", 0) > 0 and thresholds.get("speech_threshold", 0) > 0:
+                    if pipeline is not None:
+                        pipeline.set_adaptive_rms_threshold(thresholds["speech_threshold"])
+        return {**result, "audio_input": provider.diagnostics(),
+                "voice_features": voice_feature_snapshot(),
+                "realtime": pipeline.diagnostics() if pipeline is not None else {"started": False, "route": "gemini_live"}}
+
+    def recover_audio_input(self) -> dict[str, Any]:
+        """Bounded recovery for a disconnected selected endpoint."""
+        provider = self._audio_input_provider
+        if provider is None:
+            return {"ok": False, "error": "AUDIO_INPUT_NOT_STARTED"}
+        stopped = provider.stop()
+        if not stopped.get("ok"):
+            return {"ok": False, "error": stopped.get("error", "AUDIO_INPUT_STOP_FAILED")}
+        result = provider.start()
+        if not result.get("ok"):
+            return {"ok": False, "error": "AUDIO_INPUT_RECOVERY_FAILED",
+                    "details": result.get("error", "")}
+        return {"ok": True, "recovered": True, "audio_input": provider.diagnostics()}
 
     async def stop_audio_input(self) -> dict:
         """Stop provider and pipeline cooperatively without touching Core."""
@@ -847,6 +1733,28 @@ class VoiceService:
         self.last_activity = time.time()
         if self.service is None:
             return
+        if os.getenv("JARVIS_VOICE_SHORT_CONFIRMATIONS", "0").strip().casefold() in {"1", "true", "yes", "on"}:
+            decision = classify_confirmation(text)
+            pending = getattr(getattr(self.service, "security", None), "pending", {})
+            if decision and isinstance(pending, dict) and len(pending) == 1:
+                token = next(iter(pending))
+                result = (self.service.confirm(token, task_id=self._desktop_session_id or "voice")
+                          if decision == "approve" else
+                          self.service.deny_confirmation(token, task_id=self._desktop_session_id or "voice"))
+                self.last_event = {"id": self.last_event_id + 1,
+                                   "kind": "VOICE_CONFIRMATION",
+                                   "decision": decision,
+                                   "ok": bool(result.get("ok")),
+                                   "at": time.time()}
+                self.last_event_id += 1
+                self.stats["confirmations"] = self.stats.get("confirmations", 0) + 1
+                self.last_response = str(result.get("message") or result.get("error") or "")[:240]
+                return
+            if decision and isinstance(pending, dict) and len(pending) != 1:
+                self.last_rejection = {"classification": "AMBIGUOUS_CONFIRMATION",
+                                        "rejected_reason": "pending_confirmation_count",
+                                        "count": len(pending), "at": time.time()}
+                return
         self._handle(
             text,
             timings={
@@ -1398,6 +2306,7 @@ class VoiceService:
             brain = get_brain()
             if not brain:
                 return {"handled": False, "reason": "no_brain"}
+            self._apply_personality_to_brain(brain)
 
             # P1.4C: Append user turn to conversation context FIRST
             # (before build_messages, so it appears in context for the LLM)
@@ -1660,6 +2569,7 @@ class VoiceService:
                 self._speak(ack["message"])
                 timings["time_to_ack_ms"] = int((time.perf_counter() - ack_started) * 1000)
             brain = self._get_brain()
+            self._apply_personality_to_brain(brain)
             response_started = time.time()
             result = brain.interpret(command, source="voice", voice_capture=True)
             timings["response_ready_ms"] = int((time.time() - response_started) * 1000)
@@ -1784,11 +2694,20 @@ class VoiceService:
         text = str(text or "").strip()[:600]
         if not text:
             return {"ok": False, "error": "Texto vazio"}
+        if self._voice_mode == "gemini_live":
+            return {
+                "ok": False,
+                "error": "LOCAL_TTS_BLOCKED_BY_GEMINI_MODE",
+                "message": "O áudio local está bloqueado enquanto Gemini Live está selecionado.",
+            }
         spoke = self._speak(text)
         return {"ok": True, "spoken": spoke, "message": "Falando..." if spoke else "Falhou o TTS."}
 
     def _speak(self, text: str) -> bool:
         if not text:
+            return False
+        if self._voice_mode == "gemini_live":
+            self.last_error = "LOCAL_TTS_BLOCKED_BY_GEMINI_MODE"
             return False
         operation_cancellation = self._operation_cancellation
         if (self._voice_session.cancellation.is_cancelled
@@ -1942,6 +2861,14 @@ class VoiceService:
             },
             "wake_word": self._voice.WAKE_WORD if self._voice else "jarvis",
             "tts_mode": self.tts_mode,
+            "voice_features": voice_feature_snapshot(),
+            "conversation_profile": self.conversation_profile(),
+            "gemini_live": self.gemini_live_status(),
+            "microphone": {
+                "selected_id": self._selected_microphone_id,
+                "configured": bool(self._selected_microphone_id),
+                "adaptive_enabled": adaptive_microphone_enabled(),
+            },
             "whisper_model": os.getenv("JARVIS_WHISPER_MODEL", "small"),
             "stt": self._voice.status() if self._voice else {},
             "last_heard": self.last_heard,
@@ -1955,6 +2882,10 @@ class VoiceService:
                 self._audio_input_provider.diagnostics()
                 if self._audio_input_provider is not None
                 else {"running": False}
+            ),
+            "realtime_pipeline": (
+                self._realtime_pipeline.diagnostics()
+                if self._realtime_pipeline is not None else {"active": False}
             ),
             "tts_pipeline": {
                 "configured": self._tts_pipeline is not None,

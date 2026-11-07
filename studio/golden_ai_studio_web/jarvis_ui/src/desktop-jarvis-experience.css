@@ -1,0 +1,281 @@
+/* Jarvis Desktop reference surface. Scoped to the native desktop shell so
+   the public web page and all trading panels keep their existing layout. */
+#app[data-desktop-shell="1"] #golden.on .gView[data-view="conversa"] { padding: 10px 14px 14px; overflow: hidden; }
+#app[data-desktop-shell="1"] #golden.on .gView[data-view="conversa"] > .gBand[hidden],
+#app[data-desktop-shell="1"] #golden.on .gView[data-view="conversa"] > #gPills[hidden],
+#app[data-desktop-shell="1"] #golden.on .gView[data-view="conversa"] > .jarvisExperienceStrip[hidden] { display: none !important; }
+
+#app[data-desktop-shell="1"] .desktopJarvisExperience {
+  --dj-bg: #06121d; --dj-panel: #0b1c2a; --dj-panel-2: #10283a;
+  --dj-line: rgba(86, 192, 224, .27); --dj-cyan: #55d8ee; --dj-blue: #3d9eff;
+  --dj-gold: #f0ae23; --dj-text: #ecf7fb; --dj-muted: #82a8b5;
+  position: relative;
+  display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto auto; gap: 10px;
+  min-width: 0; min-height: 0; height: 100%; color: var(--dj-text);
+  background: radial-gradient(ellipse at 75% 0%, rgba(17, 91, 130, .26), transparent 36%),
+    radial-gradient(ellipse at 17% 45%, rgba(11, 49, 76, .22), transparent 43%), var(--dj-bg);
+  font-family: "Segoe UI", sans-serif;
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] { grid-template-columns: 204px minmax(0, 1fr); grid-template-rows: 56px minmax(0, 1fr); }
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .gView[data-view="conversa"] { padding: 12px 14px 14px; }
+#app[data-desktop-shell="1"] .djRefHero { position: relative; display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; align-items: center; min-height: 194px; gap: 16px; overflow: hidden; padding: 14px 18px 82px; border: 1px solid var(--dj-line); border-left: 3px solid var(--dj-gold); border-radius: 12px; background: linear-gradient(105deg, rgba(13, 43, 60, .96), rgba(8, 19, 32, .94)); box-shadow: 0 14px 35px rgba(0,0,0,.2), inset 0 1px rgba(160,235,255,.08); }
+#app[data-desktop-shell="1"] .djHeroBackdrop { position: absolute; inset: 0; opacity: 1; pointer-events: none; overflow: hidden; background: linear-gradient(90deg, rgba(4,18,29,.97) 0%, rgba(4,18,29,.88) 22%, rgba(4,18,29,.48) 44%, rgba(4,18,29,.16) 72%, rgba(4,18,29,.34) 100%), linear-gradient(180deg, rgba(4,18,29,.16), rgba(4,18,29,.34)), url("../assets/jarvis-hero-reference-art.png") 61% center / 43% 100% no-repeat, url("../assets/jarvis-hero-robot-v1.png") center / 100% 100% no-repeat; }
+#app[data-desktop-shell="1"] .djHeroBackdrop::before { content: ""; position: absolute; inset: -25% 0 -25% 46%; opacity: .5; background: radial-gradient(ellipse at 50% 50%, rgba(240,174,35,.2), transparent 40%), linear-gradient(115deg, transparent 0 48%, rgba(63,171,232,.18) 49% 50%, transparent 51%); }
+#app[data-desktop-shell="1"] .djHeroRobot { display: none; }
+#app[data-desktop-shell="1"] .djHeroRobot::before { content: ""; position: absolute; left: 28%; right: 28%; top: 28%; height: 42%; border: 1px solid rgba(73,208,238,.65); border-radius: 38% 38% 48% 48%; background: radial-gradient(circle at 35% 45%, #f3b42d 0 4%, transparent 5%), radial-gradient(circle at 65% 45%, #f3b42d 0 4%, transparent 5%), linear-gradient(145deg, rgba(5,28,42,.85), rgba(26,57,70,.72)); box-shadow: 0 0 18px rgba(55,202,238,.33), inset 0 0 10px rgba(240,174,35,.23); }
+#app[data-desktop-shell="1"] .djHeroRobot::after { content: ""; position: absolute; left: 39%; right: 39%; bottom: 18%; height: 2px; border-radius: 2px; background: #edac2a; box-shadow: 0 0 10px #f0ae23; }
+#app[data-desktop-shell="1"] .djHeroScreens { display: none; }
+#app[data-desktop-shell="1"] .djHeroScreens::before { content: ""; position: absolute; inset: 16px 12px; opacity: .75; background: repeating-linear-gradient(0deg, transparent 0 16px, rgba(66,153,195,.22) 17px 18px), linear-gradient(160deg, transparent 0 48%, rgba(239,174,36,.9) 49% 50%, transparent 51%), linear-gradient(20deg, transparent 0 56%, rgba(71,206,237,.88) 57% 58%, transparent 59%); clip-path: polygon(0 80%, 10% 65%, 20% 71%, 30% 40%, 42% 53%, 53% 30%, 65% 45%, 75% 19%, 88% 34%, 100% 9%, 100% 100%, 0 100%); }
+#app[data-desktop-shell="1"] .djHeroScreens::after { content: ""; position: absolute; left: 8px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: #55d8ee; box-shadow: 13px 0 #f0ae23, 26px 0 #4ee19a; }
+#app[data-desktop-shell="1"] .djCoreSlot { position: relative; z-index: 1; display: grid; place-items: center; width: 76px; height: 76px; }
+#app[data-desktop-shell="1"] .djCoreSlot #orbWrap { position: relative; display: grid; place-items: center; width: 70px; height: 70px !important; margin: 0; overflow: visible; }
+#app[data-desktop-shell="1"] .djCoreSlot #orbWrap::before { content: ""; position: absolute; inset: 3px; border: 1px solid rgba(81,213,231,.9); border-radius: 50%; box-shadow: 0 0 0 6px rgba(81,213,231,.09), 0 0 32px rgba(81,213,231,.58), inset 0 0 17px rgba(240,174,35,.3); animation: djPulse 3s ease-in-out infinite; }
+#app[data-desktop-shell="1"] .djCoreSlot #orbWrap::after { content: "J"; position: absolute; display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid rgba(236,78,155,.85); border-radius: 50%; color: #ffd5e9; background: radial-gradient(circle, rgba(236,78,155,.52), rgba(4,20,31,.96) 72%); font: 700 16px "Segoe UI", sans-serif; box-shadow: 0 0 19px rgba(236,78,155,.68); }
+#app[data-desktop-shell="1"] .djCoreSlot #orbHalo { display: block !important; width: 38px; height: 38px; box-shadow: 0 0 35px 13px rgba(81,213,231,.34); animation: djPulse 2.8s ease-in-out infinite reverse; }
+#app[data-desktop-shell="1"] .djCoreSlot #stateLabel { display: none !important; }
+#app[data-desktop-shell="1"] .djHeroCopy { position: relative; z-index: 1; min-width: 0; }
+#app[data-desktop-shell="1"] .djHero h1 { margin: 2px 0 0; color: #fff; font: 700 28px "Segoe UI", sans-serif; letter-spacing: .02em; }
+#app[data-desktop-shell="1"] .djHero h2 { margin: 0 0 4px; color: #e3f4f8; font: 500 16px "Segoe UI", sans-serif; }
+#app[data-desktop-shell="1"] .djHero p { margin: 0 0 6px; color: #99cad7; font-size: 11px; }
+#app[data-desktop-shell="1"] .djHero small { display: block; max-width: 760px; overflow: hidden; color: #77d9e7; font: 9px "Consolas", monospace; text-overflow: ellipsis; white-space: nowrap; }
+#app[data-desktop-shell="1"] .djHero small + small { margin-top: 3px; color: #8caeb9; }
+#app[data-desktop-shell="1"] .djEyebrow { color: var(--dj-cyan); font: 9px "Consolas", monospace; letter-spacing: .15em; }
+#app[data-desktop-shell="1"] .djHeroActions { position: relative; z-index: 1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; max-width: 310px; }
+#app[data-desktop-shell="1"] .djHeroPill, #app[data-desktop-shell="1"] .djHeroState, #app[data-desktop-shell="1"] .djLiveTag { padding: 6px 8px; border: 1px solid rgba(81,213,231,.32); border-radius: 6px; color: #9be7ed; background: rgba(5, 46, 62, .62); font: 9px "Consolas", monospace; white-space: nowrap; }
+#app[data-desktop-shell="1"] .djHeroPill { color: #77e7ad; border-color: rgba(81,226,153,.33); }
+#app[data-desktop-shell="1"] .djHeroActions .djGeminiPill { color: #72efab; border-color: rgba(42,225,135,.48); background: rgba(4,64,52,.66); }
+#app[data-desktop-shell="1"] .djHeroActions .djProfileButton { min-width: 72px; padding: 0 9px; color: #d9edf0; background: rgba(8,30,42,.78); }
+#app[data-desktop-shell="1"] .djHeroActions > [data-dj-listen], #app[data-desktop-shell="1"] .djHeroActions > [data-dj-stop] { display: none; }
+#app[data-desktop-shell="1"] .djButton, #app[data-desktop-shell="1"] .djMini, #app[data-desktop-shell="1"] .djIconButton { min-height: 30px; padding: 0 11px; border: 1px solid var(--dj-line); border-radius: 6px; color: #dff6fa; background: rgba(15, 44, 59, .9); font: 600 9px "Consolas", monospace; cursor: pointer; transition: .16s ease; }
+#app[data-desktop-shell="1"] .djButton:hover, #app[data-desktop-shell="1"] .djButton:focus-visible, #app[data-desktop-shell="1"] .djMini:hover, #app[data-desktop-shell="1"] .djIconButton:hover { border-color: var(--dj-cyan); outline: 2px solid rgba(81,213,231,.16); outline-offset: 1px; }
+#app[data-desktop-shell="1"] .djButton.djPrimary { color: #1d1605; border-color: var(--dj-gold); background: var(--dj-gold); }
+#app[data-desktop-shell="1"] .djButton.djDanger { color: #ffb7b9; border-color: rgba(248,81,73,.58); }
+#app[data-desktop-shell="1"] .djIconButton { width: 31px; padding: 0; font-size: 14px; }
+
+#app[data-desktop-shell="1"] .djModeCards { position: relative; z-index: 3; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: -75px 24px 0; }
+#app[data-desktop-shell="1"] .djModeCard { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 66px; padding: 9px 12px; border: 1px solid rgba(78,177,216,.38); border-radius: 9px; color: #d6edf2; background: linear-gradient(145deg, rgba(17,50,72,.94), rgba(6,23,36,.96)); box-shadow: 0 13px 27px rgba(0,0,0,.38), 0 0 0 1px rgba(11,73,105,.18), inset 0 1px rgba(135,224,246,.13); backdrop-filter: blur(5px); text-align: left; cursor: pointer; transition: .17s ease; }
+#app[data-desktop-shell="1"] .djModeCard:hover, #app[data-desktop-shell="1"] .djModeCard:focus-visible { border-color: var(--dj-cyan); transform: translateY(-1px); }
+#app[data-desktop-shell="1"] .djModeCard.is-active { border-color: #4bafff; background: linear-gradient(145deg, rgba(24,93,160,.82), rgba(8,43,76,.96)); box-shadow: 0 13px 30px rgba(0,0,0,.45), 0 0 22px rgba(49,145,255,.32), inset 0 0 0 1px rgba(80,170,255,.34), inset 0 1px rgba(175,235,255,.32); }
+#app[data-desktop-shell="1"] .djModeIcon { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border: 1px solid rgba(240,174,35,.4); border-radius: 8px; color: var(--dj-gold); background: rgba(240,174,35,.12); font: 700 13px "Consolas", monospace; }
+#app[data-desktop-shell="1"] .djModeCard:nth-child(1) .djModeIcon, #app[data-desktop-shell="1"] .djModeCard:nth-child(3) .djModeIcon { color: #69c6ff; border-color: rgba(75,173,255,.45); background: rgba(36,128,219,.15); }
+#app[data-desktop-shell="1"] .djModeCard b, #app[data-desktop-shell="1"] .djModeCard small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#app[data-desktop-shell="1"] .djModeCard b { font-size: 13px; }
+#app[data-desktop-shell="1"] .djModeCard small { margin-top: 2px; color: #8db6c1; font-size: 10px; }
+
+#app[data-desktop-shell="1"] .djStatusGrid { display: none; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+#app[data-desktop-shell="1"] .djStatusCard { display: grid; gap: 4px; min-width: 0; padding: 8px 10px; border: 1px solid var(--dj-line); border-radius: 7px; background: rgba(12,36,49,.78); }
+#app[data-desktop-shell="1"] .djStatusCard span, #app[data-desktop-shell="1"] .djStatusList span, #app[data-desktop-shell="1"] .djLatency span { color: #7ca7b2; font: 9px "Consolas", monospace; letter-spacing: .05em; }
+#app[data-desktop-shell="1"] .djStatusCard b, #app[data-desktop-shell="1"] .djStatusList b, #app[data-desktop-shell="1"] .djLatency b { overflow: hidden; color: #d9f5f7; font: 600 10px "Consolas", monospace; text-overflow: ellipsis; white-space: nowrap; }
+#app[data-desktop-shell="1"] .djStatusCard b[data-state="ok"] { color: #74e8a4; }
+#app[data-desktop-shell="1"] .djStatusCard b[data-state="error"] { color: #ff8989; }
+#app[data-desktop-shell="1"] .djStatusCard b[data-state="warn"] { color: #f3c86b; }
+
+#app[data-desktop-shell="1"] .djReferenceWorkspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 0; gap: 10px; overflow: hidden; }
+#app[data-desktop-shell="1"] .desktopJarvisExperience.djSettingsCentralized .djExperienceGrid { grid-template-columns: 300px minmax(0, 1fr); }
+#app[data-desktop-shell="1"] .djPanel { min-width: 0; border: 1px solid var(--dj-line); border-radius: 10px; background: linear-gradient(155deg, rgba(11,33,47,.97), rgba(6,19,29,.98)); box-shadow: inset 0 1px rgba(129,225,239,.04); }
+#app[data-desktop-shell="1"] .djConversations { display: flex; flex-direction: column; min-height: 0; padding: 12px; }
+#app[data-desktop-shell="1"] .djConversationHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin-bottom: 10px; }
+#app[data-desktop-shell="1"] .djConversationHead h2, #app[data-desktop-shell="1"] .djPanelHead h2 { margin: 4px 0 0; color: #edf9fb; font: 600 15px "Segoe UI", sans-serif; }
+#app[data-desktop-shell="1"] .djConversationList { display: grid; align-content: start; gap: 6px; min-height: 0; overflow: auto; scrollbar-width: thin; }
+#app[data-desktop-shell="1"] .djConversationItem { display: grid; grid-template-columns: 31px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 56px; padding: 7px; border: 1px solid rgba(71,178,203,.18); border-radius: 8px; color: #d6edf1; background: rgba(7,29,42,.72); cursor: pointer; }
+#app[data-desktop-shell="1"] .djConversationItem.is-active, #app[data-desktop-shell="1"] .djConversationItem:hover { border-color: #3b9eff; background: rgba(16,76,123,.45); }
+#app[data-desktop-shell="1"] .djConversationIcon { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid rgba(81,213,231,.35); border-radius: 8px; color: var(--dj-cyan); background: rgba(41,135,166,.18); }
+#app[data-desktop-shell="1"] .djConversationItem b, #app[data-desktop-shell="1"] .djConversationItem small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#app[data-desktop-shell="1"] .djConversationItem b { font-size: 10px; }
+#app[data-desktop-shell="1"] .djConversationItem small { margin-top: 3px; color: #7eaab6; font-size: 9px; }
+#app[data-desktop-shell="1"] .djConversationTime { color: #74bad0; font: 9px "Consolas", monospace; }
+#app[data-desktop-shell="1"] .djConversationEmpty { display: grid; justify-items: center; align-content: center; gap: 7px; min-height: 140px; padding: 18px 10px; border: 1px dashed rgba(71, 178, 203, .28); border-radius: 9px; color: #b7d9df; text-align: center; background: rgba(4, 20, 31, .38); }
+#app[data-desktop-shell="1"] .djConversationEmptyIcon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid rgba(81, 213, 231, .35); border-radius: 50%; color: var(--dj-cyan); font-size: 18px; }
+#app[data-desktop-shell="1"] .djConversationEmpty b { font: 600 11px "Segoe UI", sans-serif; }
+#app[data-desktop-shell="1"] .djConversationEmpty small { max-width: 180px; color: #7eaab6; font-size: 9px; line-height: 1.35; }
+
+#app[data-desktop-shell="1"] .djChatPanel { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; min-height: 0; overflow: hidden; padding: 13px 14px 12px; }
+#app[data-desktop-shell="1"] .djPanelHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+#app[data-desktop-shell="1"] .djPanelSubhead { margin: 3px 0 0; color: #79dce5; font: 9px "Consolas", monospace; }
+#app[data-desktop-shell="1"] .djChatTools { display: flex; align-items: center; gap: 6px; }
+#app[data-desktop-shell="1"] .djReferenceQuickActions { display: flex; flex-wrap: wrap; gap: 7px; min-height: 32px; margin-bottom: 8px; }
+#app[data-desktop-shell="1"] .djReferenceQuickActions button { padding: 7px 12px; border: 1px solid rgba(81,213,231,.28); border-radius: 17px; color: #b9e9ee; background: rgba(8,42,57,.76); font-size: 10px; cursor: pointer; }
+#app[data-desktop-shell="1"] .djReferenceQuickActions button:hover { border-color: var(--dj-cyan); background: rgba(25,103,128,.46); }
+#app[data-desktop-shell="1"] .djArtifactActions { display: none; flex-wrap: wrap; gap: 6px; min-height: 24px; margin: -2px 0 7px; }
+#app[data-desktop-shell="1"] .djArtifactActions.is-visible { display: flex; }
+#app[data-desktop-shell="1"] .djArtifactActions button { padding: 5px 9px; border: 1px solid rgba(240,174,35,.25); border-radius: 14px; color: #d9c58d; background: rgba(87,59,12,.28); font-size: 9px; cursor: pointer; }
+#app[data-desktop-shell="1"] .djArtifactActions button:hover { border-color: var(--dj-gold); color: #fff1bb; }
+#app[data-desktop-shell="1"] .djConversationSlot { min-height: 0; overflow: hidden; border: 1px solid rgba(71,178,203,.14); border-radius: 7px; background: rgba(3,12,18,.54); }
+#app[data-desktop-shell="1"] .djConversationSlot > #gChatSlot { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+#app[data-desktop-shell="1"] .djConversationSlot #conversation { height: 100%; max-height: none !important; min-height: 0; padding: 13px 13px 10px; mask-image: none; -webkit-mask-image: none; }
+#app[data-desktop-shell="1"] .djConversationSlot #conversation:empty::before { content: "As suas conversas aparecerão aqui."; display: block; padding: 25px; color: #5e8792; text-align: center; font: 11px "Consolas", monospace; }
+#app[data-desktop-shell="1"] .djConversationSlot #conversation img { display: block; max-width: min(100%, 720px); margin: 10px auto; border: 1px solid rgba(240,174,35,.38); border-radius: 9px; box-shadow: 0 9px 27px rgba(0,0,0,.32); }
+#app[data-desktop-shell="1"] .djThinkingSlot { position: relative; min-height: 20px; }
+#app[data-desktop-shell="1"] .djThinkingSlot #thinkingBar[hidden] { display: none !important; }
+#app[data-desktop-shell="1"] .djConversationSlot #thinkingBar { position: relative; inset: auto; min-height: 20px; padding-top: 7px; }
+#app[data-desktop-shell="1"] .djQuickSlot { min-height: 25px; padding-top: 7px; overflow: hidden; }
+#app[data-desktop-shell="1"] .djQuickSlot > #gQuick { display: flex; gap: 6px; min-height: 25px; overflow-x: auto; scrollbar-width: thin; }
+#app[data-desktop-shell="1"] .djQuickSlot .gQBtn { flex: 0 0 auto; min-height: 25px; padding: 0 9px; border: 1px solid rgba(71,178,203,.22); border-radius: 17px; background: rgba(15,50,64,.58); color: #9bd5df; font-size: 10px; }
+#app[data-desktop-shell="1"] .djComposer { display: grid; gap: 7px; margin-top: 8px; }
+#app[data-desktop-shell="1"] .djComposerTools > .gCmdBar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+#app[data-desktop-shell="1"] .djComposerTools select { min-height: 25px; padding: 0 5px; border: 1px solid var(--dj-line); border-radius: 4px; background: var(--dj-panel-2); color: #d6f2f6; }
+#app[data-desktop-shell="1"] .djInputSlot > #gInputSlot { display: block; }
+#app[data-desktop-shell="1"] .djInputSlot #inputRow { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 8px 7px 10px; border: 1px solid rgba(81,213,231,.52); border-radius: 25px; background: rgba(6,21,29,.95); box-shadow: inset 0 0 20px rgba(38,144,169,.11), 0 0 14px rgba(37,150,178,.08); }
+#app[data-desktop-shell="1"] .djInputSlot #cmdInput { min-width: 0; padding: 8px 4px; border: 0; background: transparent; color: #e8f9fb; font-size: 14px; }
+#app[data-desktop-shell="1"] .djInputSlot #cmdInput:focus { box-shadow: none; }
+#app[data-desktop-shell="1"] .djInputSlot .roundBtn { width: 35px; height: 35px; }
+#app[data-desktop-shell="1"] .djFooterComposer { display: grid; gap: 6px; padding: 0 10px 8px; border: 1px solid rgba(81,213,231,.25); border-radius: 0 0 11px 11px; background: linear-gradient(180deg, rgba(7,27,40,.92), rgba(4,18,28,.96)); }
+#app[data-desktop-shell="1"] .djFooterComposer .djComposerTools { min-height: 0; }
+
+#app[data-desktop-shell="1"] .djControlBar { display: grid; grid-template-columns: 1.3fr 1fr 1fr auto; gap: 16px; align-items: center; padding: 9px 12px; border: 1px solid var(--dj-line); border-radius: 10px; background: rgba(7,27,40,.92); }
+#app[data-desktop-shell="1"] .djControlGroup { min-width: 0; }
+#app[data-desktop-shell="1"] .djControlGroup > span { display: block; margin-bottom: 5px; color: #7eabb7; font: 9px "Consolas", monospace; }
+#app[data-desktop-shell="1"] .djChipRow { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: thin; }
+#app[data-desktop-shell="1"] .djChip { flex: 0 0 auto; min-height: 25px; padding: 0 9px; border: 1px solid rgba(81,213,231,.22); border-radius: 14px; color: #b9dce3; background: rgba(15,49,65,.82); font-size: 10px; cursor: pointer; }
+#app[data-desktop-shell="1"] .djChip.is-active { border-color: var(--dj-blue); color: #e8f8ff; background: rgba(28,103,168,.54); box-shadow: 0 0 10px rgba(52,157,255,.16); }
+#app[data-desktop-shell="1"] .djChip.djGold.is-active { border-color: var(--dj-gold); background: rgba(144,91,9,.46); }
+#app[data-desktop-shell="1"] .djControlSettings { display: grid; place-items: center; align-self: center; width: 36px; height: 36px; border: 1px solid rgba(81,213,231,.28); border-radius: 7px; color: #d8edf1; background: rgba(12,42,57,.88); font-size: 17px; cursor: pointer; }
+#app[data-desktop-shell="1"] .djControlSettings:hover { border-color: var(--dj-cyan); color: #fff; box-shadow: 0 0 14px rgba(81,213,231,.2); }
+
+#app[data-desktop-shell="1"] .djSettingsDrawer { position: absolute; z-index: 10; top: 12px; right: 14px; width: min(560px, calc(100% - 28px)); max-height: calc(100% - 24px); overflow: auto; padding: 13px; border: 1px solid rgba(240,174,35,.46); border-radius: 12px; background: rgba(5,19,29,.97); box-shadow: 0 22px 55px rgba(0,0,0,.58), 0 0 0 1px rgba(81,213,231,.09); scrollbar-width: thin; }
+#app[data-desktop-shell="1"] .djSettingsDrawer[hidden] { display: none !important; }
+#app[data-desktop-shell="1"] .djSettingsHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+#app[data-desktop-shell="1"] .djSettingsHead h2 { margin: 4px 0 0; font-size: 16px; }
+#app[data-desktop-shell="1"] .djSettingsSection { display: block; margin: 9px 0; padding: 11px; border: 1px solid rgba(71,178,203,.2); border-radius: 8px; background: rgba(9,34,48,.82); }
+#app[data-desktop-shell="1"] .djSettingsSection h3 { margin: 4px 0 0; font-size: 14px; }
+#app[data-desktop-shell="1"] .djField { display: grid; gap: 5px; margin: 8px 0; color: #7da7b2; font: 9px "Consolas", monospace; }
+#app[data-desktop-shell="1"] .djField select, #app[data-desktop-shell="1"] .djField input { width: 100%; min-height: 30px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--dj-line); border-radius: 4px; color: #e2f7fa; background: var(--dj-panel-2); font: 11px "Segoe UI", sans-serif; }
+#app[data-desktop-shell="1"] .djPersonaGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; max-height: 185px; overflow-y: auto; padding-right: 2px; }
+#app[data-desktop-shell="1"] .djPersonaGrid button { display: grid; gap: 2px; min-height: 41px; padding: 6px; border: 1px solid rgba(71,178,203,.22); border-radius: 5px; color: #d8f1f4; background: rgba(8,32,42,.68); text-align: left; cursor: pointer; }
+#app[data-desktop-shell="1"] .djPersonaGrid button:hover, #app[data-desktop-shell="1"] .djPersonaGrid button[aria-pressed="true"] { border-color: var(--dj-cyan); background: rgba(38,133,153,.25); }
+#app[data-desktop-shell="1"] .djPersonaGrid b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 9px "Segoe UI", sans-serif; }
+#app[data-desktop-shell="1"] .djPersonaGrid span { overflow: hidden; color: #7da7b2; font: 8px "Segoe UI", sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+#app[data-desktop-shell="1"] .djActions { display: flex; flex-wrap: wrap; gap: 5px; }
+#app[data-desktop-shell="1"] .djHint { margin: 8px 0 0; color: #76a9b5; font: 9px/1.5 "Consolas", monospace; }
+#app[data-desktop-shell="1"] .djDisclosure { padding: 0 !important; overflow: hidden; }
+#app[data-desktop-shell="1"] .djDisclosure summary { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 11px; cursor: pointer; list-style: none; }
+#app[data-desktop-shell="1"] .djDisclosure summary::-webkit-details-marker { display: none; }
+#app[data-desktop-shell="1"] .djDisclosure summary > span:first-child { display: grid; gap: 4px; }
+#app[data-desktop-shell="1"] .djDisclosure summary b { color: #e1f5f7; font: 600 12px "Segoe UI", sans-serif; }
+#app[data-desktop-shell="1"] .djDisclosureBody { padding: 0 11px 11px; border-top: 1px solid rgba(71,178,203,.14); }
+#app[data-desktop-shell="1"] .djReadout { min-height: 42px; max-height: 135px; margin: 8px 0 0; padding: 7px; overflow: auto; border: 1px solid rgba(71,178,203,.18); border-radius: 4px; color: #8fb6bf; background: #07131b; white-space: pre-wrap; font: 9px "Consolas", monospace; }
+#app[data-desktop-shell="1"] .djStatusList, #app[data-desktop-shell="1"] .djLatency { display: grid; gap: 7px; padding-top: 10px; }
+#app[data-desktop-shell="1"] .djStatusList > div, #app[data-desktop-shell="1"] .djLatency > div { display: flex; justify-content: space-between; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid rgba(71,178,203,.12); }
+#app[data-desktop-shell="1"] .djLatency { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+#app[data-desktop-shell="1"] .djLatency > div { display: grid; gap: 3px; border-bottom: 0; }
+#app[data-desktop-shell="1"] .djLatency b { overflow-wrap: anywhere; white-space: normal; font-size: 9px; }
+#app[data-desktop-shell="1"] .djRail[hidden] { display: none !important; }
+#app[data-desktop-shell="1"] .djThinkingSlot #thinkingBar[hidden] { display: none !important; }
+#app[data-desktop-shell="1"] .djCoreSlot[data-state="listening"] #orbWrap::before { border-color: #75e4a4; box-shadow: 0 0 0 7px rgba(117,228,164,.1), 0 0 32px rgba(117,228,164,.52); }
+#app[data-desktop-shell="1"] .djCoreSlot[data-state="speaking"] #orbWrap::before { border-color: var(--dj-gold); animation-duration: 1.15s; }
+#app[data-desktop-shell="1"] .djCoreSlot[data-state="thinking"], #app[data-desktop-shell="1"] .djCoreSlot[data-state="executing"] { filter: hue-rotate(24deg); }
+#app[data-desktop-shell="1"] .djCoreSlot[data-state="alert"] #orbWrap::before, #app[data-desktop-shell="1"] .djCoreSlot[data-state="error"] #orbWrap::before { border-color: #ff8887; box-shadow: 0 0 0 6px rgba(255,136,135,.1), 0 0 26px rgba(255,136,135,.45); }
+@keyframes djPulse { 0%, 100% { transform: scale(.96); opacity: .72; } 50% { transform: scale(1.05); opacity: 1; } }
+@media (max-width: 1250px) { #app[data-desktop-shell="1"] .djModeCards { grid-template-columns: repeat(3, minmax(0, 1fr)); } #app[data-desktop-shell="1"] .djControlBar { grid-template-columns: 1fr; gap: 8px; } }
+@media (max-width: 900px) { #app[data-desktop-shell="1"] .gView[data-view="conversa"] { overflow-y: auto; } #app[data-desktop-shell="1"] .desktopJarvisExperience { height: auto; min-height: 100%; } #app[data-desktop-shell="1"] .djRefHero { grid-template-columns: 66px minmax(0, 1fr); } #app[data-desktop-shell="1"] .djHeroActions { grid-column: 1 / -1; justify-content: flex-start; max-width: none; } #app[data-desktop-shell="1"] .djStatusGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } #app[data-desktop-shell="1"] .djReferenceWorkspace { grid-template-columns: 1fr; overflow: visible; } #app[data-desktop-shell="1"] .djConversations { min-height: 170px; } }
+@media (max-width: 560px) { #app[data-desktop-shell="1"] .djModeCards { grid-template-columns: repeat(2, minmax(0, 1fr)); } #app[data-desktop-shell="1"] .djHero h1 { font-size: 22px; } #app[data-desktop-shell="1"] .djPersonaGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Reference fidelity: the supplied Jarvis mockup uses a compact hero,
+   icon-led mode cards and a restrained blue/gold glass surface.  These rules
+   stay scoped to the desktop Jarvis route and do not alter trading views. */
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .desktopJarvisExperience {
+  --dj-bg: #06131e;
+  --dj-panel: #081c2a;
+  --dj-panel-2: #0b2537;
+  --dj-line: rgba(84, 190, 224, .31);
+  --dj-cyan: #55d8ee;
+  --dj-blue: #238cff;
+  --dj-gold: #f4b21e;
+  --dj-text: #f0f9fb;
+  --dj-muted: #86abb9;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  gap: 9px;
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djRefHero {
+  min-height: 174px;
+  padding: 13px 18px 74px;
+  border-radius: 12px;
+  background: linear-gradient(105deg, rgba(9, 38, 54, .98), rgba(5, 20, 31, .95));
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .3), inset 0 1px rgba(160, 235, 255, .08);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djHeroCopy > small {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djHero h1 { font-size: 29px; }
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djHero h2 { font-size: 16px; }
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCards {
+  margin: -63px 23px 0;
+  gap: 9px;
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCard {
+  min-height: 65px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(15, 47, 67, .96), rgba(5, 22, 35, .98));
+  box-shadow: 0 15px 28px rgba(0, 0, 0, .42), inset 0 1px rgba(145, 229, 245, .12);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCard.is-active {
+  border-color: #3f9eff;
+  background: linear-gradient(145deg, rgba(22, 91, 158, .9), rgba(5, 48, 86, .98));
+  box-shadow: 0 15px 31px rgba(0, 0, 0, .48), 0 0 24px rgba(39, 145, 255, .34), inset 0 0 0 1px rgba(93, 185, 255, .42);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeIcon {
+  width: 31px;
+  height: 31px;
+  border-radius: 8px;
+  color: #f4c14d;
+  background: rgba(240, 174, 35, .12);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeIcon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCard:nth-child(1) .djModeIcon,
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCard:nth-child(3) .djModeIcon,
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCard:nth-child(4) .djModeIcon {
+  color: #73c9ff;
+  border-color: rgba(75, 173, 255, .5);
+  background: rgba(36, 128, 219, .16);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCard:nth-child(4) .djModeIcon { color: #d6e9f5; background: rgba(164, 189, 205, .15); }
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCard b { font-size: 13px; }
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djModeCard small { font-size: 10px; }
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djReferenceWorkspace {
+  grid-template-columns: 292px minmax(0, 1fr);
+  gap: 10px;
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djPanel {
+  border-radius: 11px;
+  background: linear-gradient(155deg, rgba(8, 31, 45, .98), rgba(4, 17, 27, .99));
+  box-shadow: inset 0 1px rgba(129, 225, 239, .06), 0 12px 26px rgba(0, 0, 0, .14);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djConversationItem {
+  min-height: 55px;
+  border-radius: 9px;
+  background: rgba(7, 29, 42, .78);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djConversationItem.is-active {
+  border-color: #2e9aff;
+  background: linear-gradient(90deg, rgba(17, 98, 164, .66), rgba(11, 55, 91, .58));
+  box-shadow: inset 3px 0 #3fa8ff, 0 0 16px rgba(31, 137, 239, .12);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djControlBar {
+  border-radius: 11px;
+  background: linear-gradient(180deg, rgba(8, 29, 43, .97), rgba(5, 20, 31, .98));
+  box-shadow: inset 0 1px rgba(129, 225, 239, .05);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djInputSlot #inputRow {
+  border-color: rgba(76, 196, 231, .6);
+  background: rgba(4, 19, 28, .98);
+  box-shadow: inset 0 0 23px rgba(38, 144, 169, .14), 0 0 17px rgba(37, 150, 178, .12);
+}
+#app[data-desktop-shell="1"] #golden[data-d2-route="jarvis"] .djFooterComposer {
+  border-color: rgba(81, 213, 231, .3);
+  border-radius: 0 0 12px 12px;
+}

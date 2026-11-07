@@ -18,6 +18,23 @@ const hexToRgb = (hex) => {
 };
 const storeKey = (k) => `jarvis.${k}.v1::${window.generatorName || "local"}`;
 
+function friendlyUiError(value) {
+  const code = String(value || "").trim();
+  const messages = {
+    GEMINI_LIVE_NOT_CONNECTED: "O Gemini Live não está conectado.",
+    GEMINI_LIVE_TEXT_FAILED: "Não consegui enviar o texto para o Gemini Live.",
+    GEMINI_LIVE_AUDIO_TOGGLE_FAILED: "Não consegui alternar o microfone Gemini.",
+    GEMINI_LIVE_AUDIO_INTERRUPT_FAILED: "Não consegui interromper o áudio Gemini.",
+    GEMINI_PREVIEW_IN_PROGRESS: "Já existe um teste de voz em andamento.",
+    NON_CHROME_BROWSER_DETECTED: "Não consegui confirmar uma janela do Google Chrome em primeiro plano.",
+    CHROME_FOCUS_GUARD_FAILED: "Não consegui focar a janela segura do Chrome.",
+    SEARCH_PROVIDERS_EXHAUSTED: "Os provedores de pesquisa não ficaram disponíveis.",
+  };
+  return messages[code] || (code
+    ? "O Jarvis não conseguiu concluir esta operação. Consulte o diagnóstico para obter detalhes."
+    : "Erro não identificado.");
+}
+
 function loadJSON(key, fallback) {
   try { const v = JSON.parse(localStorage.getItem(storeKey(key))); return v == null ? fallback : v; } catch { return fallback; }
 }
@@ -30,6 +47,18 @@ const orbWrap = $("#orbWrap");
 const conversationEl = $("#conversation");
 const thinkingBar = $("#thinkingBar");
 const thinkingText = $("#thinkingText");
+
+// The thinking indicator is a request-scoped affordance, not a permanent
+// activity light. Keep all paths (local, Gateway and Gemini Live) on the same
+// helpers so a completed response cannot leave the dots stuck in chat.
+function showThinking(label = "pensando…") {
+  if (!thinkingBar) return;
+  if (thinkingText && label) thinkingText.textContent = label;
+  thinkingBar.hidden = false;
+}
+function hideThinking() {
+  if (thinkingBar) thinkingBar.hidden = true;
+}
 const cmdInput = $("#cmdInput");
 const micBtn = $("#micBtn");
 const isJarvisDesktop = window.__JARVIS_DESKTOP__ === true;
@@ -106,8 +135,30 @@ const settings = {
   agent: saved.agent || "auto",      // auto | local | backend | ia
   advanced: !!saved.advanced,        // manda o comando cru ao backend
   browserTts: saved.browserTts != null ? !!saved.browserTts : false,
+  persona: saved.persona || "equilibrado",
+  profileName: saved.profileName || CFG.userName,
+  profileContext: saved.profileContext || "",
+  microphoneId: saved.microphoneId || "",
+  voiceMode: "gemini_live",
+  geminiVoice: saved.geminiVoice || "Aoede",
   uiVersion: 1,
 };
+
+const JARVIS_PERSONAS = [
+  ["equilibrado", "Equilibrado", "Direto e cordial. O padrão."],
+  ["brincalhao", "Brincalhão", "Traz humor leve sem atrapalhar a tarefa."],
+  ["ignorante", "Ignorante", "Falsa impaciência, sem insultos nem hostilidade."],
+  ["malandro", "Malandro", "Descontraído, com gírias moderadas e clareza."],
+  ["profissional", "Profissional", "Formal, objetivo e sem piadas."],
+  ["rigoroso", "Rigoroso", "Firme ao apontar erros e riscos."],
+  ["mordomo", "Mordomo", "Elegante, prestativo e cerimonioso."],
+  ["amigo", "Amigo", "Caloroso, pergunta de volta e se importa."],
+  ["direto", "Direto", "Só o necessário. Sem rodeios."],
+  ["motivador", "Motivador", "Energético, incentiva e comemora progresso."],
+  ["narrador", "Narrador", "Fala como um locutor, com ritmo e presença."],
+  ["amoroso", "Amoroso", "Acolhedor, sem interromper o objetivo."],
+  ["sarcastico", "Sarcástico", "Ironia fina apenas quando não houver risco."],
+];
 
 // Migração de interface: quem já tinha salvo um tema antigo passa a ver o painel
 // GOLDEN JARVIS (o novo padrão). A versão fica gravada para não repetir.
@@ -249,6 +300,10 @@ function setState(s, ms) {
   clearTimeout(alertTimer);
   appState = s || "idle";
   app.dataset.state = appState;
+  // O indicador representa somente uma solicitação ativa. Estados de captura,
+  // fala, espera e erro nunca devem manter o "pensando" visível.
+  if (appState === "thinking" || appState === "executing") showThinking();
+  else hideThinking();
   hud.setState(appState);
   const labels = {
     idle: ["EM ESPERA", null], listening: ["OUVINDO", "Fale agora..."],
@@ -356,11 +411,18 @@ async function typeInto(msg, text, speed = 12) {
 
 function renderResponse(out) {
   if (!out) return;
+  hideThinking();
   const isErr = out.error || out.intent === "unknown";
   if (!out.streamed) {
     const msg = addMessage(isErr ? "err" : "jarvis", "", { actions: out.actions });
-    if (out.typing === false) msg.setText(out.reply);
-    else typeInto(msg, out.reply);
+    if (out.typing === false) {
+      msg.setText(out.reply);
+      if (out.image_path) appendGeneratedImage(msg, out.image_path);
+    } else {
+      typeInto(msg, out.reply).then(() => {
+        if (out.image_path) appendGeneratedImage(msg, out.image_path);
+      });
+    }
   }
   if (out.actions?.length) {
     for (const a of out.actions) logLine(`${a.name} ${a.status === "ok" ? "OK" : "FALHOU"}${a.detail ? " · " + a.detail : ""}`, a.status === "ok" ? "ok" : "bad");
@@ -371,7 +433,36 @@ function renderResponse(out) {
   }
 }
 
+async function appendGeneratedImage(msg, imagePath) {
+  const filename = String(imagePath || '').split(/[\\/]/).pop();
+  if (!filename || !window.Gateway?.httpGetBlob) return;
+  try {
+    const blob = await window.Gateway.httpGetBlob(
+      '/api/jarvis/generated-image?name=' + encodeURIComponent(filename));
+    if (!blob) return;
+    const image = document.createElement('img');
+    image.alt = 'Imagem gerada pelo Jarvis';
+    image.style.cssText = 'display:block;max-width:min(100%,640px);max-height:520px;margin-top:12px;border-radius:10px;border:1px solid var(--border);object-fit:contain;';
+    image.src = URL.createObjectURL(blob);
+    image.onload = () => URL.revokeObjectURL(image.src);
+    msg.body.appendChild(image);
+    conversationEl.scrollTop = conversationEl.scrollHeight;
+  } catch (error) {
+    logLine('Imagem gerada, mas não foi possível exibi-la no chat.', 'bad');
+  }
+}
+
 // ------------------------------------------------------------------ VOZ ----
+function setMicButtonState(active) {
+  const on = Boolean(active);
+  micBtn.classList.toggle("ptt-active", on);
+  micBtn.classList.toggle("ptt-muted", !on);
+  micBtn.setAttribute("aria-pressed", String(on));
+  micBtn.dataset.ptt = on ? "on" : "off";
+  micBtn.setAttribute("aria-label", on ? "Microfone ativo - clique para silenciar" : "Microfone mudo - clique para falar");
+  micBtn.title = on ? "Microfone ativo — clique para silenciar" : "Microfone mudo — clique para falar";
+}
+
 let speakAnim = 0;
 function startSpeakAnim() {
   stopSpeakAnim();
@@ -386,7 +477,7 @@ function stopSpeakAnim() { clearInterval(speakAnim); speakAnim = 0; hud.setAmpli
 const voice = createVoice({
   onPartial: (t) => { stateHint.textContent = "«" + t + "»"; },
   onFinal: (t) => { stateHint.textContent = ""; submitCommand(t, "voz"); },
-  onError: (m) => { toast("VOZ", m, "bad"); logLine(m, "bad"); setState("idle"); micBtn.classList.remove("listening"); },
+  onError: (m) => { toast("VOZ", m, "bad"); logLine(m, "bad"); setState("idle"); micBtn.classList.remove("listening"); setMicButtonState(false); },
   onAmplitude: (v) => {
     vcBar.style.width = Math.round(Math.min(1, v) * 100) + "%";
     golden?.setAmplitude(v);
@@ -394,6 +485,7 @@ const voice = createVoice({
   },
   onListeningChange: (on) => {
     micBtn.classList.toggle("listening", on);
+    setMicButtonState(on);
     voiceCard.dataset.on = on ? "1" : "0";
     vcState.textContent = on ? "ESCUTANDO" : "PARADO";
     if (on) setState("listening");
@@ -409,6 +501,8 @@ function applyDesktopVoiceState(state) {
   const listening = ["OUVINDO", "WAITING_WAKE", "LISTENING", "WAKE_DETECTED"].includes(normalized);
   const processing = ["TRANSCRIBING", "PROCESSING", "CAPTURING_FOLLOWUP"].includes(normalized);
   micBtn.classList.toggle("listening", listening);
+  const captureActive = (listening || processing) && normalized !== "WAITING_WAKE";
+  setMicButtonState(captureActive);
   voiceCard.dataset.on = listening || processing ? "1" : "0";
   vcState.textContent = processing ? "PROCESSANDO" : listening ? "ESCUTANDO" :
     normalized === "SPEAKING" ? "FALANDO" : normalized === "ERROR" ? "ERRO" : "PARADO";
@@ -427,7 +521,7 @@ const desktopVoice = isJarvisDesktop ? createDesktopVoiceClient({
     if (heard) addMessage("user", heard, { typing: false });
     if (response) addMessage("jarvis", response, { typing: false });
     stateHint.textContent = "";
-    applyDesktopVoiceState("WAITING_WAKE");
+    applyDesktopVoiceState("OFF");
   },
   onError: (message) => {
     toast("VOZ", message, "bad");
@@ -615,11 +709,174 @@ const localPatterns = [
   /\b(timer|cronometro|alarme|me avise em|conta \d+)\b/,
   /\b(ajuda|comandos|capacidades)\b/,
   /\b(piada|quem sou eu|quem e voce|seu nome|se apresente|o que voce faz)\b/,
-  /\b(pesquisar|pesquise|procure|buscar|busque)\b/,
   /\b(tocar|toque|musica|som ambiente)\b/,
   /\b(calcule|quanto e)\b/,
   /^(oi|ola|opa|bom dia|boa tarde|boa noite)\b/,
 ];
+
+// Pesquisas e dados atuais devem passar pelo Gateway/Brain canônico, que
+// aplica as permissões existentes e usa as ferramentas web somente leitura.
+// O Gemini Live permanece sem ferramentas para não criar uma segunda rota de
+// execução dentro da sessão de voz.
+function isResearchRequest(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /\b(pesquis\w*|procure?\w*|busc\w*|internet|web|notici\w*|cotac\w*|dolar|euro|preco\w*|fonte\w*|link\w*|atualiz\w*|agora|hoje|ultim\w*)\b/.test(t);
+}
+
+// Requests that operate the local computer must stay on the canonical
+// Gateway/ComputerMission path.  Gemini Live has no tools by design; sending
+// these phrases directly to the Live session would make the model answer as
+// if it had acted while nothing happened on the PC.  The Gateway still
+// enforces SecurityManager confirmations and the web-ai-safe profile.
+function isComputerUseRequest(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (!t || isResearchRequest(t)) return false;
+  return /\b(abr(?:ir|a|e)|fech(?:ar|e|a)|inici(?:ar|e|a)|execut(?:ar|e)|control(?:ar|e)|cliqu(?:e|ar)|clicar|digit(?:e|ar)|escrev(?:a|er)|pression(?:e|ar)|aper(?:te|tar)|tecla|atalho|janela|programa|aplicativo|computador|pc|mouse|teclado|arquivo|pasta|navegador|browser|chrome|edge|captura(?:r)?\s+(?:a\s+)?tela|screenshot|print\s+da\s+tela|olh(?:e|ar)\s+(?:a\s+)?minha\s+tela|vej(?:a|ar)\s+(?:a\s+)?minha\s+tela|volume|silenci(?:ar|e)|aument(?:e|ar)\s+(?:o\s+)?volume|diminu(?:a|ir)\s+(?:o\s+)?volume)\b/.test(t.replace(/\s+/g, " "));
+}
+
+// Keep image requests out of the tool-free Live session.  The canonical
+// Gateway invokes the confirmed image_generate capability when a Gemini image
+// key is configured; it must never claim that an image was generated on error.
+function isImageRequest(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /\b(cri(?:e|ar)|ger(?:e|ar)|faz(?:er|a|ca)|produz(?:a|ir)|desenh(?:e|ar)|edit(?:e|ar)|transform(?:e|ar))\b[\s\S]*\b(imagem|figura|foto|ilustrac(?:ao|ao)|arte|logo|banner)\b/.test(t)
+    || /\b(imagem|foto|ilustrac(?:ao|ao)|arte|logo|banner)\b[\s\S]*\b(cri(?:e|ar)|ger(?:e|ar)|faz(?:er|a|ca)|edit(?:e|ar)|transform(?:e|ar))\b/.test(t);
+}
+
+// Market/XAUUSD analysis must use the canonical Gateway/MT5 read-only path.
+// Gemini Live is intentionally tool-free, so letting these phrases reach the
+// Live text session produces a generic answer such as “não consigo analisar”.
+function isMarketAnalysisRequest(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const asset = /\b(ouro|gold|xauusd|xau\s*[/\-]?\s*usd)\b/.test(t);
+  // Canonical setup vocabulary: entrada|entry|setup|stop|take|alvo.
+  const intent = /\b(analis\w*|tendenc\w*|estrutur\w*|liquidez|order\s*block|bos|choch|confluenc\w*|cenari\w*|perspectiv\w*|entrada|entry|setup|stop|take|take\s*profit|alvo|mapa\s+de\s+entrada|scalp\w*|day\s*[- ]?\s*trade\w*|intraday|swing\s*[- ]?\s*trade\w*|saida\w*|ponto\w*\s+de\s+entrada|indicador\w*|analise\s+completa)\b/.test(t);
+  const explicitSetup = /\b(pontos?\s+de\s+entrada|ponto\s+de\s+entrada|entrada|entry|setup|stop\w*|take\w*|alvo|scalp\w*|day\s*[- ]?\s*trade\w*|intraday|swing\s*[- ]?\s*trade\w*)\b/.test(t);
+  return (asset && intent) || (!asset && explicitSetup);
+}
+
+function isNegatedMarketAnalysisRequest(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /\bnao\s+(?:(?:quero|queria|preciso|necessito)\s+)?(?:(?:que|q)\s+)?(?:analis\w*|tendenc\w*|estrutur\w*|liquidez|cenario\w*|(?:faca|fazer)\s+(?:uma\s+)?analis\w*)\b/.test(t);
+}
+
+function compactMarketGatewayReply(request) {
+  if (isNegatedMarketAnalysisRequest(request)) {
+    return "Entendido, chefe. Não vou analisar o XAUUSD.";
+  }
+  return "Está aí, chefe. A análise que você pediu foi concluída. Confira os detalhes no Painel.";
+}
+
+// Coding/Codex requests must use the canonical Gateway too.  Gemini Live is
+// intentionally tool-free; if this classification is omitted, a spoken
+// request such as "use o Codex" is answered conversationally and no Codex
+// thread is created.
+function isCodingRequest(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/\bcodex\b/.test(t)) return true;
+  const topic = /\b(codigo|script|bug|programa(?:cao)?|python|javascript|typescript|mql5|arquivo|repositorio|thread)\b/.test(t);
+  const action = /\b(analise|analisar|corrija|corrigir|crie|criar|gere|gerar|execute|executar|rode|rodar|teste|testar|encontre|verifique|ajuste|adicione|implemente|liste|mostre)\b/.test(t);
+  return topic && action;
+}
+
+// External MCPs are registered in the canonical Gateway and are deliberately
+// unavailable to Gemini Live.  Keep every explicit MCP request on the
+// Gateway/tool-registry path so Live cannot acknowledge work it cannot run.
+function isExternalMcpRequest(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /\bmcps?\b/.test(t)
+    || /\bservidores?\s+mcps?\b/.test(t)
+    || /\bmcps?\s+extern(?:o|os|a|as)\b/.test(t)
+    || /\b(playwright|filesystem|servidor\s+git|servidor\s+fetch|servidor\s+time)\s+mcp\b/.test(t);
+}
+
+function isMcpStatusRequest(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (!isExternalMcpRequest(t)) return false;
+  return /\b(status|saude|servidor(?:es)?|conexao|conectado|pronto|diagnostico|verifi(?:que|car)|funcionando|health|ach(?:ou|ar|e|ei)|encontr\w*|exist\w*|registr\w*|cadastr\w*|aparec\w*|disponiv\w*|falt\w*|sumid\w*|porque|por\s+que|entao)\b/.test(t);
+}
+
+function formatMcpStatus(data) {
+  const external = data?.mcp_external;
+  const bootstrap = Array.isArray(external?.bootstrap) ? external.bootstrap : [];
+  const health = Array.isArray(external?.health) ? external.health : [];
+  const healthById = new Map(health.map((row) => [String(row?.server_id || ""), row]));
+  if (!bootstrap.length && !health.length) {
+    return "Não encontrei servidores MCP externos registrados no Gateway. Verifique se o Jarvis foi reiniciado com o autostart de MCP habilitado.";
+  }
+  const lines = bootstrap.map((row) => {
+    const id = String(row?.server_id || "MCP");
+    const live = healthById.get(id) || {};
+    const status = String(row?.status || (live.running ? "READY" : live.health) || "UNKNOWN").toUpperCase();
+    const toolCount = Array.isArray(row?.tools) ? row.tools.length : 0;
+    const suffix = toolCount ? ` · ${toolCount} ferramenta${toolCount === 1 ? "" : "s"}` : "";
+    return `• ${id}: ${status}${suffix}`;
+  });
+  if (!lines.length) {
+    for (const row of health) {
+      const id = String(row?.server_id || "MCP");
+      const status = row?.running ? "RUNNING" : String(row?.health || "UNKNOWN").toUpperCase();
+      lines.push(`• ${id}: ${status}`);
+    }
+  }
+  return `Status dos MCPs externos${external?.autostart_enabled ? " (autostart ativo)" : ""}:\n${lines.join("\n")}`;
+}
+
+async function handleMcpStatusRequest() {
+  setState("executing");
+  showThinking("verificando MCPs…");
+  try {
+    if (!window.Gateway?.isAuthenticated || typeof window.Gateway.httpGet !== "function") {
+      renderResponse({
+        reply: "Não consegui consultar os MCPs: o Gateway não está autenticado.",
+        error: true,
+        typing: false,
+      });
+      return;
+    }
+    const data = await window.Gateway.httpGet("/api/jarvis/extensions/status");
+    if (!data || data.ok === false) {
+      renderResponse({
+        reply: "Não consegui consultar o status dos MCPs no Gateway. Tente novamente depois que o indicador ficar conectado.",
+        error: true,
+        typing: false,
+      });
+      return;
+    }
+    const reply = formatMcpStatus(data);
+    // Keep the diagnostic visible and also narrate it through the already
+    // authorized Gemini Live session, preserving the selected voice/profile.
+    renderResponse({ reply, typing: false, speak: false });
+    await speakDesktopGeminiReply(reply);
+  } catch (error) {
+    renderResponse({
+      reply: "A consulta dos MCPs falhou, mas o Jarvis continua disponível. Verifique o Gateway e tente novamente.",
+      error: true,
+      typing: false,
+    });
+    logLine("status dos MCPs: " + String(error?.message || error), "bad");
+  } finally {
+    hideThinking();
+    setState("idle");
+  }
+}
+
+async function speakDesktopGeminiReply(text) {
+  const desktopMode = String(window.__JARVIS_DESKTOP_VOICE_MODE__ || settings.voiceMode || "gemini_live").toLowerCase();
+  if (!isJarvisDesktop || desktopMode !== "gemini_live"
+      || !window.__JARVIS_GEMINI_AUTH_TOKEN__
+      || typeof window.__JARVIS_GEMINI_SEND_TEXT__ !== "function") return;
+  const reply = String(text || "").trim().slice(0, 4000);
+  if (!reply) return;
+  // The web result is already rendered in the chat. Suppress the synthetic
+  // user/output transcription generated only to make Gemini narrate it, so
+  // the same answer is not duplicated on screen.
+  window.__JARVIS_SUPPRESS_GEMINI_TRANSCRIPT_UNTIL__ = Date.now() + 15000;
+  const result = await window.__JARVIS_GEMINI_SEND_TEXT__(
+    `Leia em português brasileiro, com a voz selecionada, exatamente esta resposta ao usuário. Não acrescente informações: ${reply}`,
+  );
+  if (!result?.ok) logLine("Gemini Live não conseguiu narrar a resposta web: " + friendlyUiError(result?.error || "GEMINI_LIVE_SPEECH_FAILED"), "bad");
+}
 
 function shouldForward(text) {
   if (bridge.status !== "online") return false;
@@ -631,14 +888,35 @@ function shouldForward(text) {
 
 // Fila: um comando de cada vez, para as respostas nunca saírem fora de ordem.
 let commandQueue = Promise.resolve();
-function submitCommand(raw, source = "texto") {
+let geminiAnswerTimer = 0;
+
+function finishGeminiTurn() {
+  clearTimeout(geminiAnswerTimer);
+  geminiAnswerTimer = 0;
+  hideThinking();
+  if (appState === "thinking" || appState === "executing") setState("idle");
+}
+
+function waitForGeminiTurn() {
+  clearTimeout(geminiAnswerTimer);
+  // The text endpoint acknowledges submission before Live emits the answer.
+  // Bound the visual state so a transport that drops a reply cannot pin the UI.
+  geminiAnswerTimer = setTimeout(() => {
+    geminiAnswerTimer = 0;
+    hideThinking();
+    if (appState === "thinking" || appState === "executing") setState("idle");
+    logLine("Gemini Live não retornou a resposta no tempo esperado", "bad");
+  }, 30000);
+}
+
+function submitCommand(raw, source = "texto", options = {}) {
   commandQueue = commandQueue
-    .then(() => runCommand(raw, source))
-    .catch((e) => { logLine("falha no processamento: " + (e?.message || e), "bad"); setState("idle"); thinkingBar.hidden = true; });
+    .then(() => runCommand(raw, source, options))
+    .catch((e) => { logLine("falha no processamento: " + (e?.message || e), "bad"); setState("idle"); hideThinking(); });
   return commandQueue;
 }
 
-async function runCommand(raw, source = "texto") {
+async function runCommand(raw, source = "texto", options = {}) {
   const text = String(raw || "").trim();
   // Um anexo do COMANDO MANUAL viaja junto do próximo comando escrito à mão.
   const att = source === "texto" ? takeAttachment() : null;
@@ -647,7 +925,9 @@ async function runCommand(raw, source = "texto") {
   if (source === "voz") vcLast.textContent = label;
   lastTask = label;
   golden?.setTask(label);
-  addMessage("user", att ? `${label}  [anexo: ${att.name}]` : label);
+  if (!options.skipUserEcho) {
+    addMessage("user", att ? `${label}  [anexo: ${att.name}]` : label);
+  }
   logLine(`comando (${source}): ${label}${att ? " · anexo " + att.name : ""}`);
   if (source === "texto") cmdInput.value = "";
   sfx.click();
@@ -661,6 +941,48 @@ async function runCommand(raw, source = "texto") {
   }
 
   const agent = settings.agent;
+
+  // A consulta de saúde é local e determinística.  It must not be sent to
+  // Gemini Live, whose text endpoint has no MCP/tool access and was the source
+  // of GEMINI_LIVE_TEXT_FAILED plus the stuck thinking indicator.
+  if (source === "texto" && !att && isMcpStatusRequest(text)) {
+    await handleMcpStatusRequest();
+    return;
+  }
+
+  // In an authorized Gemini Live session, typed questions use the same
+  // canonical Live session and audio output owner as microphone turns.  Do
+  // not fall back to the normal command router here: that would create a
+  // second answer path and could execute a tool outside the Live conversation.
+  const desktopMode = String(window.__JARVIS_DESKTOP_VOICE_MODE__ || settings.voiceMode || "gemini_live").toLowerCase();
+  if (isJarvisDesktop && source === "texto" && !att && desktopMode === "gemini_live"
+      && !isResearchRequest(text)
+      && !isComputerUseRequest(text)
+      && !isImageRequest(text)
+      && !isCodingRequest(text)
+      && !isMarketAnalysisRequest(text)
+      && !isExternalMcpRequest(text)
+      && window.__JARVIS_GEMINI_AUTH_TOKEN__
+      && typeof window.__JARVIS_GEMINI_SEND_TEXT__ === "function") {
+    setState("executing");
+    let awaitingAnswer = false;
+    try {
+      const result = await window.__JARVIS_GEMINI_SEND_TEXT__(text);
+      if (result?.ok) {
+        awaitingAnswer = true;
+        waitForGeminiTurn();
+        logLine("texto enviado ao Gemini Live — aguardando resposta em áudio", "ok");
+      }
+      else {
+        const code = String(result?.error || "GEMINI_LIVE_TEXT_FAILED");
+        toast("GEMINI LIVE", friendlyUiError(code), "bad");
+        logLine("Gemini Live: " + friendlyUiError(code), "bad");
+      }
+    } finally {
+      if (!awaitingAnswer) finishGeminiTurn();
+    }
+    return;
+  }
 
   // Local-only actions (theme, UI panels) bypass agent routing
   if (!shouldForward(label)) {
@@ -679,26 +1001,47 @@ async function runCommand(raw, source = "texto") {
   }
 
   const forceForward = agent === "backend" || settings.advanced || !!(att && att.text);
+  const gatewayRequest = isResearchRequest(label) || isComputerUseRequest(label)
+    || isImageRequest(label) || isCodingRequest(label)
+    || isMarketAnalysisRequest(label) || isExternalMcpRequest(label);
 
-  if (agent !== "ia" && (forceForward || shouldForward(label))) {
+  // Even when the selected presentation model is “Gemini Live”, requests
+  // that need a tool must be rendered from the canonical Gateway result.
+  // This keeps the answer in the chat and prevents a second tool-less path.
+  if ((agent !== "ia" || gatewayRequest) && (forceForward || shouldForward(label))) {
     setState("executing");
     pendingReply = null;
-    const res = await bridge.sendCommand(payload, { source, ui: { theme: app.dataset.theme, state: appState, advanced: settings.advanced, agent } });
+    const res = await bridge.sendCommand(payload, { source, ui: { theme: app.dataset.theme, state: appState, advanced: settings.advanced, agent, persona: settings.persona, profile_name: settings.profileName, voice_mode: settings.voiceMode, gemini_voice: settings.geminiVoice } });
     if (res.ok && res.data) {
       const d = res.data;
       if (d.telemetry) { serverTelemetry = d.telemetry; metrics.setServerTelemetry(d.telemetry); }
       if (Array.isArray(d.market) && d.market.length) { lastMarket = d.market; golden?.setMarket(d.market); }
-      if (d.reply || d.actions) renderResponse({ reply: d.reply || "", actions: d.actions, speak: d.speak });
+      if (d.reply || d.actions) {
+        // Keep detailed market evidence in the structured Panel/history.  The
+        // conversation and TTS receive only the short acknowledgement, even
+        // during a rolling Gateway update that still returns the legacy raw
+        // analysis message.
+        const marketReply = isMarketAnalysisRequest(label) && d.ok !== false
+          ? compactMarketGatewayReply(label)
+          : (d.reply || "");
+        renderResponse({ reply: marketReply, actions: d.actions, speak: d.speak,
+          image_path: d.path || d.tool_result?.path,
+          image_mime_type: d.mime_type || d.tool_result?.mime_type });
+        // Web/current-data requests use the canonical Gateway tools. Keep the
+        // answer visible in the chat and narrate it through the already-open
+        // Gemini session so the selected Live voice remains the sole audio
+        // owner on the Desktop.
+        if (marketReply) await speakDesktopGeminiReply(marketReply);
+      }
       setState("idle");
       return;
     }
     if (res.ok) {
       setState("thinking");
-      thinkingText.textContent = "executando no backend";
-      thinkingBar.hidden = false;
+      showThinking("executando no backend");
       clearTimeout(waitTimer);
       waitTimer = setTimeout(() => {
-        thinkingBar.hidden = true;
+        hideThinking();
         if (!pendingReply) { setState("idle"); logLine("backend sem resposta em 25s", "bad"); }
       }, 25000);
       return;
@@ -713,13 +1056,17 @@ async function runCommand(raw, source = "texto") {
   if (agent === "ia") {
     if (window.Gateway && window.Gateway.isAuthenticated) {
       setState("thinking");
-      thinkingText.textContent = "consultando o núcleo de IA";
-      thinkingBar.hidden = false;
+      showThinking("consultando o núcleo de IA");
       const out = await brain.aiAsk(payload);
-      thinkingBar.hidden = true;
+      hideThinking();
       setState("idle");
       if (!out?.text) logLine("o núcleo de IA não respondeu", "bad");
-      if (out?.text && settings.speak) speak(out.text);
+      if (out?.text) {
+        // The IA agent is still backed by the canonical Gateway.  Keep its
+        // answer visible in the conversation instead of only speaking it.
+        renderResponse({ reply: out.text, typing: false, speak: false });
+        if (settings.speak) speak(out.text);
+      }
       return;
     }
     toast("NÚCLEO DE IA", "IA generativa indisponível — Gateway não conectado.", "bad");
@@ -727,14 +1074,13 @@ async function runCommand(raw, source = "texto") {
   }
 
   setState("thinking");
-  thinkingText.textContent = "processando";
-  thinkingBar.hidden = false;
+  showThinking("pensando…");
   sfx.think();
   await new Promise((r) => setTimeout(r, 260));
   let out = null;
   try { out = await brain.think(payload); }
   catch (e) { out = { reply: "Falha interna: " + (e.message || e), error: true }; }
-  thinkingBar.hidden = true;
+  hideThinking();
   if (out) renderResponse(out);
   setState("idle");
 }
@@ -1118,6 +1464,205 @@ function renderCapabilities() {
   el.innerHTML = caps.map(([n, ok]) => `<div><span class="${ok ? "yes" : "no"}">${ok ? "✓" : "✗"}</span><span>${esc(n)}</span></div>`).join("");
 }
 
+function renderPersonaGrid() {
+  const grid = $("#personaGrid");
+  if (!grid) return;
+  grid.innerHTML = JARVIS_PERSONAS.map(([id, name, desc]) =>
+    `<button type="button" class="personaCard" data-persona="${esc(id)}" aria-pressed="${settings.persona === id}">
+      <b>${esc(name)}</b><span>${esc(desc)}</span></button>`).join("");
+  grid.querySelectorAll("[data-persona]").forEach((button) => {
+    button.onclick = () => {
+      settings.persona = button.dataset.persona || "equilibrado";
+      persist();
+      const post = gatewayHttpPost();
+      const desktopControl = window.__JARVIS_DESKTOP_CONTROL__;
+      if (isJarvisDesktop && desktopControl?.setPersona) desktopControl.setPersona(settings.persona);
+      else if (post) post("/api/jarvis/voice-service/profile", { personality: settings.persona }).catch(() => {});
+      renderPersonaGrid();
+      toast("JEITO", JARVIS_PERSONAS.find(([id]) => id === settings.persona)?.[1] || "Equilibrado", "ok");
+    };
+  });
+}
+
+function gatewayHttpPost() {
+  const gateway = window.Gateway;
+  return gateway?.httpPost ? gateway.httpPost.bind(gateway) : null;
+}
+
+async function refreshWhatsappStatus() {
+  const post = gatewayHttpPost(); const state = $("#whatsappBridgeStatus"); const process = $("#whatsappBridgeProcess");
+  if (!state || !post) return;
+  try { const data = await post("/api/jarvis/whatsapp/status", {}); state.textContent = data?.state || data?.error || "ERROR"; process.textContent = data?.process?.running ? "RUNNING" : "STOPPED"; }
+  catch (error) { state.textContent = "ERROR"; process.textContent = String(error.message || error).slice(0, 80); }
+}
+async function refreshVaultStatus() {
+  const post = gatewayHttpPost(); const state = $("#vaultStatus"); const entries = $("#vaultEntries");
+  if (!state || !post) return;
+  if (window.Gateway && !window.Gateway.isAuthenticated) {
+    state.textContent = "AGUARDANDO AUTENTICAÇÃO";
+    entries.textContent = "—";
+    return;
+  }
+  try {
+    const data = await post("/api/jarvis/vault/status", {});
+    if (data?.http_failure) {
+      const statusCode = data.http_status ? `HTTP ${data.http_status}` : "FALHA HTTP";
+      state.textContent = `${statusCode} · ${data.error_code || "ERRO"}`;
+      entries.textContent = "—";
+      return;
+    }
+    state.textContent = data?.state || (data?.ok === false ? (data?.error || "ERROR") : "UNKNOWN");
+    entries.textContent = Array.isArray(data?.entries) ? String(data.entries.length) : "—";
+  } catch (_) { state.textContent = "FALHA DE CONSULTA"; entries.textContent = "—"; }
+}
+async function saveGeminiCredential() {
+  const post = gatewayHttpPost(); const input = $("#geminiCredentialInput"); const result = $("#geminiCredentialResult");
+  if (!post || !input || !result) return;
+  const secret = String(input.value || "");
+  if (!secret) { result.textContent = "Informe a chave para cadastro local."; return; }
+  result.textContent = "Protegendo com DPAPI…";
+  try {
+    const data = await post("/api/jarvis/vault/gemini/configure", { secret });
+    input.value = "";
+    result.textContent = data?.ok ? "GEMINI CREDENTIAL: CONFIGURED" : (data?.error || "Não configurada");
+    await refreshVaultStatus();
+  } catch (_) { input.value = ""; result.textContent = "Falha no cadastro local."; }
+}
+async function saveFredCredential() {
+  const post = gatewayHttpPost(); const input = $("#fredCredentialInput"); const result = $("#fredCredentialResult");
+  if (!post || !input || !result) return;
+  const secret = String(input.value || "").trim();
+  if (!secret) { result.textContent = "Informe a chave FRED para cadastro local."; return; }
+  result.textContent = "Protegendo com DPAPI…";
+  try {
+    const data = await post("/api/jarvis/vault/fred/configure", { secret });
+    input.value = "";
+    result.textContent = data?.ok ? "FRED: CONFIGURADO · SOMENTE LEITURA" : (data?.error || "FRED não configurado");
+    await refreshVaultStatus();
+  } catch (_) { input.value = ""; result.textContent = "Falha no cadastro local do FRED."; }
+}
+async function saveCloudflareCredentials() {
+  const post = gatewayHttpPost();
+  const tokenInput = $("#cloudflareTokenInput");
+  const accountInput = $("#cloudflareAccountIdInput");
+  const result = $("#cloudflareCredentialResult");
+  if (!post || !tokenInput || !accountInput || !result) return;
+  const token = String(tokenInput.value || "").trim();
+  const accountId = String(accountInput.value || "").trim();
+  if (!token || !accountId) {
+    result.textContent = "Informe o API Token e o Account ID do Cloudflare.";
+    return;
+  }
+  result.textContent = "Salvando credencial com segurança…";
+  try {
+    const data = await post("/api/models/key", { provider: "cloudflare", key: token, account_id: accountId });
+    result.textContent = data?.ok && data?.configured
+      ? "CLOUDFLARE + FLUX.1 SCHNELL: CONFIGURADO"
+      : (data?.error || "Cloudflare não configurado");
+  } catch (_) {
+    result.textContent = "Falha no cadastro do Cloudflare.";
+  } finally {
+    tokenInput.value = "";
+    accountInput.value = "";
+  }
+}
+async function saveOpenAIImageKey() {
+  const post = gatewayHttpPost();
+  const input = $("#openaiImageKeyInput");
+  const result = $("#openaiImageKeyResult");
+  if (!post || !input || !result) return;
+  const key = String(input.value || "").trim();
+  if (!key) { result.textContent = "Informe a chave OpenAI para cadastro local."; return; }
+  result.textContent = "Salvando com segurança…";
+  try {
+    const data = await post("/api/models/key", { provider: "openai", key });
+    result.textContent = data?.ok && data?.configured
+      ? "OPENAI IMAGES: CONFIGURADO"
+      : (data?.error || "OpenAI Images não configurado");
+  } catch (_) {
+    result.textContent = "Falha no cadastro da OpenAI Images.";
+  } finally {
+    input.value = "";
+  }
+}
+async function refreshComputerStatus() {
+  const post = gatewayHttpPost(); const details = $("#computerDetails"); const esc = $("#computerEscStatus"); const taskId = $("#computerTaskId")?.value.trim();
+  if (!post || !details) return;
+  try { const status = await post("/api/jarvis/voice-service/status", {}); esc.textContent = status?.computer_use_esc ? "ENABLED" : "DISABLED"; if (taskId) { const data = await post("/api/jarvis/tasks/get", { task_id: taskId }); details.textContent = JSON.stringify(data?.task || data?.error || data); } else details.textContent = "Informe um task_id para consultar a missão."; const approvals = await post("/api/jarvis/approvals/list", {}); $("#computerApprovals").textContent = JSON.stringify(approvals?.approvals || approvals?.error || []); }
+  catch (error) { details.textContent = String(error.message || error); }
+}
+async function refreshJarvisExperienceStrip() {
+  const post = gatewayHttpPost(); if (!post) return;
+  try {
+    const voice = await post("/api/jarvis/voice-service/status", {});
+    const liveConnected = voice?.conversation_profile?.gemini_live_connected === true;
+    $("#jarvisExperienceVoice").textContent = liveConnected ? "GEMINI LIVE · ENABLED" : "GEMINI LIVE · AGUARDANDO";
+    $("#jarvisExperiencePersona").textContent = String(voice?.conversation_profile?.personality_label || settings.persona || "Equilibrado").toUpperCase();
+    $("#jarvisExperienceComputer").textContent = voice?.computer_use_esc ? "ESC ENABLED" : "ESC DISABLED";
+    const mics = await post("/api/jarvis/voice-service/microphones", {});
+    $("#jarvisExperienceMic").textContent = mics?.ok ? `${(mics.microphones || []).length} ENDPOINT(S)` : "ERROR";
+    const wa = await post("/api/jarvis/whatsapp/status", {});
+    $("#jarvisExperienceWhatsapp").textContent = wa?.state || "PENDING_CONFIGURATION";
+  } catch (_) { /* status strip remains conservative */ }
+}
+async function computerAction(path) { const post = gatewayHttpPost(); const taskId = $("#computerTaskId")?.value.trim(); if (!post || !taskId) return; await post(path, { task_id: taskId }).catch(() => {}); await refreshComputerStatus(); }
+
+async function refreshMicrophoneList() {
+  const select = $("#microphoneSelect");
+  const result = $("#microphoneResult");
+  if (!select || !result) return;
+  const post = gatewayHttpPost();
+  if (!post) { result.textContent = "Gateway indisponível"; return; }
+  try {
+    const data = await post("/api/jarvis/voice-service/microphones", {});
+    if (!data?.ok) throw new Error(data?.error || "não foi possível listar");
+    const selected = settings.microphoneId || data.selected_id || "";
+    if (data.selected_id && !settings.microphoneId) { settings.microphoneId = data.selected_id; persist(); }
+    select.innerHTML = `<option value="">Selecione um microfone</option>` +
+      (data.microphones || []).map((mic) => `<option value="${esc(mic.stable_id)}">${esc(mic.name)} · ${esc(mic.host_api)}</option>`).join("");
+    select.value = selected;
+    const selectedLabel = selected ? " · selecionado" : "";
+    result.textContent = `${(data.microphones || []).length} endpoint(s)${selectedLabel}`;
+  } catch (error) {
+    result.textContent = String(error.message || error).slice(0, 100);
+  }
+}
+
+async function probeSelectedMicrophone() {
+  const endpointId = $("#microphoneSelect")?.value || settings.microphoneId || "";
+  const result = $("#microphoneResult");
+  const details = $("#microphoneDetails");
+  const post = gatewayHttpPost();
+  if (!post || !endpointId) { if (result) result.textContent = "Selecione um microfone"; return; }
+  if (result) result.textContent = "Testando...";
+  try {
+    const data = await post("/api/jarvis/voice-service/microphone/probe", { endpoint_id: endpointId });
+    if (!data?.ok) throw new Error(data?.error || "falha no teste");
+    if (result) result.textContent = "Microfone funcionando";
+    if (details) details.textContent = `blocos: ${data.blocks || 0} · RMS: ${data.rms || 0} · clipping: ${data.clipping || 0}`;
+  } catch (error) {
+    if (result) result.textContent = String(error.message || error).slice(0, 100);
+  }
+}
+
+async function calibrateSelectedMicrophone() {
+  const endpointId = $("#microphoneSelect")?.value || settings.microphoneId || "";
+  const result = $("#microphoneResult");
+  const post = gatewayHttpPost();
+  if (!post || !endpointId) { if (result) result.textContent = "Selecione um microfone"; return; }
+  try {
+    const sample = await post("/api/jarvis/voice-service/microphone/probe", { endpoint_id: endpointId });
+    if (!sample?.ok || !(Number(sample.rms) > 0)) throw new Error(sample?.error || "nenhum sinal captado");
+    const data = await post("/api/jarvis/voice-service/microphone/calibrate", {
+      endpoint_id: endpointId, kind: "noise", level: Number(sample.rms),
+    });
+    if (!data?.ok) throw new Error(data?.error || "falha na calibração");
+    if (result) result.textContent = `Ruído salvo · confiança ${(data.thresholds?.confidence || 0).toFixed(2)}`;
+  } catch (error) {
+    if (result) result.textContent = String(error.message || error).slice(0, 100);
+  }
+}
+
 function wireSettings() {
   $("#speakToggle").checked = settings.speak;
   $("#wakeToggle").checked = settings.wake;
@@ -1143,12 +1688,98 @@ function wireSettings() {
   $("#rateRange").oninput = (e) => { settings.rate = parseFloat(e.target.value); $("#rateVal").textContent = settings.rate; voice.setRate(settings.rate); persist(); };
   $("#pitchRange").oninput = (e) => { settings.pitch = parseFloat(e.target.value); $("#pitchVal").textContent = settings.pitch; voice.setPitch(settings.pitch); persist(); };
   $("#voiceSelect").onchange = (e) => { settings.voiceName = e.target.value; voice.setVoice(settings.voiceName); persist(); };
-  $("#testVoiceBtn").onclick = () => {
-    voice.setRate(settings.rate); voice.setPitch(settings.pitch); voice.setVoice(settings.voiceName);
-    voice.speak(`Sistemas de voz calibrados. Bom dia, ${CFG.userName}.`);
-  };
+  const voiceMode = $("#voiceMode");
+  const geminiVoice = $("#geminiVoice");
+  if (voiceMode) { settings.voiceMode = "gemini_live"; voiceMode.value = "gemini_live"; voiceMode.onchange = async () => { settings.voiceMode = "gemini_live"; persist(); const post = gatewayHttpPost(); const desktopControl = window.__JARVIS_DESKTOP_CONTROL__; if (isJarvisDesktop && desktopControl?.setMode) desktopControl.setMode("gemini_live"); else if (post) await post("/api/jarvis/voice-service/profile", { mode: "gemini_live" }).catch(() => {}); $("#geminiVoiceStatus").textContent = "Gemini Live conectando automaticamente"; }; }
+  if (geminiVoice) { geminiVoice.value = settings.geminiVoice; geminiVoice.onchange = async (e) => { settings.geminiVoice = e.target.value.trim() || "Aoede"; persist(); const post = gatewayHttpPost(); const desktopControl = window.__JARVIS_DESKTOP_CONTROL__; if (isJarvisDesktop && desktopControl?.setVoice) desktopControl.setVoice(settings.geminiVoice); else if (post) await post("/api/jarvis/voice-service/profile", { voice: settings.geminiVoice }).catch(() => {}); }; }
+  $("#testVoiceBtn")?.remove();
+  const geminiPreviewStatus = $("#geminiVoicePreviewStatus");
+  const geminiPreviewStop = $("#stopVoicePreviewBtn");
+  const geminiGrantPayload = (extra = {}) => ({
+    ...extra,
+    authorization_token: window.__JARVIS_DESKTOP__ === true
+      ? String(window.__JARVIS_GEMINI_AUTH_TOKEN__ || "") : "",
+  });
+  $("#testGeminiVoiceBtn")?.addEventListener("click", async () => {
+    const post = gatewayHttpPost();
+    if (!post || window.__JARVIS_DESKTOP__ !== true || !window.__JARVIS_GEMINI_AUTH_TOKEN__) {
+      if (geminiPreviewStatus) geminiPreviewStatus.textContent = "Conecte o Gemini Live pelo botão INICIAR GEMINI LIVE; nenhuma conexão foi aberta.";
+      return;
+    }
+    if (geminiPreviewStatus) geminiPreviewStatus.textContent = "Carregando áudio Gemini…";
+    if (geminiPreviewStop) geminiPreviewStop.disabled = false;
+    try {
+      const data = await post("/api/jarvis/voice-service/gemini/preview/start", geminiGrantPayload({
+        text: "Olá! Sou o Jarvis, seu assistente pessoal. Esta é uma demonstração da minha voz.",
+      }));
+      if (!data?.ok) throw new Error(data?.error || data?.detail || "GEMINI_PREVIEW_FAILED");
+      if (geminiPreviewStatus) geminiPreviewStatus.textContent = "Reproduzindo áudio Gemini Live…";
+    } catch (error) {
+      if (geminiPreviewStatus) geminiPreviewStatus.textContent = String(error?.message || error).slice(0, 160);
+      if (geminiPreviewStop) geminiPreviewStop.disabled = true;
+    }
+  });
+  geminiPreviewStop?.addEventListener("click", async () => {
+    const post = gatewayHttpPost();
+    if (!post || !window.__JARVIS_GEMINI_AUTH_TOKEN__) return;
+    await post("/api/jarvis/voice-service/gemini/preview/stop", geminiGrantPayload()).catch(() => {});
+    if (geminiPreviewStatus) geminiPreviewStatus.textContent = "Prévia interrompida.";
+    geminiPreviewStop.disabled = true;
+  });
+  document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
+    tab.onclick = () => {
+      const target = tab.dataset.settingsTab;
+      document.querySelectorAll("[data-settings-tab]").forEach((item) => item.dataset.active = String(item === tab));
+      document.querySelectorAll("[data-settings-panel]").forEach((panel) => { panel.hidden = panel.dataset.settingsPanel !== target; });
+      if (target === "audio") refreshMicrophoneList();
+      if (target === "whatsapp") refreshWhatsappStatus();
+      if (target === "security") refreshVaultStatus();
+      if (target === "computer") refreshComputerStatus();
+    };
+  });
+  $("#refreshWhatsappBtn")?.addEventListener("click", refreshWhatsappStatus);
+  $("#refreshVaultBtn")?.addEventListener("click", refreshVaultStatus);
+  $("#saveGeminiCredentialBtn")?.addEventListener("click", saveGeminiCredential);
+  $("#saveFredCredentialBtn")?.addEventListener("click", saveFredCredential);
+  $("#saveCloudflareCredentialsBtn")?.addEventListener("click", saveCloudflareCredentials);
+  $("#saveOpenAIImageKeyBtn")?.addEventListener("click", saveOpenAIImageKey);
+  $("#settingsGeminiSetupBtn")?.addEventListener("click", () => window.__JARVIS_DESKTOP_CONTROL__?.setup?.());
+  $("#settingsGeminiStartBtn")?.addEventListener("click", () => window.__JARVIS_DESKTOP_CONTROL__?.start?.());
+  $("#settingsGeminiStopBtn")?.addEventListener("click", () => window.__JARVIS_DESKTOP_CONTROL__?.stop?.());
+  $("#computerRefreshBtn")?.addEventListener("click", refreshComputerStatus);
+  $("#computerPauseBtn")?.addEventListener("click", () => computerAction("/api/jarvis/tasks/pause"));
+  $("#computerResumeBtn")?.addEventListener("click", () => computerAction("/api/jarvis/tasks/resume"));
+  $("#computerCancelBtn")?.addEventListener("click", () => computerAction("/api/jarvis/tasks/cancel"));
+  renderPersonaGrid();
+  refreshJarvisExperienceStrip();
+  const micSelect = $("#microphoneSelect");
+  if (micSelect) {
+    micSelect.value = settings.microphoneId || "";
+    micSelect.onchange = async (event) => {
+      settings.microphoneId = event.target.value;
+      persist();
+      const post = gatewayHttpPost();
+      if (!post || !settings.microphoneId) return;
+      try { await post("/api/jarvis/voice-service/microphone/select", { endpoint_id: settings.microphoneId }); }
+      catch (error) { $("#microphoneResult").textContent = String(error.message || error).slice(0, 100); }
+    };
+  }
+  $("#refreshMicrophonesBtn")?.addEventListener("click", refreshMicrophoneList);
+  $("#testMicrophoneBtn")?.addEventListener("click", probeSelectedMicrophone);
+  $("#calibrateMicrophoneBtn")?.addEventListener("click", calibrateSelectedMicrophone);
+  const profileName = $("#profileNameInput");
+  const profileContext = $("#profileContextInput");
+  if (profileName) profileName.value = settings.profileName;
+  if (profileContext) profileContext.value = settings.profileContext;
+  $("#saveProfileBtn")?.addEventListener("click", () => {
+    settings.profileName = String(profileName?.value || CFG.userName).trim().slice(0, 80) || CFG.userName;
+    settings.profileContext = String(profileContext?.value || "").trim().slice(0, 500);
+    persist();
+    toast("PERFIL", "Preferências salvas localmente", "ok");
+  });
   // Gateway adapter: auto-connect, no manual URL config needed
   if (window.Gateway) {
+    window.Gateway.on("authenticated", () => { void refreshVaultStatus(); });
     const resultEl = $("#backendResult");
     if (resultEl) {
       resultEl.textContent = "Gateway detectado — connecte-se via status pill.";
@@ -1824,10 +2455,109 @@ function wireUI() {
   $("#sysName").textContent = CFG.systemName;
   $("#sysSub").textContent = CFG.systemSub;
   $("#inputRow").onsubmit = (e) => { e.preventDefault(); submitCommand(cmdInput.value); };
+  setMicButtonState(false);
+  window.addEventListener("jarvis:gemini-audio-state", (event) => {
+    const active = event?.detail?.active === true;
+    setMicButtonState(active);
+    if (isJarvisDesktop && String(window.__JARVIS_DESKTOP_VOICE_MODE__ || settings.voiceMode || "gemini_live").toLowerCase() === "gemini_live") {
+      applyDesktopVoiceState(active ? "LISTENING" : "OFF");
+    }
+  });
+  window.addEventListener("jarvis:gemini-transcript", (event) => {
+    const detail = event?.detail || {};
+    const sequence = Number(detail.sequence || 0);
+    if (sequence <= 0 || sequence === Number(window.__JARVIS_LAST_GEMINI_TRANSCRIPT__ || 0)) return;
+    window.__JARVIS_LAST_GEMINI_TRANSCRIPT__ = sequence;
+    const input = String(detail.input || "").trim();
+    const output = String(detail.output || "").trim();
+
+    // Explicit voice actions use the same canonical route as typed actions.
+    // Interrupt the tool-free Live turn first so it cannot speak a duplicate
+    // answer, then let submitCommand enforce Gateway authorization/confirmation.
+    const gatewayVoiceRequest = input && (
+      // Canonical live-action routing: isResearchRequest(input) || isComputerUseRequest(input) || isImageRequest(input)
+      isResearchRequest(input) || isComputerUseRequest(input)
+      || isImageRequest(input) || isCodingRequest(input)
+      // Market reads and MCP diagnostics must also leave Gemini Live: Live
+      // has no tool registry, so keeping these turns there would produce a
+      // generic answer (or analyze a negative request as if it were positive).
+      || isMarketAnalysisRequest(input) || isExternalMcpRequest(input)
+    );
+    if (gatewayVoiceRequest) {
+      // Put the recognized request on screen before the cooperative Live
+      // interruption.  A slow/failed interrupt must never hide what the user
+      // actually said or make the chat appear idle.
+      addMessage("user", input, { typing: false });
+      window.__JARVIS_SUPPRESS_GEMINI_TRANSCRIPT_UNTIL__ = Date.now() + 15000;
+      const interrupt = window.__JARVIS_GEMINI_AUDIO_INTERRUPT__;
+      void Promise.resolve(typeof interrupt === "function" ? interrupt() : null)
+        .catch(() => null)
+        .finally(() => { void submitCommand(input, "voz", { skipUserEcho: true }); });
+      return;
+    }
+    if (Number(window.__JARVIS_SUPPRESS_GEMINI_TRANSCRIPT_UNTIL__ || 0) > Date.now()) return;
+    if (input) addMessage("user", input, { typing: false });
+    if (output) addMessage("jarvis", output, { typing: false });
+    // A Live answer is complete when its output transcript arrives. This is
+    // also the completion signal for typed Gemini turns, whose POST only
+    // acknowledges submission and cannot clear the indicator itself.
+    if (output) finishGeminiTurn();
+  });
   micBtn.onclick = async () => {
     if (isJarvisDesktop) {
-      logLine("Microfone Desktop acionado", "ok");
+      const desktopMode = String(window.__JARVIS_DESKTOP_VOICE_MODE__ || settings.voiceMode || "gemini_live").toLowerCase();
+      if (desktopMode === "gemini_live") {
+        if (!window.__JARVIS_GEMINI_AUTH_TOKEN__) {
+          if (Date.now() - Number(window.__JARVIS_LAST_VOICE_NOTICE_AT__ || 0) > 5000) {
+            toast("VOZ", "Gemini Live não está conectado. Use INICIAR GEMINI LIVE; nenhuma captura foi iniciada.", "bad");
+            window.__JARVIS_LAST_VOICE_NOTICE_AT__ = Date.now();
+          }
+          logLine("Gemini Live não conectado — captura não iniciada", "bad");
+          setMicButtonState(false);
+          return;
+        }
+        const toggle = window.__JARVIS_GEMINI_AUDIO_TOGGLE__;
+        if (typeof toggle !== "function") {
+          toast("VOZ", "O controle de áudio Gemini ainda está carregando. Tente novamente.", "bad");
+          logLine("Controle de áudio Gemini indisponível", "bad");
+          setMicButtonState(false);
+          return;
+        }
+        const result = await toggle();
+        // The output bridge may remain active while capture is muted. Only
+        // ``capture_active`` represents the push-to-talk microphone state.
+        const active = result?.audio?.capture_active === true || result?.capture_active === true;
+        setMicButtonState(active);
+        applyDesktopVoiceState(active ? "LISTENING" : "OFF");
+        if (result?.ok === false) {
+          const code = String(result.error || result.error_code || "GEMINI_LIVE_AUDIO_TOGGLE_FAILED");
+          toast("VOZ", friendlyUiError(code), "bad");
+          logLine(`Gemini Live: ${friendlyUiError(code)}`, "bad");
+        } else if (active) {
+          sfx.listenOn();
+          logLine("Microfone Gemini ativo — fale agora", "ok");
+        } else {
+          logLine("Microfone Gemini mudo", "ok");
+        }
+        return;
+      }
+      if (window.__JARVIS_VOICE_PROFILE_BLOCKED__ === true) {
+        if (Date.now() - Number(window.__JARVIS_LAST_VOICE_NOTICE_AT__ || 0) > 5000) {
+          toast("VOZ", "A voz local está bloqueada pelo perfil web-ai-safe. Inicie uma sessão Gemini Live autorizada.", "bad");
+          window.__JARVIS_LAST_VOICE_NOTICE_AT__ = Date.now();
+        }
+        logLine("Voz local bloqueada pelo perfil — captura não iniciada", "bad");
+        return;
+      }
+      if (desktopVoice.isActive()) {
+        const stopped = await desktopVoice.stop();
+        setMicButtonState(false);
+        logLine(stopped ? "Microfone Desktop mudo" : "Falha ao silenciar o microfone Desktop", stopped ? "ok" : "bad");
+        return;
+      }
+      logLine("Microfone Desktop acionado — fale agora", "ok");
       const ok = await desktopVoice.start();
+      setMicButtonState(ok);
       if (ok) sfx.listenOn();
       return;
     }
@@ -1869,7 +2599,21 @@ function wireUI() {
     const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
     if (e.key === "Escape") {
       if (!settingsModal.hidden) return closeSettings();
-      voice.stopSpeaking(); voice.stop(); setState("idle"); return;
+      voice.stopSpeaking(); voice.stop();
+      if (isJarvisDesktop) {
+      const desktopMode = String(window.__JARVIS_DESKTOP_VOICE_MODE__ || settings.voiceMode || "gemini_live").toLowerCase();
+        if (desktopMode === "gemini_live" && typeof window.__JARVIS_GEMINI_AUDIO_INTERRUPT__ === "function") {
+          // ESC is an interruption command, not a microphone toggle.  The
+          // Desktop helper stops any active capture and cancels the current
+          // Gemini output generation through the authorized VoiceService
+          // endpoint, so audio cannot continue after the operator presses ESC.
+          e.preventDefault();
+          void window.__JARVIS_GEMINI_AUDIO_INTERRUPT__();
+        } else if (desktopMode !== "gemini_live" && desktopVoice?.isActive?.()) {
+          void desktopVoice.stop();
+        }
+      }
+      setMicButtonState(false); setState("idle"); return;
     }
     if (typing) return;
     if (e.key === " ") { e.preventDefault(); micBtn.click(); }
