@@ -1,12 +1,16 @@
 # Golden JARVIS Desktop — pacote local do Painel
 
-## Pacote corrigido
+## Pacote recomendado
 
-Use `GoldenJarvisLocalPanel-20261108-corrigido.zip`. Esta revisão inclui os
-dois módulos que o Core importa durante a inicialização:
-`jarvis_core/xauusd_opportunity_catalog.py` e `jarvis_core/robot_catalog.py`.
-O ZIP `GoldenJarvisLocalPanel-20261108.zip` foi preservado como histórico,
-mas não deve ser usado para uma instalação nova.
+Use `GoldenJarvisLocalPanel-20261108-completo.zip`. Ele contém o código,
+configuração não sensível, UI, assets e documentação do projeto local, além
+do Desktop compatível. Inclui os módulos que o Core importa durante a
+inicialização: `jarvis_core/xauusd_opportunity_catalog.py` e
+`jarvis_core/robot_catalog.py`.
+
+`GoldenJarvisLocalPanel-20261108-corrigido.zip` e
+`GoldenJarvisLocalPanel-20261108.zip` foram preservados como históricos e não
+devem ser usados para uma instalação nova.
 
 Este pacote é um snapshot somente leitura da versão que estava rodando em
 08/11/2026. O `Jarvis.exe` em `Desktop/Jarvis` é o mesmo binário que estava
@@ -16,20 +20,20 @@ embutir o HTML atual.
 ## Conteúdo
 
 - `Desktop/Jarvis/`: aplicativo Windows PyInstaller ONEDIR, pronto para abrir.
-- `Source/GoldenAI/`: Core, UI e suporte da mesma árvore local. Extraia esta
-  pasta como `C:\GoldenAI` no novo computador, pois o `server_agent.py` usa
-  esse caminho canônico.
+- `Source/GoldenAI/`: snapshot completo e sanitizado da árvore local. Extraia
+  esta pasta como `C:\GoldenAI` no novo computador, pois o `server_agent.py`
+  usa esse caminho canônico.
 - `Audit/VERSION_MANIFEST.md`: identificação, hashes, Git e alterações locais.
 
 O pacote não contém `.env`, `config/api_keys.json`, chaves/tokens, credenciais
-do MetaTrader, `certs/`, bancos SQLite, logs, `device_registry` ou relatórios
-privados da Arena. Também não contém os artefatos MQL5. O Painel continua
-somente leitura/simulação com `execution_authority=NONE`.
+do MetaTrader, certificados privados, bancos SQLite, logs, históricos,
+conversas/memória, anexos, backups ou caches. O Painel continua somente
+leitura/simulação com `execution_authority=NONE`.
 
 ## Instalação em outro Windows
 
 1. Extraia o ZIP em uma pasta temporária, por exemplo
-   `C:\GoldenJarvisLocalPanel-20261108`.
+   `C:\GoldenJarvisLocalPanel-20261108-completo`.
 2. Em uma máquina nova (ou em uma instalação separada), copie
    `Source\GoldenAI` para `C:\GoldenAI`. Não sobreponha um GoldenAI existente
    sem fazer backup e sem aprovação.
@@ -78,7 +82,7 @@ $env:JARVIS_MCP_AUTOSTART='0'
 Em outra janela, abra com duplo clique:
 
 ```text
-C:\GoldenJarvisLocalPanel-20261108\Desktop\Jarvis\Jarvis.exe
+C:\GoldenJarvisLocalPanel-20261108-completo\Desktop\Jarvis\Jarvis.exe
 ```
 
 O perfil `web-ai-safe` habilita apenas leitura de mercado quando disponível e
