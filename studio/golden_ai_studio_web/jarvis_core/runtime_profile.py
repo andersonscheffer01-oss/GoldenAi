@@ -6,7 +6,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class RuntimeProfile:
-    """Runtime capabilities; the default preserves the historical startup."""
+    """Runtime capabilities; default keeps operations enabled and reads markets."""
 
     name: str
     web_enabled: bool = True
@@ -104,13 +104,17 @@ class RuntimeProfile:
         return ""
 
 
-DEFAULT_PROFILE = RuntimeProfile(name="default")
+DEFAULT_PROFILE = RuntimeProfile(
+    name="default", market_data_read_enabled=True,
+    mt5_market_data_read_enabled=True)
 WEB_AI_SAFE_PROFILE = RuntimeProfile(
     name="web-ai-safe",
     market_data_read_enabled=True,
     mt5_market_data_read_enabled=True,
     mt5_enabled=False,
-    voice_enabled=False,
+    # Conversation audio is allowed in the safe profile; it has no bearing on
+    # market mutation, order authority, or the legacy MT5 connector.
+    voice_enabled=True,
     trading_enabled=False,
     strategy_tester_enabled=False,
     mql5_compile_enabled=False,
@@ -145,3 +149,4 @@ def set_active_runtime_profile(value: Any = None) -> RuntimeProfile:
 
 def active_runtime_profile() -> RuntimeProfile:
     return _ACTIVE_PROFILE
+

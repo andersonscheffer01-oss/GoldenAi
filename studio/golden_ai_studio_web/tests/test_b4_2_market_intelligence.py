@@ -174,6 +174,57 @@ def test_panel_analysis_does_not_call_model_without_real_candles(tmp_path):
         set_active_runtime_profile(DEFAULT_PROFILE)
 
 
+def test_panel_analysis_calls_model_with_valid_candles_when_temporal_authority_is_unknown(tmp_path):
+    service = JarvisService(str(tmp_path), runtime_profile=WEB_AI_SAFE_PROFILE)
+    try:
+        candles = [{"time": 1791028800 + index * 900,
+                    "open": 2300.0 + index, "high": 2301.0 + index,
+                    "low": 2299.0 + index, "close": 2300.5 + index}
+                   for index in range(50)]
+        frame = {
+            "status": "AVAILABLE", "freshness": "UNKNOWN", "candle_count": 50,
+            "candles": candles, "raw_timestamp_end": candles[-1]["time"],
+            "snapshot_id": "snapshot-temporal-unknown", "requested_candle_count": 50,
+            "coverage_ratio": 1.0, "history_complete": True,
+            "coverage_range": {}, "observed_gap_count": 0,
+            "estimated_missing_intervals": 0, "analysis_history_sufficient": True,
+        }
+        evidence = {
+            "symbol": "XAUUSD", "quote": {"bid": 2300.0, "ask": 2301.0},
+            "instrument": {"symbol": "XAUUSD"}, "timeframes": {"M15": frame},
+            "source_availability": {"M15": {"status": "AVAILABLE", "freshness": "UNKNOWN"}},
+            "temporal": {"DATA_RECENCY_OBSERVED": "UNKNOWN",
+                         "ABSOLUTE_UTC_VERIFIED": "UNKNOWN",
+                         "TEMPORAL_RESTRICTION": True},
+            "provenance": {"snapshot_ids": {"M15": "snapshot-temporal-unknown"},
+                           "observed_at": "2026-11-07T00:00:00+00:00"},
+            "macro": {"status": "UNAVAILABLE", "freshness": "UNKNOWN", "facts": []},
+            "economic_events": {"status": "UNAVAILABLE", "freshness": "UNKNOWN", "facts": []},
+            "news": {"status": "UNAVAILABLE", "freshness": "UNKNOWN", "facts": []},
+        }
+        service._collect_panel_market_evidence = lambda *_args: evidence
+        service.golden_bridge.panel_macro_news = lambda *_args: {"data": {}}
+        model_calls = []
+
+        def model_response(*args, **kwargs):
+            model_calls.append((args, kwargs))
+            return {"ok": False, "provider": "codex", "model": "codex-market",
+                    "error": "fixture provider unavailable"}
+
+        service.generate_response = model_response
+        result = service.golden_panel_analysis(
+            "XAUUSD", "M15", "corr-temporal-unknown", "MT5", "mt5:XAUUSD",
+            "XAUUSD", "METALS")
+
+        assert model_calls
+        assert result["execution_authority"] == "NONE"
+        assert result["order_sent"] is False
+        assert result["position_mutated"] is False
+    finally:
+        service.close()
+        set_active_runtime_profile(DEFAULT_PROFILE)
+
+
 @pytest.mark.parametrize(("router_mode", "analysis_case"), [
     ("success", "baseline"),
     ("success", "direction_down"),
@@ -996,13 +1047,13 @@ def test_market_data_connection_never_initializes_when_approved_terminal_is_abse
     try:
         mt5, terminal, reason = market_readonly._market_data_connection()
         assert mt5 is None and terminal is None
-        assert reason == "APPROVED_TERMINAL_NOT_RUNNING"
+        assert reason == "NO_OPEN_MT5_TERMINAL"
         assert initialize_calls == []
     finally:
         set_active_runtime_profile(DEFAULT_PROFILE)
 
 
-def test_market_data_connection_rejects_wrong_terminal_data_root(monkeypatch):
+def test_market_data_connection_accepts_open_terminal_without_fixed_data_root(monkeypatch):
     import sys
     from pathlib import Path
     from types import SimpleNamespace
@@ -1015,15 +1066,17 @@ def test_market_data_connection_rejects_wrong_terminal_data_root(monkeypatch):
         info={"name": "terminal64.exe", "exe": approved_exe})
     initialize_calls = []
     monkeypatch.setattr(psutil, "process_iter", lambda _attrs: [process])
-    monkeypatch.setitem(sys.modules, "MetaTrader5", SimpleNamespace(
+    fake_mt5 = SimpleNamespace(
         initialize=lambda **_kwargs: initialize_calls.append(True) or True,
         terminal_info=lambda: SimpleNamespace(connected=True,
-            data_path=str(Path.home() / "MetaQuotes" / "Terminal" / "WRONG_ROOT"))))
+            data_path=str(Path.home() / "MetaQuotes" / "Terminal" / "WRONG_ROOT")),
+        account_info=lambda: SimpleNamespace(server="HantecMarkets-Demo"))
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake_mt5)
     set_active_runtime_profile(WEB_AI_SAFE_PROFILE)
     try:
         mt5, terminal, reason = market_readonly._market_data_connection()
-        assert mt5 is None and terminal is not None
-        assert reason == "APPROVED_DATA_ROOT_MISMATCH"
+        assert mt5 is fake_mt5 and terminal is not None
+        assert reason == ""
         assert initialize_calls == [True]
     finally:
         set_active_runtime_profile(DEFAULT_PROFILE)
@@ -1154,6 +1207,7 @@ def test_mt5_live_update_reads_only_one_forming_candle_and_current_tick(monkeypa
     assert result["provider"] == "MT5"
     assert result["quote"]["bid"] == 100.0
     assert result["quote"]["ask"] == 101.0
+    assert result["snapshot_id"].startswith("market_update_")
     assert result["quote"]["time"] == now
     assert result["quote"]["time_epoch"] == now
     assert result["quote"]["time_msc"] == now * 1000 + 456
@@ -1274,3 +1328,4 @@ def test_mt5_bitcoin_analysis_rejects_stale_snapshot_without_model_call(tmp_path
     finally:
         service.close()
         set_active_runtime_profile(DEFAULT_PROFILE)
+

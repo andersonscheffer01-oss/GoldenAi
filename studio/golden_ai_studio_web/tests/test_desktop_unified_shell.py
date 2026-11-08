@@ -22,8 +22,8 @@ def test_desktop_shell_is_gated_to_canonical_desktop_runtime():
     assert 'window.__JARVIS_DESKTOP__ === true' in source
     assert 'src="src/desktop-shell.js' in html
     assert 'href="src/desktop-shell.css' in html
-    assert 'desktop-shell.js?v=20261007-market-score-detail-1' in html
-    assert 'desktop-shell.css?v=20261007-market-score-detail-1' in html
+    assert 'desktop-shell.js?v=20261108-golden-arena-1' in html
+    assert 'desktop-shell.css?v=20261108-golden-arena-1' in html
     assert "desktop-identity" not in source.lower()
     assert "jarvis_device_token" not in source
 
@@ -70,7 +70,7 @@ def test_core_agent_state_uses_authenticated_gateway_read_model():
     assert 'AGENT STATE: UNKNOWN' in source
     assert 'window.Gateway?.on("authenticated", updateCoreState)' in source
     assert 'id="d2CoreState"' in html
-    assert 'src="src/desktop-shell.js?v=20261007-market-score-detail-1"' in html
+    assert 'src="src/desktop-shell.js?v=20261108-golden-arena-1"' in html
     assert source.index('if (!window.Gateway?.isAuthenticated)') < source.index('window.Gateway.httpGet("/api/desktop/status")')
     assert 'gatewayStatus?.dataset.state' not in source
     assert source.count('searchPanelAssets("")') == 1
@@ -94,6 +94,17 @@ def test_operations_controls_are_disabled_and_have_no_trade_handlers():
     assert "/api/jarvis/golden/panel-analysis" in source
     assert "/api/market/" not in source
     assert "httpPost" in source
+    assert "order_send" not in source.lower()
+
+
+def test_operations_view_reads_canonical_mt5_snapshot_without_mutation():
+    source = SHELL_JS.read_text(encoding="utf-8")
+    assert "loadCanonicalOperations" in source
+    assert 'window.Gateway.httpPost("/api/jarvis/golden/overview"' in source
+    assert "include_live: true" in source
+    assert 'execution_authority === "NONE"' in source
+    assert "data-operations-positions" in HTML.read_text(encoding="utf-8")
+    assert "data-operations-orders" in HTML.read_text(encoding="utf-8")
     assert "order_send" not in source.lower()
 
 
@@ -306,3 +317,4 @@ def test_desktop_refuses_to_reuse_a_gateway_with_another_profile():
         return_value=response,
     ):
         assert launcher.probe(HTTPS_HEALTH_URL) is False
+

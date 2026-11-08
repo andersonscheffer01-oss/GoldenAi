@@ -31,6 +31,7 @@ class ModelProfile(str, Enum):
     FAST = "FAST"
     VOICE_FAST = "VOICE_FAST"
     GENERAL = "GENERAL"
+    MARKET = "MARKET"
     DEEP = "DEEP"
     CODING = "CODING"
     VISION = "VISION"
@@ -111,3 +112,4 @@ class ProviderResult:
     generation_ms: int = 0
     attempts: tuple[dict[str, Any], ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
+

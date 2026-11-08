@@ -9,7 +9,7 @@ import urllib.request
 
 from ..config import resolve_api_key
 from .model_router import ProviderAdapter
-from .models import ProviderState
+from .models import ModelProfile, ProviderState
 
 
 class ProviderCallError(RuntimeError):
@@ -223,6 +223,47 @@ def _raise_text_error(value):
                             error_code="PROVIDER_OR_INTEGRATION_FAILURE")
 
 
+def build_codex_adapter(provider=None):
+    """Build the local Codex market adapter with a read-only contract."""
+    if provider is None:
+        from codex_provider import codex_available, get_codex_provider
+        if not codex_available():
+            return None
+        provider = get_codex_provider()
+    chat = getattr(provider, "chat", None)
+    if not callable(chat):
+        return None
+    chat_signature = _accepts_timeout(chat)
+
+    def codex(payload, model, timeout):
+        value = (chat(payload, model=model, timeout=timeout)
+                 if chat_signature else chat(payload, model=model))
+        if not isinstance(value, dict):
+            raise ProviderCallError("Codex retornou formato inesperado.")
+        if value.get("error"):
+            raise ProviderCallError(str(value["error"])[:500])
+        text = value.get("text") or value.get("content") or ""
+        if not isinstance(text, str) or not text.strip():
+            raise ProviderCallError("Codex retornou resposta vazia.")
+        metadata = dict(value.get("metadata") or {})
+        metadata.update({"provider": "codex", "read_only": True,
+                         "execution_authority": "NONE"})
+        return {"text": text, "metadata": metadata}
+
+    return ProviderAdapter(
+        "codex", codex, cloud=False,
+        supported_profiles=frozenset({ModelProfile.MARKET}))
+
+
+def register_codex_adapter(model_router):
+    """Register Codex lazily without probing or changing other profiles."""
+    if "codex" not in model_router.providers:
+        adapter = build_codex_adapter()
+        if adapter is not None:
+            model_router.register_provider(adapter)
+    return model_router
+
+
 def build_real_adapters(groq_call=None, gemini_call=None):
     adapters = []
     if groq_call:
@@ -262,6 +303,12 @@ def build_real_adapters(groq_call=None, gemini_call=None):
             response = chat(model=model, messages=payload, stream=False)
             return response.get("message", {}).get("content", "")
         adapters.append(ProviderAdapter("ollama", ollama, cloud=False))
+    except Exception:
+        pass
+    try:
+        adapter = build_codex_adapter()
+        if adapter is not None:
+            adapters.append(adapter)
     except Exception:
         pass
     return adapters
@@ -307,3 +354,4 @@ def register_real_adapters(model_router, groq_call=None, gemini_call=None,
     if provider is not None:
         model_router.register_provider(provider.as_adapter())
     return model_router
+

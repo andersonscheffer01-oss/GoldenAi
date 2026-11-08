@@ -330,6 +330,8 @@ class JarvisService:
             providers.append(item)
 
         preferred_provider, preferred_model = DEFAULT_MODELS[ModelProfile.GENERAL]
+        market_provider, market_model = DEFAULT_MODELS[ModelProfile.MARKET]
+        market_item = next((item for item in providers if item["name"] == market_provider), {})
         active = next((item for item in providers if item["status"] == "ONLINE"), None)
         research_status = {"provider": "", "status": "NOT_CONFIGURED", "configured": False,
                            "last_success": 0.0, "last_error": "", "latency_ms": None,
@@ -388,6 +390,12 @@ class JarvisService:
                                      PROVIDER_MODELS.get(active["name"], {}).get(ModelProfile.GENERAL, "")) if active else "",
                     "preferred_provider": str(preferred_provider),
                     "preferred_model": preferred_model},
+            "market_analysis": {
+                "preferred_provider": str(market_provider),
+                "preferred_model": market_model,
+                "configured": bool(market_item.get("configured")),
+                "status": market_item.get("status", "NOT_CONFIGURED"),
+            },
             "local_ai": next((item for item in providers if item["name"] == "ollama"),
                               {"name": "ollama", "status": "NOT_CONFIGURED"}),
             "research": research_status,
@@ -1171,6 +1179,8 @@ class JarvisService:
         audit_context = dict(audit_context or {})
         request_id = str(audit_context.get("request_id") or uuid.uuid4().hex)
         surface = str(surface or "main").strip().lower()[:40] or "main"
+        market_read_only = (isinstance(market_context, dict)
+                            and market_context.get("surface") == "market")
         conversation_id = str(conversation_id or f"{surface}-default").strip()[:160]
         message = str(message or "").strip()
         if not message:
@@ -1218,7 +1228,9 @@ class JarvisService:
                       "correlation_id": audit_context.get("correlation_id", request_id),
                       "conversation_id": conversation_id,
                       "surface": surface, "operation": "canonical_ai_response",
-                      "action": "CANONICAL_AI_RESPONSE", "status": audit_status})
+                      "action": "CANONICAL_AI_RESPONSE", "status": audit_status,
+                      **({"read_only": True, "execution_authority": "NONE"}
+                         if market_read_only else {})})
         if record_conversation:
             self._record_conversation_turn(conversation_id, message, canonical)
         return {
@@ -1238,6 +1250,8 @@ class JarvisService:
                                if isinstance(market_context, dict) else "UNKNOWN"},
             "routing_metadata": canonical.get("routing_metadata", {}),
             "response_id": canonical.get("response_id", request_id),
+            **({"read_only": True, "execution_authority": "NONE"}
+               if market_read_only else {}),
         }
 
     def stream_response(self, message, surface="main", conversation_id="",
@@ -1251,6 +1265,8 @@ class JarvisService:
         request_id = str(audit_context.get("request_id") or uuid.uuid4().hex)
         correlation_id = str(audit_context.get("correlation_id") or request_id)
         surface = str(surface or "main").strip().lower()[:40] or "main"
+        market_read_only = (isinstance(market_context, dict)
+                            and market_context.get("surface") == "market")
         conversation_id = str(conversation_id or f"{surface}-default").strip()[:160]
         message = str(message or "").strip()
         if not message:
@@ -1278,6 +1294,8 @@ class JarvisService:
             "conversation_id": conversation_id,
             "surface": surface,
             "operation": "canonical_ai_stream",
+            **({"read_only": True, "execution_authority": "NONE"}
+               if market_read_only else {}),
         }
         self.audit.add(
             task_id=conversation_id, command="canonical_ai_stream",
@@ -1341,7 +1359,9 @@ class JarvisService:
                               "response": response, "provider": provider,
                               "model": model, "conversation_id": conversation_id,
                               "surface": surface, "stream": True,
-                              "response_id": request_id}
+                              "response_id": request_id,
+                              **({"read_only": True, "execution_authority": "NONE"}
+                                 if market_read_only else {})}
                     self._record_conversation_turn(conversation_id, message, result)
                     elapsed = int((time.perf_counter() - started) * 1000)
                     self.audit.add(
@@ -1359,7 +1379,9 @@ class JarvisService:
                            "request_id": request_id,
                            "correlation_id": correlation_id,
                            "conversation_id": conversation_id,
-                           "surface": surface}
+                           "surface": surface,
+                           **({"read_only": True, "execution_authority": "NONE"}
+                              if market_read_only else {})}
                     continue
                 elif kind == "cancelled":
                     self.audit.add(
@@ -1971,7 +1993,8 @@ class JarvisService:
             self._panel_analysis_lock = lock
         if not lock.acquire(blocking=False):
             return {"ok": False, "status": "ANALYSIS_ALREADY_RUNNING",
-                    "execution_authority": "NONE", "live_authorized": False}
+                    "execution_authority": "NONE", "read_only": True,
+                    "live_authorized": False}
         try:
             return self._golden_panel_analysis_once(
                 symbol, timeframe, correlation_id, provider, provider_asset_id,
@@ -2005,7 +2028,8 @@ class JarvisService:
             "opportunities": [], "opportunity_status": "NOT_EVALUATED",
             "signal_status": "NOT_CONFIRMED", "execution_status": "NOT_EXECUTED",
             "reason_code": reason, "summary": reason,
-            "execution_authority": "NONE", "live_authorized": False,
+            "execution_authority": "NONE", "read_only": True,
+            "live_authorized": False,
             "order_sent": False, "position_mutated": False,
             "temporal_authority": "UNKNOWN",
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -2060,14 +2084,18 @@ class JarvisService:
         try:
             record = self.golden_analysis_repository.get(analysis_id)
         except ValueError as exc:
-            return {"ok": False, "status": "INVALID_REQUEST", "error_code": str(exc)}
+            return {"ok": False, "status": "INVALID_REQUEST", "error_code": str(exc),
+                    "read_only": True, "execution_authority": "NONE"}
         except Exception:
             return {"ok": False, "status": "UNAVAILABLE",
-                    "error_code": "ANALYSIS_STORE_READ_FAILED"}
+                    "error_code": "ANALYSIS_STORE_READ_FAILED",
+                    "read_only": True, "execution_authority": "NONE"}
         if record is None:
             return {"ok": True, "status": "NOT_FOUND", "found": False,
+                    "read_only": True, "execution_authority": "NONE",
                     "message": "Análise não encontrada."}
         return {"ok": True, "status": "FOUND", "found": True,
+                "read_only": True, "execution_authority": "NONE",
                 "analysis": record["analysis"],
                 "record": {key: value for key, value in record.items()
                            if key != "analysis"},
@@ -2080,11 +2108,14 @@ class JarvisService:
                 symbol=symbol, analysis_mode=analysis_mode, date_from=date_from,
                 date_to=date_to, status=status, limit=limit, offset=offset)
         except ValueError as exc:
-            return {"ok": False, "status": "INVALID_REQUEST", "error_code": str(exc)}
+            return {"ok": False, "status": "INVALID_REQUEST", "error_code": str(exc),
+                    "read_only": True, "execution_authority": "NONE"}
         except Exception:
             return {"ok": False, "status": "UNAVAILABLE",
-                    "error_code": "ANALYSIS_STORE_READ_FAILED"}
+                    "error_code": "ANALYSIS_STORE_READ_FAILED",
+                    "read_only": True, "execution_authority": "NONE"}
         return {"ok": True, "status": "AVAILABLE" if page["items"] else "EMPTY",
+                "read_only": True, "execution_authority": "NONE",
                 "data": page, "message": "Histórico GoldenAI consultado."}
 
     def _golden_panel_analysis_once(self, symbol="", timeframe="M15", correlation_id="",
@@ -2241,6 +2272,7 @@ class JarvisService:
             "snapshot_id": snapshot.get("snapshot_id", ""),
             "correlation_id": correlation_id,
             "execution_authority": "NONE",
+            "read_only": True,
             "live_authorized": False,
             "order_sent": False,
             "position_mutated": False,
@@ -2302,12 +2334,12 @@ class JarvisService:
             result_base.update({"status": "STALE",
                                 "summary": "Dados técnicos desatualizados; análise interrompida."})
             return finish(result_base)
-        if not snapshot.get("ok") or not technical_ok or not recency_observed:
+        if not snapshot.get("ok") or not technical_ok:
             result_base.update({"status": "INSUFFICIENT_DATA",
-                                "summary": "Candles suficientes com recência observada indisponíveis; ModelRouter não foi chamado.",
-                                "limitations": ["Dados técnicos ausentes ou sem recência observada.",
+                                "summary": "Candles técnicos suficientes indisponíveis; ModelRouter não foi chamado.",
+                                "limitations": ["Dados técnicos ausentes ou insuficientes.",
                                                 "Autoridade UTC absoluta permanece UNKNOWN."],
-                                "risk_warnings": ["Nenhuma conclusão foi gerada.",
+                                "risk_warnings": ["Nenhuma conclusão foi gerada por falta de dados técnicos suficientes.",
                                                   "LIVE NÃO AUTORIZADO."],
                                 "risks": ["Nenhuma conclusão foi gerada.",
                                           "LIVE NÃO AUTORIZADO."]})
@@ -2356,7 +2388,7 @@ class JarvisService:
                            "operation": "golden_panel_analysis",
                            "execution_authority": "NONE"},
             include_memory_context=False, record_conversation=False,
-            one_shot=True)
+            one_shot=False)
         model_provider = str(response.get("provider") or "NONE")
         model_name = str(response.get("model") or "NONE")
         if not response.get("ok"):
@@ -4909,3 +4941,4 @@ class JarvisService:
              "$wsh.SendKeys('%{TAB}')"],
             capture_output=True, timeout=5)
         return {"ok": True, "message": "Alternando janela..."}
+

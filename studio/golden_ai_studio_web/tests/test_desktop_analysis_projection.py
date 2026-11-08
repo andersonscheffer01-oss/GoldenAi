@@ -72,6 +72,7 @@ const context = {
       analysisView: analysis, selectedPanelAsset: asset, selectedTimeframe:'M15', selectedAnalysisMode:'INDEPENDENT',
   selectedIdentityValidated:true,
   latestPanelAnalysis:{asset, timeframe:'M15', mode:'INDEPENDENT', result},
+  panelMarketSnapshot:{snapshot_id:'snap-btc-1'},
   panelAnalysisRunning:false, analysisStatus:new Node(),
   document:{createElement:() => new Node()},
 };
@@ -86,6 +87,11 @@ if (analysis.lists['.d2CriteriaList em'].some(item => ['VALIDADO', 'SELL', 'BUY'
 if (!quality.textContent.includes('EXECUTION_AUTHORITY NONE')) throw new Error('execution authority not preserved');
 if (!scan.removed || !choices.children[0].textContent.includes('BTCUSD') || !choices.children[0].textContent.includes('M15')) throw new Error('independent controls remain');
 if (JSON.stringify(analysis).includes('8.5')) throw new Error('strategy score leaked into analysis');
+
+context.panelMarketSnapshot = {snapshot_id:'snap-btc-2'};
+vm.runInNewContext(process.argv[1] + '; renderAnalysisProjection();', context);
+if (!status.textContent.includes('NO_ANALYSIS') || analysis.dataset.snapshotId !== '') throw new Error('stale snapshot analysis was displayed');
+context.panelMarketSnapshot = {snapshot_id:'snap-btc-1'};
 
 context.latestPanelAnalysis = {asset:{...asset, provider_symbol:'XAUUSD', provider_asset_id:'mt5:XAUUSD'}, timeframe:'M15', mode:'INDEPENDENT', result:{...result, provider_symbol:'XAUUSD', provider_asset_id:'mt5:XAUUSD'}};
 vm.runInNewContext(process.argv[1] + '; renderAnalysisProjection();', context);
@@ -150,6 +156,78 @@ if (context.latestPanelAnalysis.result.directional_bias !== undefined || context
 if (!analysisStatus.textContent.includes('PROVIDER_HTTP_FAILURE_HTTP_503') || analysisStatus.dataset.state !== 'ERROR') throw new Error('sanitized error not shown');
 if (summary.textContent !== 'A análise falhou. Nenhuma conclusão foi produzida.') throw new Error('unsafe/provider body displayed');
 if (projectionCalls !== 1) throw new Error('error state projection missing');
+"""
+    completed = subprocess.run(
+        [node, "-e", harness, renderer], capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+def test_analysis_result_is_rejected_when_panel_snapshot_changed():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js não disponível para o teste de snapshot stale")
+
+    source = SHELL.read_text(encoding="utf-8")
+    start = source.index("  function renderPanelAnalysis(")
+    end = source.index("\n  const observer", start)
+    renderer = source[start:end]
+    harness = r"""
+const vm = require('node:vm');
+const asset = {provider:'MT5', provider_asset_id:'mt5:XAUUSD', provider_symbol:'XAUUSD'};
+const summary = {textContent:''};
+const field = () => ({textContent:''});
+let invalidated = '';
+const context = {
+  panel:{querySelector:() => field(), querySelectorAll:() => []}, analysisStatus:{textContent:'', dataset:{}},
+  selectedAssetHeading:null,
+  selectedTimeframe:'M15', selectedAnalysisMode:'INDEPENDENT', selectedPanelAsset:asset,
+  panelMarketSnapshot:{snapshot_id:'snap-new'}, latestPanelAnalysis:null,
+  renderAnalysisProjection(){}, rememberPersistedPanelAnalysis(){},
+  invalidatePanelAnalysis(message){ invalidated = message; },
+};
+context.asset = asset;
+context.stale = {status:'PARTIAL', analysis_mode:'INDEPENDENT', provider_asset_id:'mt5:XAUUSD',
+  provider_symbol:'XAUUSD', snapshot_id:'snap-old'};
+vm.runInNewContext(process.argv[1] + '; renderPanelAnalysis({analysis:stale}, asset);', context);
+if (!invalidated.includes('SNAPSHOT')) throw new Error('stale snapshot was accepted');
+if (context.latestPanelAnalysis !== null) throw new Error('stale analysis was retained');
+"""
+    completed = subprocess.run(
+        [node, "-e", harness, renderer], capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+def test_panel_snapshot_update_invalidates_previous_analysis_projection():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js não disponível para o teste de invalidação live")
+
+    source = SHELL.read_text(encoding="utf-8")
+    start = source.index("  function renderMarketSnapshot(")
+    end = source.index("\n  function invalidatePanelAnalysis", start)
+    renderer = source[start:end]
+    harness = r"""
+const vm = require('node:vm');
+let invalidated = '';
+const text = () => ({textContent:''});
+const context = {
+  panelMarketSnapshot:{snapshot_id:'snap-old'}, latestPanelAnalysis:{result:{snapshot_id:'snap-old'}},
+  selectedTimeframe:'M15', chartTitle:text(), chartQuote:text(), chartMeta:text(),
+  chartSource:text(), chartUpdated:text(), chartState:{hidden:false,dataset:{}},
+  analysisStatus:{textContent:'',dataset:{}}, analysisButton:{disabled:false}, selectedAssetHeading:null,
+  drawMarketCandles:() => false, setMarketChartState(){}, syncAnalysisButton(){},
+  invalidatePanelAnalysis(message){ invalidated = message; },
+};
+const snapshot = {snapshot_id:'snap-new', quote:{}, state:{freshness:'UNKNOWN', time_status:'UNKNOWN', temporal_authority:'UNKNOWN'},
+  candles:[], status:'PARTIAL', asset:{provider_symbol:'XAUUSD'}, provenance:{}};
+context.asset = {provider_symbol:'XAUUSD'};
+context.snapshot = snapshot;
+vm.runInNewContext(process.argv[1] + '; renderMarketSnapshot(snapshot, asset);', context);
+if (!invalidated.includes('NOVO SNAPSHOT')) throw new Error('live snapshot did not invalidate analysis');
 """
     completed = subprocess.run(
         [node, "-e", harness, renderer], capture_output=True, text=True,
@@ -424,3 +502,4 @@ globalThis.gateway = new TestGateway();`, context);
         encoding="utf-8", errors="replace", check=False,
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
+

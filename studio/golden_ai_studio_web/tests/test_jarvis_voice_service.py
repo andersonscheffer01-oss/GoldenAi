@@ -200,7 +200,6 @@ class SpeakNowTest(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual("LOCAL_TTS_BLOCKED_BY_GEMINI_MODE", result["error"])
 
-
 class WakeStripTest(unittest.TestCase):
     def test_wake_variants_stripped_only_at_start(self):
         from jarvis_core.voice import JarvisVoice
@@ -322,3 +321,4 @@ class VoiceEventTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

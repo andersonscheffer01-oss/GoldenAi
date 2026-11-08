@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from jarvis_core.models import Risk
 from jarvis_core.orchestrator import CentralOrchestrator
-from jarvis_core.orchestrator.models import Route
+from jarvis_core.orchestrator.models import ModelProfile, Route
 from jarvis_core.registry import ToolRegistry
 from jarvis_core.service import JarvisService
 from jarvis_core.tools import market_readonly as market
@@ -80,6 +80,13 @@ def test_readonly_mt5_adapters_return_structured_connected_state(monkeypatch):
     monkeypatch.setattr(market, "_connection",
                         lambda: (fake, fake.terminal_info(), fake.account, ""))
 
+    connected_reads = [
+        market.mt5_status(), market.mt5_account_info(), market.mt5_positions(),
+        market.mt5_orders(), market.mt5_symbol_tick("XAUUSD"),
+        market.mt5_symbol_info("XAUUSD"),
+    ]
+    assert all(item["read_only"] is True for item in connected_reads)
+    assert all(item["execution_authority"] == "NONE" for item in connected_reads)
     assert market.mt5_status()["status"] == "CONNECTED"
     assert market.mt5_account_info()["account"]["login"] == "***3456"
     assert market.mt5_positions()["count"] == 1
@@ -87,6 +94,8 @@ def test_readonly_mt5_adapters_return_structured_connected_state(monkeypatch):
     assert market.mt5_symbol_tick("XAUUSD")["source"] == "MT5"
     assert market.mt5_symbol_info("XAUUSD")["info"]["digits"] == 2
     candles = market.mt5_recent_candles("XAUUSD", "M5", 999)
+    assert candles["read_only"] is True
+    assert candles["execution_authority"] == "NONE"
     assert candles["count"] == 3
     assert candles["timeframe"] == "M5"
 
@@ -125,6 +134,7 @@ def test_market_analysis_routes_readonly_plan_for_multiple_assets():
         decision = router.decide(query)
         assert decision.route == Route.MARKET_ANALYSIS
         assert decision.intent == "market_analysis"
+        assert decision.preferred_model_profile == ModelProfile.MARKET
         assert len(decision.steps) == 10
         assert decision.steps[2].args["symbol"] == symbol
         assert decision.steps[-1].tool == "web_research"
@@ -190,3 +200,4 @@ def test_market_plan_continues_when_web_is_optional_failure():
     assert result["ok"] is True
     assert len(result["executions"]) == 2
     assert result["executions"][1]["ok"] is False
+

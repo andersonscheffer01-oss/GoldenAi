@@ -23,9 +23,11 @@ def test_registry_is_explicitly_read_only():
     registry = GoldenReadBridge().capability_registry()
     assert {item["capability_id"] for item in registry["capabilities"]} == EXPECTED_CAPABILITIES
     assert registry["count"] == 10
+    assert registry["execution_authority"] == "NONE"
     assert registry["mutation_execution"] == "DISABLED_IN_B1"
     for item in registry["capabilities"]:
         assert item["read_only"] is True
+        assert item["execution_authority"] == "NONE"
         assert item["side_effect_class"] == READ_ONLY
         assert item["mutation_capabilities"]
 
@@ -88,6 +90,30 @@ def test_control_center_default_is_non_live_and_freezes_legacy_paths(monkeypatch
     assert snapshot["voice"]["status"] == "OUT_OF_SCOPE_B1"
 
 
+def test_control_center_live_snapshot_declares_read_only_execution_authority():
+    snapshot = GoldenReadBridge().control_center_snapshot(include_live=False)
+    assert snapshot["read_only"] is True
+    assert snapshot["execution_authority"] == "NONE"
+    assert snapshot["legacy_execution"]["invoked"] is False
+
+
+def test_mt5_read_snapshot_stamps_observation_and_authority(monkeypatch):
+    from jarvis_core.tools import market_readonly
+
+    profile = type("Profile", (), {"mt5_enabled": True})()
+    bridge = GoldenReadBridge(runtime_profile=profile)
+    monkeypatch.setattr(market_readonly, "mt5_status", lambda: {"status": "CONNECTED"})
+    monkeypatch.setattr(market_readonly, "mt5_account_info", lambda: {"status": "CONNECTED"})
+    monkeypatch.setattr(market_readonly, "mt5_positions", lambda: {"status": "CONNECTED", "positions": []})
+    monkeypatch.setattr(market_readonly, "mt5_orders", lambda: {"status": "CONNECTED", "orders": []})
+
+    result = bridge.mt5_read_snapshot()
+
+    assert result["data"]["read_only"] is True
+    assert result["data"]["execution_authority"] == "NONE"
+    assert result["data"]["observed_at"]
+
+
 def test_service_registers_b1_tools_as_read_only(tmp_path):
     service = JarvisService(tmp_path)
     try:
@@ -111,3 +137,4 @@ def test_bridge_source_has_no_execution_or_process_launch_symbols():
     assert "send_order(" not in source
     for forbidden in ("subprocess", "Popen", "os.system", "create_subprocess"):
         assert forbidden not in source
+
