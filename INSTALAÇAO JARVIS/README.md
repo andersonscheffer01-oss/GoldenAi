@@ -1,5 +1,13 @@
 # Golden JARVIS Desktop — pacote local do Painel
 
+## Pacote corrigido
+
+Use `GoldenJarvisLocalPanel-20261108-corrigido.zip`. Esta revisão inclui os
+dois módulos que o Core importa durante a inicialização:
+`jarvis_core/xauusd_opportunity_catalog.py` e `jarvis_core/robot_catalog.py`.
+O ZIP `GoldenJarvisLocalPanel-20261108.zip` foi preservado como histórico,
+mas não deve ser usado para uma instalação nova.
+
 Este pacote é um snapshot somente leitura da versão que estava rodando em
 08/11/2026. O `Jarvis.exe` em `Desktop/Jarvis` é o mesmo binário que estava
 aberto nesta máquina; ele carrega o Painel por HTTPS do Core local, em vez de
