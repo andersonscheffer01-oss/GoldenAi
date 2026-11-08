@@ -1,0 +1,21 @@
+PROVA DO PAINEL — snapshot local 2026-11-08
+
+Runtime observado:
+- Desktop: C:\GoldenAI\studio\golden_ai_studio_web\dist\Jarvis\Jarvis.exe
+- Core: C:\GoldenAI\studio\golden_ai_studio_web\server_agent.py
+- UI carregada: https://127.0.0.1:8765/jarvis_ui/jarvis.html
+- JavaScript servido: /jarvis_ui/src/desktop-shell.js
+
+No código local que alimentou a resposta HTTP, as seções aparecem em:
+- desktop-shell.js:5400 — Análise Profunda do Ativo
+- desktop-shell.js:5409-5410 — Monitoramento contínuo do ativo
+- desktop-shell.js:5414-5415 — Plano condicional monitorado
+
+As mesmas três strings foram encontradas na resposta HTTP 200 do JavaScript
+servido pelo Core em 127.0.0.1:8765. A janela JARVIS em execução também expôs
+essas três seções na árvore de acessibilidade, junto de “PAINEL · LEITURA
+SOMENTE”, “ANÁLISE · SEM EXECUÇÃO” e “Simulação somente; sem envio de ordem.”
+
+O shell HTML antigo ainda contém o texto histórico “GoldenAI — Análise do
+Mercado” em uma área legada; isso não é o título da seção nova. O shell importa
+desktop-shell.js, que é o arquivo que renderiza o Painel atual.
