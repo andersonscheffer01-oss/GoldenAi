@@ -64,7 +64,7 @@ jobs:
           $instructions | Set-Content -LiteralPath (Join-Path $bundle 'INSTALL.txt') -Encoding UTF8
           $hash = Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bundle 'Jarvis\Jarvis.exe')
           "$($hash.Algorithm)  $($hash.Hash)  Jarvis\Jarvis.exe" | Set-Content -LiteralPath (Join-Path $bundle 'SHA256.txt') -Encoding ASCII
-          $zip = Join-Path $env:GITHUB_WORKSPACE ('GoldenJarvisDesktop-ONEDIR-\${{ github.sha }}.zip')
+          $zip = Join-Path $env:GITHUB_WORKSPACE ('GoldenJarvisDesktop-ONEDIR.zip')
           Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $zip -CompressionLevel Fastest
           if (-not (Test-Path -LiteralPath $zip)) {
             throw 'Pacote ZIP não foi criado'
@@ -74,7 +74,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GoldenJarvisDesktop-ONEDIR
-          path: GoldenJarvisDesktop-ONEDIR-\${{ github.sha }}.zip
+          path: GoldenJarvisDesktop-ONEDIR.zip
           if-no-files-found: error
           retention-days: 90
           compression-level: 0
