@@ -12,7 +12,10 @@ import urllib.error
 from pathlib import Path
 from datetime import datetime
 
-ROOT = Path(r"C:\GoldenAI")
+ROOT = Path(
+    os.environ.get("GOLDENAI_ROOT")
+    or Path(__file__).resolve().parents[2]
+).resolve()
 MT5_TERMINAL = Path(r"C:\Users\Anderson\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075")
 SCREENSHOTS_DIR = ROOT / "config" / "chart_screenshots"
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -412,8 +415,7 @@ def analyze_chart_with_ai(image_base64, symbol="XAUUSD", timeframe="M15", provid
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         try:
-            from pathlib import Path as _P
-            config_path = _P(r"C:\GoldenAI\config\api_keys.json")
+            config_path = ROOT / "config" / "api_keys.json"
             if config_path.exists():
                 config = json.loads(config_path.read_text(encoding='utf-8'))
                 api_key = config.get("openrouter_api_key", "")
@@ -703,3 +705,4 @@ if __name__ == "__main__":
     if result.get("analysis"):
         print("\n=== ANÁLISE ===")
         print(result["analysis"][:1000])
+

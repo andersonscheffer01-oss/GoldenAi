@@ -15,6 +15,10 @@ from pathlib import Path
 # ============================================================
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+PROJECT_ROOT = Path(
+    os.environ.get("GOLDENAI_ROOT")
+    or Path(__file__).resolve().parents[2]
+).resolve()
 
 # Modelos disponíveis
 CLAUDE_MODELS = {
@@ -105,14 +109,9 @@ class ClaudeProvider:
     
     def _config_path(self):
         """Retorna o path do arquivo de configuração (relativo ao projeto)"""
-        # Tenta encontrar a raiz do projeto
-        for candidate in [Path(r"C:\GoldenAI\config\api_keys.json"), Path(__file__).parent.parent.parent / "config" / "api_keys.json"]:
-            try:
-                candidate.parent.mkdir(parents=True, exist_ok=True)
-                return candidate
-            except:
-                continue
-        return Path(r"C:\GoldenAI\config\api_keys.json")
+        candidate = PROJECT_ROOT / "config" / "api_keys.json"
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        return candidate
     
     def set_api_key(self, key):
         """Define e salva a API key em arquivo para persistência"""
@@ -259,3 +258,4 @@ claude_provider.load_api_key()
 def get_claude_provider():
     """Retorna o provider Claude"""
     return claude_provider
+

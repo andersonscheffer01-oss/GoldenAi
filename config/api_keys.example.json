@@ -1,0 +1,15 @@
+{
+  "gemini_api_key": "",
+  "openrouter_api_key": "",
+  "openrouter_key": "",
+  "groq_api_key": "",
+  "cline_api_key": "",
+  "cline_key": "",
+  "tavily_api_key": "",
+  "brave_search_api_key": "",
+  "elevenlabs_api_key": "",
+  "twelve_data_api_key": "",
+  "omniroute_api_key": "",
+  "gateway_token": ""
+}
+
