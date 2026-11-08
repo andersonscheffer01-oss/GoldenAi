@@ -1,0 +1,80 @@
+name: Golden Jarvis Desktop package
+
+on:
+  push:
+    branches:
+      - codex/golden-arena-github-sync
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-desktop:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install desktop build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyInstaller PySide6 aiohttp requests
+
+      - name: Build ONEDIR desktop client
+        shell: pwsh
+        working-directory: studio/golden_ai_studio_web
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'release-dist'
+          $work = Join-Path $env:RUNNER_TEMP 'golden-jarvis-pyinstaller'
+          python -m PyInstaller .\JarvisDesktop.spec --noconfirm --clean --distpath $dist --workpath $work
+          if (-not (Test-Path -LiteralPath (Join-Path $dist 'Jarvis\Jarvis.exe'))) {
+            throw 'Jarvis.exe não foi gerado'
+          }
+
+      - name: Assemble package and checksum
+        shell: pwsh
+        run: |
+          $bundle = Join-Path $env:GITHUB_WORKSPACE 'release-bundle'
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'release-dist\Jarvis') -Destination (Join-Path $bundle 'Jarvis') -Recurse
+          $instructions = @'
+          GOLDEN JARVIS DESKTOP — PACOTE ONEDIR
+
+          Este arquivo contém o cliente Desktop. O Core, a interface e os dados
+          permanecem no código-fonte do projeto.
+
+          1. Clone a branch codex/golden-arena-github-sync em C:\GoldenAI.
+          2. Configure um Python 3.13 e as dependências conforme requirements.txt.
+          3. Crie suas próprias credenciais locais a partir dos arquivos example.
+          4. Nunca copie api_keys.json, .env, bancos, logs ou device_registry.json.
+          5. Execute Jarvis\Jarvis.exe. O cliente espera o Core em C:\GoldenAI.
+          6. O perfil de trading deve permanecer somente leitura e
+             execution_authority=NONE.
+
+          Este pacote não envia ordens reais e não inclui credenciais do autor.
+          '@
+          $instructions | Set-Content -LiteralPath (Join-Path $bundle 'INSTALL.txt') -Encoding UTF8
+          $hash = Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bundle 'Jarvis\Jarvis.exe')
+          "$($hash.Algorithm)  $($hash.Hash)  Jarvis\Jarvis.exe" | Set-Content -LiteralPath (Join-Path $bundle 'SHA256.txt') -Encoding ASCII
+          $zip = Join-Path $env:GITHUB_WORKSPACE ('GoldenJarvisDesktop-ONEDIR-\${{ github.sha }}.zip')
+          Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $zip -CompressionLevel Fastest
+          if (-not (Test-Path -LiteralPath $zip)) {
+            throw 'Pacote ZIP não foi criado'
+          }
+
+      - name: Upload desktop package
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoldenJarvisDesktop-ONEDIR
+          path: GoldenJarvisDesktop-ONEDIR-\${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
