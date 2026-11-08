@@ -164,7 +164,11 @@ def _get_groq_key() -> Optional[str]:
     # Try config file
     try:
         import json
-        config_path = Path(__file__).resolve().parent.parent.parent / "config" / "api_keys.json"
+        config_root = Path(
+            os.environ.get("GOLDENAI_ROOT")
+            or Path(__file__).resolve().parents[4]
+        ).resolve()
+        config_path = config_root / "config" / "api_keys.json"
         if config_path.exists():
             with open(config_path) as f:
                 config = json.load(f)
@@ -172,6 +176,7 @@ def _get_groq_key() -> Optional[str]:
     except Exception:
         pass
     return None
+
 
 
 

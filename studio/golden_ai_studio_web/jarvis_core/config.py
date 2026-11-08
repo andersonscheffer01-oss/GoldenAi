@@ -10,7 +10,10 @@ import os
 from pathlib import Path
 from typing import Optional
 
-_GOLDEN_ROOT = Path(r"C:\GoldenAI")
+_GOLDEN_ROOT = Path(
+    os.environ.get("GOLDENAI_ROOT")
+    or Path(__file__).resolve().parents[3]
+).resolve()
 _KEYS_CACHE: Optional[dict] = None
 
 
@@ -68,3 +71,4 @@ def resolve_api_key(env_var: str, json_key: str) -> Optional[str]:
         except (ImportError, OSError):
             pass
     return None
+

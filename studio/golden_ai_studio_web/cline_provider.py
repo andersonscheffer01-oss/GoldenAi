@@ -18,6 +18,10 @@ from pathlib import Path
 CLINE_API_URL = "https://api.cline.bot/api/v1/chat/completions"
 CLINE_MODELS_URL = "https://api.cline.bot/api/v1/models"
 CLINE_REQUEST_TIMEOUT = 150
+PROJECT_ROOT = Path(
+    os.environ.get("GOLDENAI_ROOT")
+    or Path(__file__).resolve().parents[2]
+).resolve()
 
 # Modelos ClinePass (assinatura $9.99/mes)
 CLINE_MODELS = {
@@ -96,7 +100,7 @@ class ClineProvider:
         self.base_url = CLINE_API_URL
 
     def _config_path(self):
-        return Path(r"C:\GoldenAI\config\api_keys.json")
+        return PROJECT_ROOT / "config" / "api_keys.json"
 
     def set_api_key(self, key):
         """Salva a API key do Cline"""
@@ -213,3 +217,4 @@ cline_provider.load_api_key()
 def get_cline_provider():
     """Retorna o provider Cline"""
     return cline_provider
+

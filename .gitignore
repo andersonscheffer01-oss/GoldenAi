@@ -31,7 +31,8 @@ ENV/
 !.env.production.example
 !.env.template
 
-config/api_keys.json
+config/api_keys*.json
+!config/api_keys.example.json
 **/credentials.json
 **/secrets.json
 **/secrets.yaml
@@ -62,6 +63,7 @@ studio/golden_ai_studio_web/golden_runtime.db
 studio/golden_ai_studio_web/golden_tasks.db
 studio/golden_ai_studio_web/jarvis/golden_runtime.db
 studio/golden_ai_studio_web/jarvis/golden_memory.db
+studio/golden_ai_studio_web/jarvis/*.db
 studio/golden_ai_studio_web/work/
 
 # SQLite runtime sidecars
@@ -252,3 +254,4 @@ studio/golden_ai_studio_web/jarvis/golden_tasks.db
 /studio/golden_ai_studio_web/test_fixtures/
 /studio/golden_ai_studio_web/build/
 /studio/golden_ai_studio_web/dist/
+
