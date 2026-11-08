@@ -370,7 +370,7 @@ class CentralOrchestrator:
                 "web_research", {"query": f"{target} mercado notícias macro fundamentos",
                                   "limit": 5, "privacy": classification.value}))
             return self._decision("market_analysis", Route.MARKET_ANALYSIS, .96,
-                                  "market_analysis", ModelProfile.GENERAL, classification,
+                                  "market_analysis", ModelProfile.MARKET, classification,
                                   ai=False, steps=tuple(steps))
         # Cotacao deterministica: moeda detectada pelos aliases canonicos,
         # sem LLM generativo (resposta vem da tool + provider real).
@@ -515,3 +515,4 @@ class CentralOrchestrator:
 
     def status(self):
         return {"mode": self.mode, "last_decision": asdict(self.last_decision) if self.last_decision else None}
+

@@ -18,8 +18,8 @@ import market_data
 def test_safe_profile_is_explicit_and_invalid_profiles_fail_closed():
     assert resolve_runtime_profile("web-ai-safe") is WEB_AI_SAFE_PROFILE
     assert WEB_AI_SAFE_PROFILE.status()["mt5"] == "DISABLED_BY_PROFILE"
-    assert WEB_AI_SAFE_PROFILE.status()["voice"] == "DISABLED_BY_PROFILE"
-    assert WEB_AI_SAFE_PROFILE.api_disabled_reason("/api/jarvis/voice/status") == "VOICE_DISABLED_BY_PROFILE"
+    assert WEB_AI_SAFE_PROFILE.status()["voice"] == "ENABLED"
+    assert WEB_AI_SAFE_PROFILE.api_disabled_reason("/api/jarvis/voice/status") == ""
     assert WEB_AI_SAFE_PROFILE.api_disabled_reason("/api/mt5/status") == "MT5_DISABLED_BY_PROFILE"
     assert WEB_AI_SAFE_PROFILE.status()["market_data_read"] == "ENABLED"
     assert WEB_AI_SAFE_PROFILE.status()["mt5_market_data_read"] == "ENABLED"
@@ -31,6 +31,13 @@ def test_safe_profile_is_explicit_and_invalid_profiles_fail_closed():
         assert WEB_AI_SAFE_PROFILE.tool_disabled_reason(mutation) == "TRADING_DISABLED_BY_PROFILE"
     with pytest.raises(ValueError, match="Perfil de runtime invalido"):
         resolve_runtime_profile("unknown-profile")
+
+
+def test_web_ai_safe_keeps_voice_controls_without_trading_authority():
+    assert WEB_AI_SAFE_PROFILE.status()["voice"] == "ENABLED"
+    assert WEB_AI_SAFE_PROFILE.api_disabled_reason("/api/jarvis/voice/status") == ""
+    assert WEB_AI_SAFE_PROFILE.status()["trading"] == "DISABLED_BY_PROFILE"
+    assert WEB_AI_SAFE_PROFILE.tool_disabled_reason("order_send") == "TRADING_DISABLED_BY_PROFILE"
 
 
 def test_safe_service_keeps_canonical_core_and_blocks_disabled_tools(tmp_path):
@@ -62,16 +69,17 @@ def test_safe_service_keeps_canonical_core_and_blocks_disabled_tools(tmp_path):
         set_active_runtime_profile(DEFAULT_PROFILE)
 
 
-def test_safe_read_models_never_open_mt5(monkeypatch):
+def test_safe_read_models_attach_only_open_mt5_readonly(monkeypatch):
     set_active_runtime_profile(WEB_AI_SAFE_PROFILE)
     try:
         def fail_if_called():
             raise AssertionError("ensure_connection must not run in web-ai-safe")
 
-        monkeypatch.setattr(market, "_terminal_available", lambda: False)
+        monkeypatch.setattr(market, "_discover_open_mt5_terminals", lambda: [])
         result = market.mt5_status()
-        assert result["status"] == "DISABLED_BY_PROFILE"
-        assert result["availability"] == "SOURCE_DISABLED"
+        assert result["status"] == "OFFLINE"
+        assert result["availability"] == "OFFLINE"
+        assert result["reason"] == "NO_OPEN_MT5_TERMINAL"
 
         monkeypatch.setattr(market_data, "_mt5_enabled", lambda override=None: False)
         monkeypatch.setattr(market_data, "ensure_connection", fail_if_called, raising=False)
@@ -135,15 +143,17 @@ def test_connector_boundary_fails_closed_without_initialize(monkeypatch):
         set_active_runtime_profile(DEFAULT_PROFILE)
 
 
-def test_default_profile_keeps_mt5_path_available_under_mock(monkeypatch):
+def test_default_profile_uses_shared_readonly_mt5_path_under_mock(monkeypatch):
     set_active_runtime_profile(DEFAULT_PROFILE)
     calls = []
     monkeypatch.setattr(mt5_connector, "ensure_connection",
                         lambda: calls.append(True) or False)
+    monkeypatch.setattr(market_data, "_readonly_mt5_connection",
+                        lambda: (None, None, "NO_OPEN_MT5_TERMINAL"))
     try:
         result = market_data.get_market_chart("EURUSD", "H1", mt5_enabled=True)
-        assert calls == [True]
-        assert result["error"] == "MetaTrader 5 desconectado"
+        assert calls == []
+        assert result["error"] == "NO_OPEN_MT5_TERMINAL"
     finally:
         set_active_runtime_profile(DEFAULT_PROFILE)
 
@@ -154,3 +164,4 @@ def test_default_profile_preserves_operational_capabilities():
     assert status["voice"] == "ENABLED"
     assert status["trading"] == "ENABLED"
     assert active_runtime_profile() is DEFAULT_PROFILE
+

@@ -44,6 +44,7 @@ class ProviderAdapter:
     last_error_type: str = ""
     last_model: str = ""
     stream: Optional[Callable[..., Any]] = None
+    supported_profiles: Optional[frozenset] = None
 
     def usable(self, now=None):
         """Elegível para tentativa: AVAILABLE ou transitório com cooldown vencido."""
@@ -90,6 +91,9 @@ class ModelRouter:
         for provider_name in ordered:
             adapter = self.providers.get(provider_name)
             if not adapter or not adapter.usable():
+                continue
+            if (adapter.supported_profiles is not None and
+                    profile not in adapter.supported_profiles):
                 continue
             if classification == DataClassification.SECRET and adapter.cloud:
                 continue
@@ -364,3 +368,4 @@ class ModelRouter:
         if isinstance(code, int) and code >= 500:
             return ProviderState.DEGRADED
         return ProviderState.OFFLINE
+

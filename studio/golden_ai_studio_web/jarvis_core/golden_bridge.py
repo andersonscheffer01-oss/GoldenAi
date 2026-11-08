@@ -66,6 +66,7 @@ class GoldenCapability:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {
             "read_only": True,
+            "execution_authority": "NONE",
             "side_effect_class": READ_ONLY,
             "security_state": self.security_requirement,
         }
@@ -152,6 +153,7 @@ def _envelope(capability_id: str, payload: Any, source_module: str,
                 {"SOURCE_UNAVAILABLE", "SOURCE_DISABLED"})),
         "capability_id": capability_id,
         "read_only": True,
+        "execution_authority": "NONE",
         "side_effect_class": READ_ONLY,
         "security_state": "READ_ONLY_NO_SIDE_EFFECT",
         "availability": availability,
@@ -286,6 +288,7 @@ class GoldenReadBridge:
             "availability": "SOURCE_DISABLED",
             "reason": "MT5_DISABLED_BY_PROFILE",
             "source": "MT5",
+            "execution_authority": "NONE",
         }, source_module)
 
     def _market_overview(self):
@@ -308,8 +311,9 @@ class GoldenReadBridge:
 
     def capability_registry(self) -> dict[str, Any]:
         capabilities = [item.to_dict() for item in _CAPABILITIES]
-        return {"ok": True, "read_only": True, "capabilities": capabilities,
-                "count": len(capabilities), "authority": "JarvisService",
+        return {"ok": True, "read_only": True, "execution_authority": "NONE",
+                "capabilities": capabilities, "count": len(capabilities),
+                "authority": "JarvisService",
                 "mutation_execution": "DISABLED_IN_B1", "timestamp": _now()}
 
     def scanner_snapshot(self, symbol: str = "", limit: int = 3) -> dict[str, Any]:
@@ -393,6 +397,7 @@ class GoldenReadBridge:
                     "AUTO_TRADE execution fields may be lost because log_analysis "
                     "stores PENDING/false/0; no execution is proven by this Journal"),
                 "read_only": True,
+                "execution_authority": "NONE",
                 "cache_written": False,
             }
         return _safe("golden.statistics", "statistics_engine.py", read,
@@ -404,10 +409,14 @@ class GoldenReadBridge:
         """Expose a bounded allowlisted Journal page through the canonical bridge."""
         def read():
             from trade_journal import TradeJournal
-            return TradeJournal().get_history_page(
+            result = TradeJournal().get_history_page(
                 symbol=symbol, record_type=record_type, limit=limit,
                 offset=offset, date_from=date_from, date_to=date_to,
                 exit_type=exit_type)
+            if isinstance(result, dict):
+                result = {**result, "read_only": True,
+                          "execution_authority": "NONE"}
+            return result
         return _safe("golden.trade_journal.history", "trade_journal.jsonl", read,
                      evidence_class="HISTORICAL_EVIDENCE")
 
@@ -1140,12 +1149,16 @@ class GoldenReadBridge:
             "account": market.mt5_account_info(),
             "positions": market.mt5_positions(),
             "orders": market.mt5_orders(),
+            "observed_at": _now(),
+            "execution_authority": "NONE",
+            "read_only": True,
         })
 
     def control_center_snapshot(self, symbol: str = "", include_live: bool = False) -> dict[str, Any]:
         payload = {
             "ok": True,
             "read_only": True,
+            "execution_authority": "NONE",
             "authority": "JarvisService",
             "ui_states": ["UI_READ_MODEL", "UI_PROGRESS_STATE", "UI_ERROR_STATE",
                            "UI_EMPTY_STATE", "UI_DISABLED_STATE", "UI_PROVENANCE_VIEW",
@@ -1185,3 +1198,4 @@ class GoldenReadBridge:
 
 
 __all__ = ["GoldenCapability", "GoldenReadBridge", "READ_ONLY", "NO_SIDE_EFFECT"]
+

@@ -96,6 +96,7 @@ if (window.__JARVIS_DESKTOP__ === true && app && root && navigation && workspace
     tarefas: { view: "projetos", title: "Tarefas" },
     memoria: { view: "memoria", title: "Memória" },
     seguranca: { view: "d2-security", title: "Segurança" },
+    "golden-arena": { view: "d2-golden-arena", title: "Golden Scalper Arena" },
     pesquisa: { view: "pesquisa", title: "Pesquisa" },
     automacao: { view: "automacao", title: "Automação" },
   };
@@ -112,6 +113,7 @@ if (window.__JARVIS_DESKTOP__ === true && app && root && navigation && workspace
     projetos: "tarefas",
     memoria: "memoria",
     "d2-security": "seguranca",
+    "d2-golden-arena": "golden-arena",
     pesquisa: "pesquisa",
     automacao: "automacao",
   };
@@ -119,6 +121,10 @@ if (window.__JARVIS_DESKTOP__ === true && app && root && navigation && workspace
   let navigationPending = false;
   let performanceSnapshotLoaded = false;
   let performanceSnapshotLoading = false;
+  let operationsSnapshotLoaded = false;
+  let operationsSnapshotLoading = false;
+  let arenaReportLoaded = false;
+  let arenaReportLoading = false;
   const panelAssetStorageKey = `jarvis.desktop.panel.selected_asset.v1::${window.generatorName || "local"}`;
   let selectedPanelAsset = loadPanelAsset();
 
@@ -171,6 +177,8 @@ if (window.__JARVIS_DESKTOP__ === true && app && root && navigation && workspace
     jarvis.golden.setView(target.view);
     if (route === "analise") renderAnalysisProjection();
     if (route === "performance") loadCanonicalPerformance();
+    if (route === "operacoes") loadCanonicalOperations();
+    if (activeRoute === "golden-arena") void loadGoldenArenaReport();
     if (activeRoute === "painel") ensurePanelCatalog();
     if (activeRoute === "inteligencia-mercado" && !trendScanRecoveryChecked && !trendScan) {
       void recoverTrendScan();
@@ -336,6 +344,160 @@ if (window.__JARVIS_DESKTOP__ === true && app && root && navigation && workspace
       if (summary) summary.textContent = "Estatísticas indisponíveis · nenhum valor foi presumido como zero.";
     } finally {
       performanceSnapshotLoading = false;
+    }
+  }
+
+  async function loadCanonicalOperations() {
+    const view = document.querySelector(".d2OperationsView");
+    const status = view?.querySelector("[data-operations-status]");
+    const message = view?.querySelector("[data-operations-message]");
+    const sync = view?.querySelector("[data-operations-sync]");
+    if (operationsSnapshotLoaded || operationsSnapshotLoading || !view) return;
+    if (!window.Gateway?.isAuthenticated || typeof window.Gateway.httpPost !== "function") {
+      if (message) message.textContent = "Aguardando sessão autenticada; MT5 não foi consultado.";
+      if (sync) sync.textContent = "SINCRONIZADOR · AUTENTICAÇÃO NECESSÁRIA";
+      return;
+    }
+    operationsSnapshotLoading = true;
+    if (status) status.textContent = "CONSULTA READ-ONLY EM ANDAMENTO";
+    if (message) message.textContent = "Consultando a ponte canônica MT5; nenhuma ação será enviada.";
+    if (sync) sync.textContent = "SINCRONIZADOR · CONSULTANDO";
+
+    const finiteNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+    const displayNumber = (value, digits = 2) => {
+      const number = finiteNumber(value);
+      return number === null ? "—" : number.toLocaleString("pt-BR", {
+        minimumFractionDigits: digits, maximumFractionDigits: digits,
+      });
+    };
+    const unwrap = (value) => value?.data && typeof value.data === "object" ? value.data : value || {};
+    const setMetric = (name, value, detail, note) => {
+      const item = view.querySelector(`[data-operations-metric="${name}"]`);
+      if (!item) return;
+      const strong = item.querySelector("strong");
+      const paragraph = item.querySelector("p");
+      const small = item.querySelector("small");
+      if (strong) strong.textContent = value;
+      if (paragraph) paragraph.textContent = detail;
+      if (small) small.textContent = note;
+    };
+    const setEmptyRows = (body, columns, title, detail) => {
+      if (!body) return;
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = columns;
+      const empty = document.createElement("div");
+      empty.className = "d2TableEmpty";
+      const heading = document.createElement("b");
+      heading.textContent = title;
+      const explanation = document.createElement("span");
+      explanation.textContent = detail;
+      empty.append(heading, explanation);
+      cell.append(empty);
+      row.append(cell);
+      body.replaceChildren(row);
+    };
+    const setCells = (row, values) => {
+      values.forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = String(value ?? "—");
+        row.append(cell);
+      });
+    };
+    const setUnavailable = (reason) => {
+      if (status) status.textContent = "SEM OBSERVAÇÃO OPERACIONAL";
+      if (message) message.textContent = reason;
+      if (sync) sync.textContent = "SINCRONIZADOR · INDISPONÍVEL";
+      view.querySelector("[data-operations-source]")?.replaceChildren(document.createTextNode("MT5 · INDISPONÍVEL"));
+      setMetric("exposure", "—", "Sem observação canônica", "Alocação · não consultada");
+      setMetric("floating", "—", "Sem observação canônica", "Resultado · não consultado");
+      setMetric("orders", "—", "Posições e pendentes não observadas", "Fonte operacional indisponível");
+      setMetric("protection", "—", "Estado não consultado", "Nenhuma proteção foi inferida");
+      setEmptyRows(view.querySelector("[data-operations-positions]"), 12,
+        "Nenhuma posição carregada", "MT5 indisponível; isso não representa conta sem posições.");
+      setEmptyRows(view.querySelector("[data-operations-orders]"), 11,
+        "Nenhuma ordem carregada", "MT5 indisponível; nenhuma ordem foi presumida.");
+    };
+
+    try {
+      const response = await window.Gateway.httpPost("/api/jarvis/golden/overview", {
+        symbol: selectedPanelAsset?.provider_symbol || "", include_live: true,
+      });
+      const candidates = [response, response?.data, response?.result,
+        response?.result?.data, response?.data?.data];
+      const envelope = candidates.find((candidate) => candidate?.mt5
+        && candidate.read_only === true && candidate.execution_authority === "NONE");
+      if (response?.ok !== true || !envelope) throw new Error("SNAPSHOT_OPERACIONAL_INVALIDO");
+
+      const mt5Envelope = envelope.mt5;
+      const mt5 = unwrap(mt5Envelope);
+      const terminal = unwrap(mt5.terminal);
+      const positionsPayload = unwrap(mt5.positions);
+      const ordersPayload = unwrap(mt5.orders);
+      const positions = Array.isArray(positionsPayload.positions) ? positionsPayload.positions : [];
+      const orders = Array.isArray(ordersPayload.orders) ? ordersPayload.orders : [];
+      const sourceAvailability = String(mt5Envelope?.availability || "").toUpperCase();
+      const sourceAvailable = !["UNAVAILABLE", "SOURCE_DISABLED"].includes(sourceAvailability)
+        && String(terminal?.status || "").toUpperCase() === "CONNECTED";
+      if (!sourceAvailable) {
+        setUnavailable("MT5 não está disponível para observação; isso não significa conta sem posições ou ordens.");
+        return;
+      }
+
+      status.textContent = "OBSERVAÇÃO OPERACIONAL READ-ONLY";
+      message.textContent = "Snapshot MT5 reconciliado com o Control Center; nenhuma ação foi enviada.";
+      sync.textContent = "SINCRONIZADOR · SINCRONIZADO";
+      view.querySelector("[data-operations-source]")?.replaceChildren(document.createTextNode("MT5 · LEITURA SOMENTE"));
+      const volumes = positions.map((item) => finiteNumber(item?.volume));
+      const profits = positions.map((item) => finiteNumber(item?.profit));
+      const volumeKnown = volumes.every((value) => value !== null);
+      const profitKnown = profits.every((value) => value !== null);
+      const totalVolume = volumes.reduce((sum, value) => sum + (value || 0), 0);
+      const totalProfit = profits.reduce((sum, value) => sum + (value || 0), 0);
+      setMetric("exposure", volumeKnown ? `${displayNumber(totalVolume)} lotes` : "—",
+        `${positions.length} posição(ões) observada(s)`, "MT5 · somente leitura");
+      setMetric("floating", profitKnown ? displayNumber(totalProfit) : "—",
+        "Soma de PNL das posições observadas", "Sem conversão ou inferência de moeda");
+      setMetric("orders", `${positions.length + orders.length}`,
+        `${positions.length} posição(ões) · ${orders.length} pendente(s)`, "Contagem observada no snapshot");
+      setMetric("protection", positions.length ? "OBSERVADA" : "SEM POSIÇÕES",
+        positions.length ? "SL/TP exibidos por posição quando fornecidos" : "Nenhuma posição aberta observada",
+        "Nenhuma proteção foi alterada");
+
+      const positionsBody = view.querySelector("[data-operations-positions]");
+      if (positions.length) {
+        positionsBody.replaceChildren();
+        positions.forEach((item) => {
+          const row = document.createElement("tr");
+          setCells(row, [item?.ticket, "NÃO INFORMADO", item?.symbol, item?.side,
+            displayNumber(item?.volume), displayNumber(item?.price_open),
+            displayNumber(item?.price_current), displayNumber(item?.sl),
+            displayNumber(item?.tp), displayNumber(item?.profit), "READ-ONLY", "DESABILITADO"]);
+          positionsBody.append(row);
+        });
+      } else setEmptyRows(positionsBody, 12, "Nenhuma posição observada", "Snapshot MT5 conectado sem posições abertas.");
+
+      const ordersBody = view.querySelector("[data-operations-orders]");
+      if (orders.length) {
+        ordersBody.replaceChildren();
+        orders.forEach((item) => {
+          const row = document.createElement("tr");
+          setCells(row, [item?.ticket, "MT5", item?.symbol, item?.type,
+            displayNumber(item?.volume), displayNumber(item?.price), "—",
+            displayNumber(item?.sl), displayNumber(item?.tp), "OBSERVADA", "READ-ONLY"]);
+          ordersBody.append(row);
+        });
+      } else setEmptyRows(ordersBody, 11, "Nenhuma ordem pendente observada", "Snapshot MT5 conectado sem ordens pendentes.");
+      view.querySelector("[data-operations-positions-state]").textContent = "MT5 · OBSERVADO";
+      view.querySelector("[data-operations-orders-state]").textContent = "MT5 · OBSERVADO";
+      view.querySelector("[data-operations-position-count]").textContent = String(positions.length);
+      view.querySelector("[data-operations-position-volume]").textContent = volumeKnown ? displayNumber(totalVolume) : "—";
+      view.querySelector("[data-operations-position-source]").textContent = "MT5 · READ-ONLY";
+      operationsSnapshotLoaded = true;
+    } catch {
+      setUnavailable("A consulta operacional não foi reconciliada; nenhum valor foi presumido como zero.");
+    } finally {
+      operationsSnapshotLoading = false;
     }
   }
 
@@ -540,6 +702,10 @@ const trendRankingGate = createTrendRequestGate();
     const statusLabel = analysisView.querySelector(".d2AnalysisState span");
     const title = analysisView.querySelector(".d2AnalysisState b");
     const candidate = latestPanelAnalysis;
+    const candidateSnapshotId = candidate?.result?.snapshot_id;
+    const currentSnapshotId = panelMarketSnapshot?.snapshot_id;
+    const snapshotMatches = !candidateSnapshotId || !currentSnapshotId
+      || candidateSnapshotId === currentSnapshotId;
     const matchesSelection = candidate
       && selectedIdentityValidated
       && candidate.mode === selectedAnalysisMode
@@ -548,7 +714,8 @@ const trendRankingGate = createTrendRequestGate();
       && candidate.asset.provider_symbol === selectedPanelAsset?.provider_symbol
       && candidate.asset.asset_class === selectedPanelAsset?.asset_class
       && candidate.timeframe === selectedTimeframe
-      && candidate.result.analysis_mode === selectedAnalysisMode;
+      && candidate.result.analysis_mode === selectedAnalysisMode
+      && snapshotMatches;
     const result = matchesSelection ? candidate.result : null;
     const status = panelAnalysisRunning ? "ANALYZING" : result?.status
       || (selectedPanelAsset && !selectedIdentityValidated ? "IDENTITY_REVALIDATION_REQUIRED"
@@ -757,7 +924,17 @@ const trendRankingGate = createTrendRequestGate();
   }
 
   function renderMarketSnapshot(snapshot, asset) {
+    const previousSnapshot = panelMarketSnapshot;
+    const snapshotChanged = Boolean(previousSnapshot && (
+      (previousSnapshot.snapshot_id && snapshot?.snapshot_id
+        ? previousSnapshot.snapshot_id !== snapshot.snapshot_id
+        : snapshot?.provenance?.live_change === "UPDATED"
+          || previousSnapshot !== snapshot)
+    ));
     panelMarketSnapshot = snapshot;
+    if (snapshotChanged && latestPanelAnalysis) {
+      invalidatePanelAnalysis("RESULTADO ANTERIOR INVALIDADO · NOVO SNAPSHOT MT5 RECEBIDO.");
+    }
     const quote = snapshot?.quote || {};
     const state = snapshot?.state || {};
     const freshness = state.freshness || "UNKNOWN";
@@ -809,6 +986,8 @@ const trendRankingGate = createTrendRequestGate();
   }
 
   function invalidatePanelAnalysis(message) {
+    latestPanelAnalysis = null;
+    analysisRecoveryRequestId += 1;
     analysisStatus.textContent = message;
     analysisStatus.dataset.state = "UNAVAILABLE";
     panel.querySelectorAll("[data-panel-bias]").forEach((item) => { item.textContent = "UNAVAILABLE"; });
@@ -941,10 +1120,13 @@ const trendRankingGate = createTrendRequestGate();
       }
       else throw new Error("Candle recebido é anterior ao último candle confirmado");
       if (candles.length > 200) candles.splice(0, candles.length - 200);
+      const snapshotId = quoteChanged || candleChanged
+        ? (update.snapshot_id || `market_update_${Date.now()}`)
+        : current.snapshot_id;
       const next = { ...current, quote: update.quote, candles,
+        snapshot_id: snapshotId,
         provenance: { ...(current.provenance || {}), live_received_at: update.received_at,
           live_change: quoteChanged || candleChanged ? "UPDATED" : "NO_NEW_QUOTE" } };
-      panelMarketSnapshot = next;
       renderMarketSnapshot(next, asset);
     } catch (error) {
       if (requestId === marketSnapshotRequestId
@@ -1939,6 +2121,7 @@ const trendRankingGate = createTrendRequestGate();
     const submittedAsset = { ...selectedPanelAsset };
     const submittedTimeframe = selectedTimeframe;
     const submittedMode = selectedAnalysisMode;
+    const submittedSnapshotId = panelMarketSnapshot?.snapshot_id || "";
     const submittedStrategyId = selectedStrategyId;
     panelAnalysisRunning = true;
     latestPanelAnalysis = null;
@@ -1985,7 +2168,8 @@ const trendRankingGate = createTrendRequestGate();
       if (selectedPanelAsset?.provider_asset_id !== submittedAsset.provider_asset_id
           || selectedTimeframe !== submittedTimeframe
           || selectedAnalysisMode !== submittedMode
-          || panelMarketSnapshot?.timeframe !== submittedTimeframe) {
+          || panelMarketSnapshot?.timeframe !== submittedTimeframe
+          || (submittedSnapshotId && panelMarketSnapshot?.snapshot_id !== submittedSnapshotId)) {
         analysisStatus.textContent = "RESPOSTA ANTIGA DESCARTADA · ATIVO, TIMEFRAME OU MODO ALTERADO.";
         analysisStatus.dataset.state = "UNAVAILABLE";
       } else {
@@ -2014,6 +2198,11 @@ const trendRankingGate = createTrendRequestGate();
     }
     if (result.analysis_mode !== submittedMode || submittedMode !== selectedAnalysisMode) {
       invalidatePanelAnalysis("MODO DA RESPOSTA NÃO CORRESPONDE À ANÁLISE SELECIONADA.");
+      return;
+    }
+    if (result.snapshot_id && panelMarketSnapshot?.snapshot_id
+        && result.snapshot_id !== panelMarketSnapshot.snapshot_id) {
+      invalidatePanelAnalysis("SNAPSHOT DA RESPOSTA NÃO CORRESPONDE AO MT5 ATUAL.");
       return;
     }
     if (result.status === "ERROR") {
@@ -2101,6 +2290,86 @@ const trendRankingGate = createTrendRequestGate();
       : result.status === "PARTIAL"
         ? "ANÁLISE PARCIAL · CONSULTE O ESTADO DE CADA FONTE · LIVE NÃO AUTORIZADO"
         : `ANÁLISE ${result.status || "INDISPONÍVEL"} · SEM DADOS TÉCNICOS CONFIRMADOS · LIVE NÃO AUTORIZADO`;
+  }
+
+  function arenaEscape(value) {
+    return String(value ?? "—").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[char]));
+  }
+
+  function arenaMetric(metrics, key, fallback = "—") {
+    const value = metrics?.[key];
+    return value === null || value === undefined || value === "" ? fallback : value;
+  }
+
+  function renderGoldenArenaReport(envelope) {
+    const view = document.querySelector(".d2ArenaView");
+    if (!view) return;
+    const status = view.querySelector("[data-arena-status]");
+    const security = view.querySelector("[data-arena-security]");
+    const summary = view.querySelector("[data-arena-summary]");
+    const ranking = view.querySelector("[data-arena-ranking]");
+    const rankingMeta = view.querySelector("[data-arena-ranking-meta]");
+    const validation = view.querySelector("[data-arena-validation]");
+    const validationStatus = view.querySelector("[data-arena-validation-status]");
+    const provenance = view.querySelector("[data-arena-provenance]");
+    const report = envelope?.report;
+    if (!envelope?.ok || !report || typeof report !== "object") {
+      const reason = envelope?.error_code || "ARENA_REPORT_UNAVAILABLE";
+      if (status) status.textContent = `INDISPONÍVEL · ${reason}`;
+      if (security) security.textContent = "READ-ONLY · SIMULATION-ONLY · EXECUTION_AUTHORITY=NONE · ORDENS REAIS: NÃO";
+      if (rankingMeta) rankingMeta.textContent = "RELATÓRIO NÃO DISPONÍVEL";
+      if (ranking) ranking.innerHTML = `<tr><td colspan="6">${arenaEscape(envelope?.message || "Relatório da Arena indisponível.")}</td></tr>`;
+      if (validationStatus) validationStatus.textContent = "NOT_VALIDATED";
+      if (validation) validation.textContent = "Nenhuma validação foi carregada nesta sessão.";
+      if (provenance) provenance.textContent = `PROVENIÊNCIA · ${arenaEscape(reason)}`;
+      return;
+    }
+    const run = report.run || {};
+    const reportSecurity = report.security || envelope.security || {};
+    const validationData = report.validation || {};
+    const agents = Array.isArray(report.agents) ? report.agents : [];
+    const winner = validationData.winner || "NENHUM";
+    if (status) status.textContent = `${arenaEscape(run.status || "SIMULATION")} · ${arenaEscape(validationData.status || "NOT_VALIDATED")}`;
+    if (security) security.textContent = `READ-ONLY: ${reportSecurity.read_only === true ? "SIM" : "NÃO"} · SIMULATION-ONLY: ${reportSecurity.simulation_only === true ? "SIM" : "NÃO"} · EXECUTION_AUTHORITY=${arenaEscape(reportSecurity.execution_authority || "NONE")} · ORDENS REAIS: NÃO`;
+    if (summary) summary.innerHTML = [
+      ["RUN", run.run_id || "—", "Identidade do replay"],
+      ["SNAPSHOTS", run.snapshot_count ?? "—", "Eventos observados"],
+      ["FONTE", run.source_kind || "—", run.provenance || "Proveniência não informada"],
+      ["VENCEDOR APROVADO", winner, validationData.status || "Validação não concluída"],
+    ].map(([label, value, detail]) => `<article><span>${arenaEscape(label)}</span><strong>${arenaEscape(value)}</strong><small>${arenaEscape(detail)}</small></article>`).join("");
+    if (rankingMeta) rankingMeta.textContent = `${agents.length} AGENTES · ${arenaEscape(run.symbol || "XAUUSD")} · ${arenaEscape(run.source_kind || "REPLAY")}`;
+    if (ranking) ranking.innerHTML = agents.length ? agents.map((row) => {
+      const metrics = row.metrics || {};
+      const pf = arenaMetric(metrics, "profit_factor");
+      return `<tr><td>${arenaEscape(row.rank ?? "—")}</td><td><strong>${arenaEscape(row.agent)}</strong></td><td>${arenaEscape(arenaMetric(metrics, "net_pnl", 0))}</td><td>${arenaEscape(arenaMetric(metrics, "trades", 0))}</td><td>${arenaEscape(pf)}</td><td>${arenaEscape(arenaMetric(metrics, "max_drawdown", 0))}</td></tr>`;
+    }).join("") : `<tr><td colspan="6">Nenhum agente foi carregado.</td></tr>`;
+    if (validationStatus) validationStatus.textContent = validationData.status || "NOT_VALIDATED";
+    if (validation) validation.innerHTML = `<b>${arenaEscape(validationData.reason || "Critérios de validação ainda não concluídos.")}</b><p>Walk-forward: ${arenaEscape(validationData.walk_forward?.status || "—")} · OOS: ${arenaEscape(validationData.out_of_sample ? "RESERVADO" : "—")} · Estresse: ${arenaEscape(validationData.stress?.status || "—")} · Paper: ${arenaEscape((validationData.paper_sessions || []).length)}</p>`;
+    if (provenance) provenance.textContent = `PROVENIÊNCIA · ${arenaEscape(run.provenance || "NÃO INFORMADA")} · ATUALIZADO ${arenaEscape(run.generated_at || "—")}`;
+  }
+
+  async function loadGoldenArenaReport() {
+    if (arenaReportLoading || arenaReportLoaded) return;
+    const view = document.querySelector(".d2ArenaView");
+    const status = view?.querySelector("[data-arena-status]");
+    if (!window.Gateway?.isAuthenticated) {
+      if (status) status.textContent = "AUTENTICAÇÃO NECESSÁRIA";
+      return;
+    }
+    arenaReportLoading = true;
+    if (status) status.textContent = "CONSULTANDO RELATÓRIO...";
+    try {
+      const envelope = await window.Gateway.httpGet("/api/jarvis/golden/arena/report");
+      arenaReportLoaded = true;
+      renderGoldenArenaReport(envelope);
+    } catch {
+      arenaReportLoaded = true;
+      renderGoldenArenaReport({ok: false, error_code: "ARENA_GATEWAY_FAILURE", message: "Falha ao consultar a Arena."});
+    } finally {
+      arenaReportLoading = false;
+    }
   }
 
   const observer = new MutationObserver(() => {
@@ -3172,3 +3441,4 @@ function wireGoldenAnalysisHistory(analysisView, options = {}) {
   refreshCatalog();
   return {refreshCatalog, symbol};
 }
+

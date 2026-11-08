@@ -1,0 +1,7 @@
+MQL5/*.ex5
+MQL5/*.log
+Python/**/__pycache__/
+Data/**/*.sqlite
+Data/**/*.db
+Data/ticks/
+

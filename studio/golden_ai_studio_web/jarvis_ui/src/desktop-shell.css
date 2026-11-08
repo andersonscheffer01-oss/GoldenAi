@@ -805,3 +805,26 @@
   .d2DonorView .d2PerformanceLower,
   .d2DonorView .d2HistoryLayout { grid-template-columns: minmax(0, 1fr); }
 }
+
+.d2ArenaView { min-width: 0; }
+.d2ArenaView > .d2ViewHeading p { margin: 5px 0 0; color: var(--d2-muted); font-size: 12px; }
+.d2ArenaSecurity { padding: 11px 13px; border: 1px solid rgba(41, 199, 115, .35); border-radius: 6px; color: #29c773; background: rgba(41, 199, 115, .07); font: 10px "Consolas", monospace; }
+.d2ArenaSummary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.d2ArenaSummary article { min-width: 0; min-height: 92px; padding: 14px 16px; border: 1px solid #303640; border-radius: 8px; background: var(--d2-surface); }
+.d2ArenaSummary span, .d2ArenaSummary small { display: block; color: var(--d2-muted); font: 10px "Consolas", monospace; }
+.d2ArenaSummary strong { display: block; margin: 8px 0 4px; color: var(--d2-text); font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d2ArenaLayout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(270px, 1fr); gap: 14px; min-width: 0; }
+.d2ArenaLayout > .d2Surface { min-width: 0; padding: 16px; border: 1px solid #303640; border-radius: 8px; background: var(--d2-surface); }
+.d2ArenaLayout > .d2Surface > header { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--d2-border); color: var(--d2-text); }
+.d2ArenaLayout > .d2Surface > header span { color: var(--d2-muted); font: 10px "Consolas", monospace; text-align: right; }
+.d2ArenaTableWrap { overflow-x: auto; }
+.d2ArenaTable { width: 100%; min-width: 570px; border-collapse: collapse; font-size: 11px; }
+.d2ArenaTable th { padding: 10px 8px; color: var(--d2-muted); font: 10px "Consolas", monospace; text-align: left; white-space: nowrap; }
+.d2ArenaTable td { padding: 10px 8px; border-top: 1px solid var(--d2-border); color: var(--d2-text); white-space: nowrap; }
+.d2ArenaTable td:nth-child(n+3) { font-family: "Consolas", monospace; }
+.d2ArenaValidation > div[data-arena-validation] { min-height: 150px; padding: 18px 0; color: var(--d2-text); font-size: 12px; line-height: 1.55; }
+.d2ArenaValidation > div[data-arena-validation] p { color: var(--d2-muted); font-size: 11px; }
+.d2ArenaProvenance { padding-top: 12px; border-top: 1px solid var(--d2-border); color: var(--d2-muted); font: 9px "Consolas", monospace; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .d2ArenaSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .d2ArenaLayout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .d2ArenaSummary { grid-template-columns: minmax(0, 1fr); } }
+

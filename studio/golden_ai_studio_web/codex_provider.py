@@ -1,8 +1,4 @@
-"""
-Golden AI - Codex Bridge Provider
-Chama o Codex CLI local em modo nao interativo para analises fortes de
-mercado, estrategia e MQL5 dentro do Golden.
-"""
+"""Read-only Codex CLI provider for Golden market analysis."""
 import os
 import base64
 import shutil
@@ -13,10 +9,8 @@ from pathlib import Path
 
 CODEX_TIMEOUT = int(os.environ.get("GOLDEN_CODEX_TIMEOUT", "240"))
 CODEX_WORKDIR = Path(os.environ.get("GOLDEN_CODEX_WORKDIR", r"C:\GoldenAI"))
-CODEX_EXTRA_DIRS = [
-    Path(r"C:\Users\Anderson\AppData\Roaming\MetaQuotes\Terminal"),
-    Path(r"C:\Users\Anderson\Documents\Codex"),
-]
+CODEX_MODEL = os.environ.get("GOLDEN_CODEX_MODEL", "").strip()
+_INTERNAL_MODEL_IDS = frozenset({"codex-market", "codex-bridge"})
 
 
 def codex_available():
@@ -26,9 +20,9 @@ def codex_available():
 def _messages_to_prompt(messages):
     parts = [
         "Voce esta respondendo dentro do Golden AI Studio.",
-        "Foco: analise de mercado, estrategia, robos MQL5, risco e backtest.",
-        "Voce pode ler e editar arquivos no workspace quando o usuario pedir implementacao.",
-        "Ao alterar arquivos, compile/teste quando possivel e diga exatamente o que mudou.",
+        "Foco: analise de mercado baseada somente no contexto observado.",
+        "Esta sessao e SOMENTE LEITURA: nao edite arquivos, nao crie processos, nao envie ordens e nao altere MT5.",
+        "A autoridade de execucao e NONE; descreva dados ausentes sem inventar valores.",
         "Responda em portugues do Brasil, direto e pratico.",
         "Se a pergunta envolver trading, nao prometa lucro e destaque risco quando relevante.",
     ]
@@ -70,12 +64,13 @@ class CodexProvider:
     def __init__(self):
         self.available = codex_available()
 
-    def chat(self, messages, model=None):
+    def chat(self, messages, model=None, timeout=None):
         if not codex_available():
             return {"error": "Codex CLI nao encontrado no PATH. Abra o Codex Desktop ou instale/atualize o Codex CLI."}
 
         prompt = _messages_to_prompt(messages)
-        CODEX_WORKDIR.mkdir(parents=True, exist_ok=True)
+        if not CODEX_WORKDIR.is_dir():
+            return {"error": "Diretorio de trabalho do Codex nao existe; nenhuma pasta foi criada."}
         output_path = None
         temp_image_paths = []
         try:
@@ -89,19 +84,19 @@ class CodexProvider:
                 "--skip-git-repo-check",
                 "--ephemeral",
                 "--sandbox",
-                "workspace-write",
+                "read-only",
                 "-C",
                 str(CODEX_WORKDIR),
                 "-o",
                 output_path,
             ]
-            for extra_dir in CODEX_EXTRA_DIRS:
-                if extra_dir.exists():
-                    cmd.extend(["--add-dir", str(extra_dir)])
             for image_path in image_paths:
                 cmd.extend(["-i", image_path])
-            if model:
-                cmd.extend(["-m", model])
+            requested_model = CODEX_MODEL or str(model or "").strip()
+            if requested_model in _INTERNAL_MODEL_IDS:
+                requested_model = ""
+            if requested_model:
+                cmd.extend(["-m", requested_model])
             cmd.append("-")
 
             proc = subprocess.run(
@@ -110,7 +105,7 @@ class CodexProvider:
                 input=prompt,
                 text=True,
                 capture_output=True,
-                timeout=CODEX_TIMEOUT,
+                timeout=CODEX_TIMEOUT if timeout is None else max(1.0, float(timeout)),
                 encoding="utf-8",
                 errors="replace",
             )
@@ -126,9 +121,13 @@ class CodexProvider:
                 return {"error": err[-1200:]}
             if not text:
                 return {"error": "Codex retornou resposta vazia."}
-            return {"content": text}
+            return {"text": text,
+                    "metadata": {"provider": "codex", "model": CODEX_MODEL or model or "codex-market",
+                                 "sandbox": "read-only", "read_only": True,
+                                 "execution_authority": "NONE"}}
         except subprocess.TimeoutExpired:
-            return {"error": f"Tempo esgotado aguardando o Codex (mais de {CODEX_TIMEOUT}s)."}
+            seconds = CODEX_TIMEOUT if timeout is None else max(1.0, float(timeout))
+            return {"error": f"Tempo esgotado aguardando o Codex (mais de {seconds:g}s)."}
         except Exception as e:
             return {"error": str(e)}
         finally:
@@ -149,3 +148,4 @@ codex_provider = CodexProvider()
 
 def get_codex_provider():
     return codex_provider
+

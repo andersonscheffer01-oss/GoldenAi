@@ -51,6 +51,7 @@ from jarvis_core.security_compatibility import ExecutionSecurityFacade
 from jarvis_core.gateway.auth import AuthManager
 from jarvis_core.http_perimeter import HttpPerimeter
 from jarvis_core.lifecycle import CoreLifecycle
+from jarvis_core.arena_panel import load_arena_report
 
 ACTIVE_RUNTIME_PROFILE = DEFAULT_PROFILE
 ACTIVE_CORE_LIFECYCLE = None
@@ -5133,13 +5134,13 @@ void OnTick()
             {"id": "cohere-code", "label": "Cohere Code", "provider": "openrouter", "available": openrouter_ok, "cost": "Grátis", "description": "Código e respostas rápidas via OpenRouter.", "tasks": ["Código", "Chat rápido"]},
             {"id": "nvidia-lightning", "label": "NVIDIA Nemotron", "provider": "openrouter", "available": openrouter_ok, "cost": "Grátis", "description": "Resposta rápida para análise geral.", "tasks": ["Chat rápido", "Análise"]},
             {"id": "openrouter-free", "label": "Auto Grátis", "provider": "openrouter", "available": openrouter_ok, "cost": "Grátis", "description": "Roteador gratuito da OpenRouter.", "tasks": ["Fallback", "Geral"]},
-            {"id": "codex-market", "label": "Codex GPT-5.3", "provider": "openrouter", "available": openrouter_ok, "cost": "Premium", "description": "IA mais forte para análise de mercado, estratégia, MQL5 e revisão de robôs.", "tasks": ["Mercado", "Estratégia", "MQL5", "Código"]},
+            {"id": "codex-market", "label": "Codex · Mercado (read-only)", "provider": "codex", "available": codex_ok, "cost": "Conta Codex", "description": "Provedor principal local para análise de mercado sem mutação ou execução.", "tasks": ["Mercado", "Análise somente leitura"]},
             {"id": "gemini-flash", "label": "Gemini Flash", "provider": "gemini", "available": gemini_ok, "cost": "Free tier", "description": "Multimodal, prints, documentos e análise rápida.", "tasks": ["Imagens", "PDF", "Análise"]},
             {"id": "gemini-pro", "label": "Gemini Pro", "provider": "gemini", "available": gemini_ok, "cost": "Pode cobrar", "description": "Modelo Gemini mais forte quando habilitado na conta.", "tasks": ["Raciocínio", "Planejamento"]},
             {"id": "groq-fast", "label": "Groq Fast", "provider": "groq", "available": groq_ok, "cost": "Free tier", "description": "Respostas muito rápidas para chat e logs.", "tasks": ["Chat rápido", "Logs"]},
             {"id": "groq-reasoning", "label": "Groq Reasoning", "provider": "groq", "available": groq_ok, "cost": "Free tier", "description": "Raciocínio rápido com modelos open-weight.", "tasks": ["Raciocínio", "Código"]},
             {"id": "groq-llama", "label": "Groq Qwen", "provider": "groq", "available": groq_ok, "cost": "Free tier", "description": "Modelo versátil para respostas do dia a dia e código.", "tasks": ["Geral", "Código"]},
-            {"id": "codex-bridge", "label": "Codex Desktop Bridge", "provider": "codex", "available": codex_ok, "cost": "Conta Codex", "description": "Ponte local para o Codex instalado neste PC. Forte para mercado, estratégia, MQL5 e revisão de robôs.", "tasks": ["Mercado", "Estratégia", "MQL5", "Código"]},
+            {"id": "codex-bridge", "label": "Codex Desktop Bridge · read-only", "provider": "codex", "available": codex_ok, "cost": "Conta Codex", "description": "Ponte local somente leitura para análise e revisão no Codex instalado neste PC.", "tasks": ["Mercado", "Revisão somente leitura"]},
             {"id": "cline-deepseek-flash", "label": "DeepSeek V4 Flash", "provider": "cline", "available": cline_ok, "cost": "ClinePass", "description": "ClinePass rápido para código e automação.", "tasks": ["Código", "Agente"]},
             {"id": "cline-deepseek-v4", "label": "DeepSeek V4 Pro", "provider": "cline", "available": cline_ok, "cost": "ClinePass", "description": "ClinePass forte para programação.", "tasks": ["Código", "Raciocínio"]},
             {"id": "cline-qwen38", "label": "Qwen 3.8 Max", "provider": "cline", "available": cline_ok, "cost": "ClinePass", "description": "Qwen via ClinePass.", "tasks": ["Código", "MQL5"]},
@@ -5199,13 +5200,14 @@ void OnTick()
             return "cohere-code"
         providers = [
             {"id": "ollama", "label": "Locais (Ollama)", "configured": ollama_ok, "detail": "Roda no seu PC, sem API key."},
-            {"id": "openrouter", "label": "OpenRouter grátis/premium", "configured": openrouter_ok, "detail": "Uma chave libera modelos free e premium como Codex."},
+            {"id": "openrouter", "label": "OpenRouter grátis/premium", "configured": openrouter_ok, "detail": "Uma chave libera os modelos free e premium disponíveis na OpenRouter."},
             {"id": "gemini", "label": "Gemini API", "configured": gemini_ok, "detail": "Bom para imagem, PDF e análise geral."},
             {"id": "groq", "label": "GroqCloud", "configured": groq_ok, "detail": "Excelente para velocidade."},
             {"id": "codex", "label": "Codex Desktop", "configured": codex_ok, "detail": "Ponte local usando o Codex CLI autenticado neste computador."},
             {"id": "cline", "label": "ClinePass", "configured": cline_ok, "detail": "Modelos inclusos na assinatura ClinePass."},
         ]
         recommendations = {
+            "market": "codex-market" if codex_ok else ("gemini-pro" if gemini_ok else "openrouter-free"),
             "mql5": "codex-bridge" if codex_ok else ("codex-market" if openrouter_ok else ("qwen2.5-coder:14b" if any(m["id"].startswith("qwen") for m in models) else "cline-qwen38")),
             "vision": "gemini-flash" if gemini_ok else ("qwen2.5vl:7b" if any(m["id"] == "qwen2.5vl:7b" for m in models) else "openrouter-free"),
             "fast": "groq-fast" if groq_ok else ("cline-deepseek-flash" if cline_ok else "cohere-code"),
@@ -5333,6 +5335,7 @@ void OnTick()
             "/api/jarvis/golden/trend-scan": lambda d: self._api_jarvis_golden_trend_scan(d),
             "/api/jarvis/golden/market-live": lambda d: self._api_jarvis_golden_market_live(d),
             "/api/jarvis/golden/panel-analysis": lambda d: self._api_jarvis_golden_panel_analysis(d),
+            "/api/jarvis/golden/arena/report": lambda d: self._api_jarvis_golden_arena_report(d),
             "/api/jarvis/golden/scanner": lambda d: self._api_jarvis_golden_scanner(d),
             "/api/jarvis/golden/robots": lambda d: self._api_jarvis_golden_robots(d),
             "/api/jarvis/golden/robot": lambda d: self._api_jarvis_golden_robot(d),
@@ -6061,6 +6064,10 @@ void OnTick()
         except Exception as exc:
             return {"ok": False, "status": "UNAVAILABLE",
                     "error": type(exc).__name__}
+
+    def _api_jarvis_golden_arena_report(self, data):
+        """Expose the Arena's persisted report without starting simulation."""
+        return load_arena_report()
 
     def _execute_jarvis_read(self, tool_name, arguments=None, audit_context=None):
         try:
@@ -7541,3 +7548,4 @@ if __name__ == "__main__":
     parser.add_argument("--runtime-profile", default="default")
     args = parser.parse_args()
     start_server(args.port, args.runtime_profile)
+

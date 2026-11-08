@@ -37,6 +37,8 @@ _MACRO_CACHE = {"expires": 0, "data": None}
 _STRENGTH_CACHE = {"expires": 0, "data": None}
 _CALENDAR_CACHE = {"expires": 0, "items": [], "state": "configure"}
 _CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "BRL", "MXN", "ZAR", "CNH", "CNY", "SGD", "HKD", "NOK", "SEK", "DKK", "PLN", "HUF", "CZK", "TRY", "ILS", "INR", "THB", "GHS", "NGN", "KES", "TZS"}
+_READONLY_MT5_METADATA = {"provider": "MT5", "read_only": True,
+                          "execution_authority": "NONE"}
 
 
 def _mt5_enabled(override=None):
@@ -44,9 +46,17 @@ def _mt5_enabled(override=None):
         return bool(override)
     try:
         from jarvis_core.runtime_profile import active_runtime_profile
-        return bool(active_runtime_profile().mt5_enabled)
+        profile = active_runtime_profile()
+        return bool(getattr(profile, "market_data_read_enabled", False)
+                    and getattr(profile, "mt5_market_data_read_enabled", False))
     except Exception:
         return True
+
+
+def _readonly_mt5_connection():
+    """Reuse the canonical open-terminal attachment without side effects."""
+    from jarvis_core.tools.market_readonly import get_readonly_mt5_connection
+    return get_readonly_mt5_connection()
 
 def _forex_symbols(mt5):
     result = []
@@ -56,7 +66,6 @@ def _forex_symbols(mt5):
             continue
         daily_change = None
         try:
-            mt5.symbol_select(info.name, True)
             rates = mt5.copy_rates_from_pos(info.name, mt5.TIMEFRAME_D1, 0, 2)
             if rates is not None and len(rates) >= 2 and float(rates[-2]["close"]):
                 daily_change = round((float(rates[-1]["close"]) / float(rates[-2]["close"]) - 1) * 100, 4)
@@ -88,17 +97,19 @@ def _currency_strength(mt5, pairs):
 def get_forex_analysis(symbol=None, mt5_enabled=None):
     try:
         if not _mt5_enabled(mt5_enabled):
-            return {"ok": False, "error": "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE", "pairs": []}
-        import MetaTrader5 as mt5
-        from mt5_connector import ensure_connection
-        if not ensure_connection():
-            return {"ok": False, "error": "MetaTrader 5 desconectado", "pairs": []}
+            return {**_READONLY_MT5_METADATA, "ok": False,
+                    "error": "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE", "pairs": []}
+        mt5, _terminal, connection_error = _readonly_mt5_connection()
+        if connection_error or mt5 is None:
+            return {**_READONLY_MT5_METADATA, "ok": False,
+                    "error": connection_error or "MetaTrader 5 desconectado", "pairs": []}
         pairs = _forex_symbols(mt5)
         if not symbol:
-            return {"ok": True, "pairs": pairs, "count": len(pairs), "source": "MetaTrader 5"}
+            return {**_READONLY_MT5_METADATA, "ok": True, "pairs": pairs,
+                    "count": len(pairs), "source": "MetaTrader 5"}
         if symbol not in {row["symbol"] for row in pairs}:
-            return {"ok": False, "error": "Paridade nao encontrada", "pairs": pairs}
-        mt5.symbol_select(symbol, True)
+            return {**_READONLY_MT5_METADATA, "ok": False,
+                    "error": "Paridade nao encontrada", "pairs": pairs}
         info, tick = mt5.symbol_info(symbol), mt5.symbol_info_tick(symbol)
         frames = (("M15", mt5.TIMEFRAME_M15), ("H1", mt5.TIMEFRAME_H1), ("H4", mt5.TIMEFRAME_H4), ("D1", mt5.TIMEFRAME_D1))
         trends, main_rates = [], None
@@ -115,7 +126,8 @@ def get_forex_analysis(symbol=None, mt5_enabled=None):
             if label == "M15": main_rates = rates
         daily = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 16)
         if daily is None or len(daily) < 2 or main_rates is None:
-            return {"ok": False, "error": "Historico insuficiente", "pairs": pairs}
+            return {**_READONLY_MT5_METADATA, "ok": False,
+                    "error": "Historico insuficiente", "pairs": pairs}
         day, previous = daily[-1], daily[-2]
         price = float(tick.bid) if tick and tick.bid else float(main_rates[-1]["close"])
         high, low = float(day["high"]), float(day["low"])
@@ -147,7 +159,7 @@ def get_forex_analysis(symbol=None, mt5_enabled=None):
         spread_quality = 20 if (tick and info.point and (tick.ask-tick.bid)/info.point <= 20) else 10
         alignment_quality = int(bulls / len(aligned) * 30) if direction == "Alta" and aligned else int((len(aligned)-bulls) / len(aligned) * 30) if aligned else 0
         quality = min(100, 30 + alignment_quality + spread_quality + (20 if 15 <= ((price-low)/(high-low)*100 if high != low else 50) <= 85 else 10))
-        return {"ok": True, "pairs": pairs, "analysis": {"symbol": symbol, "price": round(price, info.digits),
+        return {**_READONLY_MT5_METADATA, "ok": True, "pairs": pairs, "analysis": {"symbol": symbol, "price": round(price, info.digits),
                 "bid": round(float(tick.bid), info.digits) if tick else None, "ask": round(float(tick.ask), info.digits) if tick else None,
                 "spread_points": round((tick.ask-tick.bid)/info.point, 1) if tick and info.point else None,
                 "change_day": round((price/float(previous["close"])-1)*100, 3), "open": round(float(day["open"]), info.digits),
@@ -167,27 +179,27 @@ def get_forex_analysis(symbol=None, mt5_enabled=None):
                 "quality_label": "Alta" if quality >= 75 else "Media" if quality >= 55 else "Baixa",
                 "updated_at": datetime.now(timezone.utc).isoformat(), "source": "MetaTrader 5"}}
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "pairs": []}
+        return {**_READONLY_MT5_METADATA, "ok": False, "error": str(exc), "pairs": []}
 
 def get_market_chart(symbol="XAUUSD", timeframe="M15", mt5_enabled=None):
     try:
         if not _mt5_enabled(mt5_enabled):
-            return {"ok": False, "error": "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE",
+            return {**_READONLY_MT5_METADATA, "ok": False,
+                    "error": "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE",
                     "symbol": symbol, "timeframe": timeframe}
-        import MetaTrader5 as mt5
-        from mt5_connector import ensure_connection
-        if not ensure_connection():
-            return {"ok": False, "error": "MetaTrader 5 desconectado"}
+        mt5, _terminal, connection_error = _readonly_mt5_connection()
+        if connection_error or mt5 is None:
+            return {**_READONLY_MT5_METADATA, "ok": False,
+                    "error": connection_error or "MetaTrader 5 desconectado"}
         frames = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
                   "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1}
         timeframe = str(timeframe or "M15").upper()
         if timeframe not in frames:
-            return {"ok": False, "error": "Timeframe invalido"}
-        mt5.symbol_select(symbol, True)
+            return {**_READONLY_MT5_METADATA, "ok": False, "error": "Timeframe invalido"}
         info = mt5.symbol_info(symbol)
         rates = mt5.copy_rates_from_pos(symbol, frames[timeframe], 0, 260)
         if info is None or rates is None or len(rates) < 20:
-            return {"ok": False, "error": "Historico insuficiente"}
+            return {**_READONLY_MT5_METADATA, "ok": False, "error": "Historico insuficiente"}
         digits = info.digits
         candles = [{"time": int(row["time"]), "open": round(float(row["open"]), digits),
                     "high": round(float(row["high"]), digits), "low": round(float(row["low"]), digits),
@@ -276,7 +288,8 @@ def get_market_chart(symbol="XAUUSD", timeframe="M15", mt5_enabled=None):
         losses = [max(0, closes[i-1] - closes[i]) for i in range(1, len(closes))][-14:]
         avg_gain, avg_loss = sum(gains) / 14, sum(losses) / 14
         rsi = 100 if avg_loss == 0 else 100 - 100 / (1 + avg_gain / avg_loss)
-        return {"ok": True, "symbol": symbol, "timeframe": timeframe, "candles": candles,
+        return {**_READONLY_MT5_METADATA, "ok": True, "provider_symbol": symbol,
+                "symbol": symbol, "timeframe": timeframe, "candles": candles,
                 "price": last, "change": round((last / first - 1) * 100, 3) if first else 0,
                 "rsi": round(rsi, 1), "atr": round(atr, digits), "levels": [{"price": round(c["price"], digits), "kind": c["kind"],
                 "touches": c["touches"], "relevance": "alta" if c["quality"] >= 65 else "media",
@@ -286,37 +299,48 @@ def get_market_chart(symbol="XAUUSD", timeframe="M15", mt5_enabled=None):
                 "structure_events": structure_events[-8:],
                 "source": "MetaTrader 5", "updated_at": datetime.now(timezone.utc).isoformat()}
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {**_READONLY_MT5_METADATA, "ok": False, "error": str(exc),
+                "provider_symbol": symbol}
 
 def get_market_tick(symbol="XAUUSD", mt5_enabled=None):
     """Retorna o tick bruto do MT5 sem depender do cache dos candles."""
     try:
         if not _mt5_enabled(mt5_enabled):
             return {"ok": False, "error": "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE",
-                    "symbol": symbol}
-        import MetaTrader5 as mt5
-        from mt5_connector import ensure_connection
-        if not ensure_connection():
-            return {"ok": False, "error": "MetaTrader 5 desconectado"}
-        mt5.symbol_select(symbol, True)
+                    "provider": "MT5", "provider_symbol": symbol,
+                    "symbol": symbol, "read_only": True,
+                    "execution_authority": "NONE"}
+        mt5, _terminal, connection_error = _readonly_mt5_connection()
+        if connection_error or mt5 is None:
+            return {"ok": False, "error": connection_error or "MetaTrader 5 desconectado",
+                    "provider": "MT5", "provider_symbol": symbol,
+                    "symbol": symbol, "read_only": True,
+                    "execution_authority": "NONE"}
         info = mt5.symbol_info(symbol)
         tick = mt5.symbol_info_tick(symbol)
         if info is None or tick is None:
-            return {"ok": False, "error": "Tick indisponivel"}
+            return {"ok": False, "error": "Tick indisponivel", "provider": "MT5",
+                    "provider_symbol": symbol, "symbol": symbol, "read_only": True,
+                    "execution_authority": "NONE"}
         price = float(tick.bid or tick.last or tick.ask)
-        return {"ok": True, "symbol": symbol, "bid": round(float(tick.bid), info.digits),
+        return {"ok": True, "provider": "MT5", "provider_symbol": symbol,
+                "symbol": symbol, "bid": round(float(tick.bid), info.digits),
                 "ask": round(float(tick.ask), info.digits), "price": round(price, info.digits),
                 "spread": round((float(tick.ask) - float(tick.bid)) / info.point, 1) if info.point else 0,
-                "time": int(tick.time), "time_msc": int(tick.time_msc), "source": "MetaTrader 5"}
+                "time": int(tick.time), "time_msc": int(tick.time_msc),
+                "source": "MetaTrader 5", "read_only": True,
+                "execution_authority": "NONE"}
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": str(exc), "provider": "MT5",
+                "provider_symbol": symbol, "symbol": symbol, "read_only": True,
+                "execution_authority": "NONE"}
 
 def get_market_ai_context(symbol="XAUUSD", mt5_enabled=None):
     """Contexto verificável e multitemporal usado exclusivamente pela análise IA."""
     symbol = str(symbol or "XAUUSD")
     mt5_allowed = _mt5_enabled(mt5_enabled)
     if not mt5_allowed:
-        return {
+        return {**_READONLY_MT5_METADATA,
             "ok": False,
             "status": "SOURCE_DISABLED",
             "availability": "SOURCE_DISABLED",
@@ -384,7 +408,8 @@ def get_market_ai_context(symbol="XAUUSD", mt5_enabled=None):
     bullish = sum(item["trend"] == "alta" for item in available)
     bearish = sum(item["trend"] == "baixa" for item in available)
     alignment = "alta alinhada" if bullish >= 4 else "baixa alinhada" if bearish >= 4 else "misto"
-    return {"ok": bool(timeframes), "symbol": symbol, "multitimeframe": timeframes,
+    return {**_READONLY_MT5_METADATA, "ok": bool(timeframes),
+            "provider_symbol": symbol, "symbol": symbol, "multitimeframe": timeframes,
             "alignment": alignment, "bullish_timeframes": bullish, "bearish_timeframes": bearish,
             "fundamentals": fundamentals, "errors": errors,
             "updated_at": datetime.now(timezone.utc).isoformat(), "source": "MetaTrader 5 e fontes macro configuradas"}
@@ -471,16 +496,14 @@ def _mt5_snapshot(mt5_enabled=None):
     if not _mt5_enabled(mt5_enabled):
         return [], "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE"
     try:
-        import MetaTrader5 as mt5
-        from mt5_connector import ensure_connection
-        if not ensure_connection():
-            return [], "MT5 desconectado"
+        mt5, _terminal, connection_error = _readonly_mt5_connection()
+        if connection_error or mt5 is None:
+            return [], connection_error or "MT5 desconectado"
         rows = []
         for group, symbol, name, aliases in ASSETS:
             selected = next((alias for alias in aliases if mt5.symbol_info(alias) is not None), None)
             if not selected:
                 continue
-            mt5.symbol_select(selected, True)
             rates = mt5.copy_rates_from_pos(selected, mt5.TIMEFRAME_M5, 0, 32)
             series = [round(float(row["close"]), 6) for row in rates][-32:] if rates is not None else []
             tick = mt5.symbol_info_tick(selected)
@@ -498,9 +521,8 @@ def _gold_levels(mt5_enabled=None):
     if not _mt5_enabled(mt5_enabled):
         return None
     try:
-        import MetaTrader5 as mt5
-        from mt5_connector import ensure_connection
-        if not ensure_connection():
+        mt5, _terminal, connection_error = _readonly_mt5_connection()
+        if connection_error or mt5 is None:
             return None
         symbol = next((name for name in ("XAUUSD", "GOLD") if mt5.symbol_info(name) is not None), None)
         rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 1, 1) if symbol else None
@@ -515,7 +537,8 @@ def _gold_levels(mt5_enabled=None):
             "S1": 2 * pivot - high, "S2": pivot - spread,
             "S3": low - 2 * (high - pivot), "S4": pivot - 3 * spread,
         }
-        return {"symbol": symbol, "method": "Pivos classicos do candle D1 anterior",
+        return {**_READONLY_MT5_METADATA, "provider_symbol": symbol,
+                "symbol": symbol, "method": "Pivos classicos do candle D1 anterior",
                 "reference_date": datetime.fromtimestamp(int(rates[0]["time"]), timezone.utc).date().isoformat(),
                 "previous": {"high": high, "low": low, "close": close},
                 "levels": [{"label": key, "price": round(value, 3),
@@ -529,14 +552,12 @@ def _gold_snapshot(mt5_enabled=None):
     if not _mt5_enabled(mt5_enabled):
         return None
     try:
-        import MetaTrader5 as mt5
-        from mt5_connector import ensure_connection
-        if not ensure_connection():
+        mt5, _terminal, connection_error = _readonly_mt5_connection()
+        if connection_error or mt5 is None:
             return None
         symbol = next((name for name in ("XAUUSD", "GOLD") if mt5.symbol_info(name) is not None), None)
         if not symbol:
             return None
-        mt5.symbol_select(symbol, True)
         daily = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 22)
         intraday = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 80)
         tick = mt5.symbol_info_tick(symbol)
@@ -553,7 +574,7 @@ def _gold_snapshot(mt5_enabled=None):
         ema_slow = sum(closes[-50:]) / 50
         day_range = day_high - day_low
         position = ((price - day_low) / day_range * 100) if day_range else 50
-        return {
+        return {**_READONLY_MT5_METADATA, "provider_symbol": symbol,
             "symbol": symbol,
             "price": round(price, 3),
             "change": round(((price / previous_close) - 1) * 100, 3) if previous_close else 0,
@@ -662,7 +683,8 @@ def get_market_overview(mt5_enabled=None):
     news, news_source = _market_news()
     assets = mt5_rows
     calendar, calendar_state = _economic_calendar()
-    return {"ok": bool(assets), "updated_at": datetime.now(timezone.utc).isoformat(),
+    return {**_READONLY_MT5_METADATA, "ok": bool(assets),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "assets": assets, "gold_levels": _gold_levels(mt5_enabled=mt5_enabled),
             "gold": _gold_snapshot(mt5_enabled=mt5_enabled), "macro": _macro_snapshot(assets), "news": news,
             "news_source": news_source, "calendar": [],
@@ -672,3 +694,4 @@ def get_market_overview(mt5_enabled=None):
                 {"name": "Trading Economics", "state": "ready" if te_ready else "configure", "detail": "Calendario economico"},
                 {"name": "Twelve Data", "state": "ready" if td_ready else "configure", "detail": "Cobertura multiativos"},
             ], "configured": {"trading_economics": te_ready, "twelve_data": td_ready}}
+

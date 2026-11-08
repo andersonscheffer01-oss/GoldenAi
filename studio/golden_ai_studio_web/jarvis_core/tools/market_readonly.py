@@ -21,6 +21,7 @@ _TERMINAL_PATHS = (
     Path(r"C:\Program Files\MetaTrader 5\terminal64.exe"),
     Path(r"C:\Users\Anderson\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\terminal64.exe"),
 )
+_TERMINAL_PROCESS_NAMES = frozenset({"terminal64.exe", "terminal.exe"})
 _TIMEFRAMES = {"M1": "TIMEFRAME_M1", "M5": "TIMEFRAME_M5",
                "M15": "TIMEFRAME_M15", "M30": "TIMEFRAME_M30",
                "H1": "TIMEFRAME_H1",
@@ -30,6 +31,8 @@ _TIMEFRAME_SECONDS = {"M1": 60, "M5": 300, "M15": 900,
                       "D1": 86400}
 _MAX_CANDLES = 200
 _MAX_RESULTS = 10
+_READONLY_MT5_CONTRACT = {"provider": "MT5", "read_only": True,
+                          "execution_authority": "NONE"}
 _TREND_TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
 _TREND_WEIGHTS = {"M1": 0.05, "M5": 0.10, "M15": 0.15, "M30": 0.15,
                   "H1": 0.20, "H4": 0.20, "D1": 0.15}
@@ -112,6 +115,7 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
 def _offline(reason: str, **extra: Any) -> dict[str, Any]:
     disabled = str(reason or "").startswith("SOURCE_DISABLED")
     return {
+        **_READONLY_MT5_CONTRACT,
         "ok": True,
         "status": "DISABLED_BY_PROFILE" if disabled else "OFFLINE",
         "connected": False,
@@ -123,30 +127,116 @@ def _offline(reason: str, **extra: Any) -> dict[str, Any]:
 
 
 def _terminal_available() -> bool:
-    return any(path.is_file() for path in _TERMINAL_PATHS)
+    return bool(_discover_open_mt5_terminals())
+
+
+def _discover_open_mt5_terminals() -> list[dict[str, Any]]:
+    """Enumerate active MT5 terminal processes without starting anything."""
+    try:
+        import psutil
+    except Exception:
+        return []
+    candidates: dict[tuple[int, str], dict[str, Any]] = {}
+    try:
+        processes = psutil.process_iter(("name", "exe"))
+        for process in processes:
+            try:
+                info = process.info or {}
+                executable = str(info.get("exe") or "").strip()
+                process_name = str(info.get("name") or "").strip().casefold()
+                executable_name = Path(executable).name.casefold()
+                if not executable or (process_name not in _TERMINAL_PROCESS_NAMES
+                                      and executable_name not in _TERMINAL_PROCESS_NAMES):
+                    continue
+                resolved = str(Path(executable).resolve())
+                pid = int(getattr(process, "pid", 0) or 0)
+                key = (pid, resolved.casefold())
+                candidates[key] = {
+                    "pid": pid, "executable": resolved,
+                    "process_name": process_name or executable_name,
+                }
+            except (AttributeError, KeyError, TypeError, ValueError, OSError):
+                continue
+    except Exception:
+        return []
+    return sorted(candidates.values(), key=lambda item: (
+        str(item.get("executable") or "").casefold(), int(item.get("pid") or 0)))
+
+
+def _shutdown_mt5(mt5: Any) -> None:
+    """Release only the Python API attachment; never closes the terminal."""
+    shutdown = getattr(mt5, "shutdown", None)
+    if callable(shutdown):
+        try:
+            shutdown()
+        except Exception:
+            pass
+
+
+def _candidate_is_still_open(candidate: dict[str, Any]) -> bool:
+    """Revalidate the same PID/path immediately around the MT5 attach call."""
+    try:
+        pid = int(candidate.get("pid") or 0)
+        executable = str(Path(str(candidate.get("executable") or "")).resolve())
+        return any(
+            int(item.get("pid") or 0) == pid
+            and str(item.get("executable") or "").casefold() == executable.casefold()
+            for item in _discover_open_mt5_terminals()
+        )
+    except (AttributeError, TypeError, ValueError, OSError):
+        return False
+
+
+def _attach_mt5_candidate(mt5: Any, candidate: dict[str, Any]) -> dict[str, Any] | None:
+    """Attach to one already-running candidate and collect read-only identity."""
+    try:
+        if not _candidate_is_still_open(candidate):
+            return None
+        if not mt5.initialize(path=str(candidate["executable"]), timeout=3000, portable=False):
+            _shutdown_mt5(mt5)
+            return None
+        if not _candidate_is_still_open(candidate):
+            _shutdown_mt5(mt5)
+            return None
+        terminal = mt5.terminal_info()
+        if terminal is None or not bool(_field(terminal, "connected", False)):
+            _shutdown_mt5(mt5)
+            return None
+        try:
+            account = mt5.account_info()
+        except Exception:
+            account = None
+        identity_values = [
+            _field(account, "server", ""), _field(account, "company", ""),
+            _field(terminal, "company", ""), _field(terminal, "name", ""),
+            candidate.get("executable", ""),
+        ]
+        identity = " ".join(str(value or "") for value in identity_values)
+        return {
+            "candidate": candidate, "terminal": terminal, "account": account,
+            "is_hantec": "hantec" in identity.casefold(),
+        }
+    except Exception:
+        _shutdown_mt5(mt5)
+        return None
 
 
 def _connection() -> tuple[Any, Any, Any, str]:
     """Return the existing MT5 client, terminal, account and error reason."""
     try:
-        from jarvis_core.runtime_profile import active_runtime_profile
-        if not active_runtime_profile().mt5_enabled:
-            return None, None, None, "SOURCE_DISABLED: MT5_DISABLED_BY_PROFILE"
-        import MetaTrader5 as mt5
-        from mt5_connector import ensure_connection
-
-        connected = bool(ensure_connection())
-        terminal = mt5.terminal_info()
+        mt5, terminal, reason = _market_data_connection()
+        if reason or mt5 is None:
+            return mt5, terminal, None, reason or "MT5 desconectado"
         account = mt5.account_info()
-        if not connected or not terminal or not getattr(terminal, "connected", False):
-            return mt5, terminal, account, "MT5 desconectado"
+        if account is None:
+            return mt5, terminal, account, "MT5 conta indisponível"
         return mt5, terminal, account, ""
     except Exception as exc:
         return None, None, None, f"MT5 indisponível: {type(exc).__name__}"
 
 
 def _market_data_connection() -> tuple[Any, Any, str]:
-    """Attach to the approved running terminal without legacy auto-launch paths."""
+    """Attach to an open terminal, preferring Hantec and never auto-launching."""
     try:
         from jarvis_core.runtime_profile import active_runtime_profile
         profile = active_runtime_profile()
@@ -154,42 +244,50 @@ def _market_data_connection() -> tuple[Any, Any, str]:
             return None, None, "SOURCE_DISABLED: MARKET_DATA_READ_DISABLED_BY_PROFILE"
         if not profile.mt5_market_data_read_enabled:
             return None, None, "SOURCE_DISABLED: MT5_MARKET_DATA_READ_DISABLED_BY_PROFILE"
-        import psutil
-        approved_exe = _TERMINAL_PATHS[0].resolve()
-        running = []
-        for process in psutil.process_iter(("name", "exe")):
-            try:
-                if (str(process.info.get("name") or "").casefold() == "terminal64.exe"
-                        and Path(process.info.get("exe") or "").resolve() == approved_exe):
-                    running.append((process.pid, process.info.get("exe")))
-            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
-                continue
-        if len(running) != 1:
-            reason = "APPROVED_TERMINAL_NOT_RUNNING" if not running else "APPROVED_TERMINAL_AMBIGUOUS"
-            return None, None, reason
-
         import MetaTrader5 as mt5
-        if not mt5.initialize(path=str(approved_exe), timeout=3000, portable=False):
+        candidates = _discover_open_mt5_terminals()
+        if not candidates:
+            return None, None, "NO_OPEN_MT5_TERMINAL"
+
+        attached: list[dict[str, Any]] = []
+        active_attachment: dict[str, Any] | None = None
+        for candidate in candidates:
+            if active_attachment is not None:
+                _shutdown_mt5(mt5)
+                active_attachment = None
+            attachment = _attach_mt5_candidate(mt5, candidate)
+            if attachment is not None:
+                attached.append(attachment)
+                active_attachment = attachment
+
+        hantec = [item for item in attached if item["is_hantec"]]
+        if len(hantec) > 1:
+            _shutdown_mt5(mt5)
+            return None, None, "MT5_HANTEC_TERMINAL_AMBIGUOUS"
+        if len(hantec) == 1:
+            selected = hantec[0]
+        elif len(attached) == 1:
+            selected = attached[0]
+        elif len(attached) > 1:
+            _shutdown_mt5(mt5)
+            return None, None, "MT5_TERMINAL_AMBIGUOUS"
+        else:
+            return None, None, "MT5_TERMINAL_NOT_CONNECTED"
+
+        if active_attachment is selected:
+            return mt5, selected["terminal"], ""
+        _shutdown_mt5(mt5)
+        final_attachment = _attach_mt5_candidate(mt5, selected["candidate"])
+        if final_attachment is None:
             return None, None, "EXISTING_TERMINAL_ATTACH_FAILED"
-        terminal = mt5.terminal_info()
-        if terminal is None or not bool(_field(terminal, "connected", False)):
-            return None, terminal, "EXISTING_TERMINAL_NOT_CONNECTED"
-        data_path = str(_field(terminal, "data_path", "") or "")
-        if Path(data_path).name.upper() != "D0E8209F77C8CF37AD8BF550E51FF075":
-            return None, terminal, "APPROVED_DATA_ROOT_MISMATCH"
-        current = []
-        for process in psutil.process_iter(("name", "exe")):
-            try:
-                if (str(process.info.get("name") or "").casefold() == "terminal64.exe"
-                        and Path(process.info.get("exe") or "").resolve() == approved_exe):
-                    current.append((process.pid, process.info.get("exe")))
-            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
-                continue
-        if sorted(current) != sorted(running):
-            return None, terminal, "TERMINAL_PROCESS_CHANGED_DURING_ATTACH"
-        return mt5, terminal, ""
+        return mt5, final_attachment["terminal"], ""
     except Exception as exc:
         return None, None, f"MARKET_DATA_ATTACH_FAILED:{type(exc).__name__}"
+
+
+def get_readonly_mt5_connection() -> tuple[Any, Any, str]:
+    """Public shared boundary for canonical market-data readers."""
+    return _market_data_connection()
 
 
 def _utc_iso(epoch: Any) -> str | None:
@@ -211,7 +309,8 @@ def _classify_mt5_instrument(info: Any, mt5: Any) -> tuple[str, str]:
         ({"forex", "fx", "currency", "currencies"}, "FOREX"),
         ({"index", "indices"}, "INDICES"),
         ({"crypto", "cryptocurrency", "cryptocurrencies"}, "CRYPTO"),
-        ({"metal", "metals"}, "METALS"),
+        ({"metal", "metals", "gold", "silver", "platinum", "palladium",
+          "preciousmetal", "preciousmetals"}, "METALS"),
         ({"commodity", "commodities"}, "COMMODITIES"),
     )
     path_class = next((asset_class for labels, asset_class in path_classes
@@ -487,7 +586,7 @@ def mt5_status() -> dict[str, Any]:
     if reason:
         return _offline(reason, terminal_available=bool(terminal) or _terminal_available(),
                         account_available=bool(account), server=_field(account, "server"))
-    return {
+    return {**_READONLY_MT5_CONTRACT,
         "ok": True,
         "status": "CONNECTED",
         "connected": True,
@@ -506,7 +605,7 @@ def mt5_account_info() -> dict[str, Any]:
         return _offline(reason or "Conta MT5 indisponível", account=None)
     login = _field(account, "login")
     masked_login = f"***{str(login)[-4:]}" if login is not None else None
-    return {
+    return {**_READONLY_MT5_CONTRACT,
         "ok": True,
         "status": "CONNECTED",
         "account": {
@@ -546,7 +645,7 @@ def mt5_positions() -> dict[str, Any]:
             "swap": _field(row, "swap"),
             "ticket": _field(row, "ticket"),
         } for row in rows]
-        return {"ok": True, "status": "CONNECTED", "positions": positions,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "CONNECTED", "positions": positions,
                 "count": len(positions), "timestamp": _timestamp()}
     except Exception as exc:
         return _offline(f"Falha ao consultar posições: {type(exc).__name__}", positions=[])
@@ -567,7 +666,7 @@ def mt5_orders() -> dict[str, Any]:
             "tp": _field(row, "tp"),
             "ticket": _field(row, "ticket"),
         } for row in rows]
-        return {"ok": True, "status": "CONNECTED", "orders": orders,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "CONNECTED", "orders": orders,
                 "count": len(orders), "timestamp": _timestamp()}
     except Exception as exc:
         return _offline(f"Falha ao consultar ordens: {type(exc).__name__}", orders=[])
@@ -599,17 +698,17 @@ def mt5_symbol_tick(symbol: str) -> dict[str, Any]:
         return _offline(reason or "MT5 desconectado", requested_symbol=symbol, tick=None)
     resolved, suggestions, resolve_error = _resolve_symbol(mt5, symbol)
     if not resolved:
-        return {"ok": True, "status": "NOT_FOUND", "requested_symbol": symbol,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "NOT_FOUND", "requested_symbol": symbol,
                 "suggestions": suggestions, "reason": resolve_error,
                 "timestamp": _timestamp()}
     try:
         info, tick = mt5.symbol_info(resolved), mt5.symbol_info_tick(resolved)
         if tick is None:
-            return {"ok": True, "status": "DEGRADED", "symbol": resolved,
+            return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "DEGRADED", "symbol": resolved,
                     "reason": "Tick indisponível", "timestamp": _timestamp()}
         bid, ask = float(tick.bid or 0), float(tick.ask or 0)
         point = float(_field(info, "point", 0) or 0)
-        return {"ok": True, "status": "CONNECTED", "symbol": resolved,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "CONNECTED", "symbol": resolved,
                 "bid": bid, "ask": ask, "last": _field(tick, "last"),
                 "spread": round((ask - bid) / point, 4) if point else None,
                 "time": _field(tick, "time"), "timestamp": _timestamp(),
@@ -624,12 +723,12 @@ def mt5_symbol_info(symbol: str) -> dict[str, Any]:
         return _offline(reason or "MT5 desconectado", requested_symbol=symbol, info=None)
     resolved, suggestions, resolve_error = _resolve_symbol(mt5, symbol)
     if not resolved:
-        return {"ok": True, "status": "NOT_FOUND", "requested_symbol": symbol,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "NOT_FOUND", "requested_symbol": symbol,
                 "suggestions": suggestions, "reason": resolve_error,
                 "timestamp": _timestamp()}
     try:
         info = mt5.symbol_info(resolved)
-        return {"ok": True, "status": "CONNECTED", "symbol": resolved,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "CONNECTED", "symbol": resolved,
                 "info": {"symbol": _field(info, "name", resolved),
                          "description": _field(info, "description"),
                          "digits": _field(info, "digits"),
@@ -651,15 +750,16 @@ def mt5_search_symbols(query: str, asset_class: str = "ALL", limit: int = 40) ->
     """Enumerate or search provider instruments using scoped read-only metadata."""
     query = str(query or "").strip()
     if len(query) > 64:
-        return {"ok": False, "status": "INVALID_QUERY", "assets": [],
+        return {**_READONLY_MT5_CONTRACT, "ok": False, "status": "INVALID_QUERY", "assets": [],
                 "reason": "QUERY_TOO_LONG"}
     requested_class = str(asset_class or "ALL").strip().upper()
     if requested_class not in {"ALL", *_MT5_ASSET_CLASSES}:
-        return {"ok": False, "status": "INVALID_ASSET_CLASS", "assets": []}
+        return {**_READONLY_MT5_CONTRACT, "ok": False,
+                "status": "INVALID_ASSET_CLASS", "assets": []}
     mt5, _, reason = _market_data_connection()
     if reason or mt5 is None:
         status = "SOURCE_DISABLED" if "SOURCE_DISABLED" in str(reason) else "SOURCE_UNAVAILABLE"
-        return {"ok": False, "status": status, "provider": "MT5",
+        return {**_READONLY_MT5_CONTRACT, "ok": False, "status": status,
                 "assets": [], "reason": str(reason or "MT5_UNAVAILABLE")[:120]}
 
     needle = re.sub(r"[^A-Z0-9]", "", query.upper())
@@ -740,13 +840,15 @@ def mt5_search_symbols(query: str, asset_class: str = "ALL", limit: int = 40) ->
             classification_counts[kind] += 1
             if needle and len(assets) >= max(1, min(int(limit), 100)):
                 break
-        return {"ok": True, "status": "AVAILABLE" if assets else "NO_MATCH",
-                "provider": "MT5", "assets": assets, "query": query,
+        return {**_READONLY_MT5_CONTRACT, "ok": True,
+                "status": "AVAILABLE" if assets else "NO_MATCH",
+                "assets": assets, "query": query,
                 "observed_at": _timestamp(), "read_only": True,
                 "enumerated_count": len(rows), "classification_counts": classification_counts,
                 "execution_authority": "NONE", "capability": "MT5_MARKET_DATA_READ"}
     except Exception as exc:
-        return {"ok": False, "status": "SOURCE_UNAVAILABLE", "provider": "MT5",
+        return {**_READONLY_MT5_CONTRACT, "ok": False,
+                "status": "SOURCE_UNAVAILABLE",
                 "assets": [], "reason": type(exc).__name__,
                 "observed_at": _timestamp(), "read_only": True}
 
@@ -760,7 +862,8 @@ def mt5_market_data_snapshot(symbol: str, timeframe: str = "M15", count: int = 1
     except (TypeError, ValueError):
         count = 120
     if not symbol or timeframe not in _TIMEFRAMES:
-        return {"ok": False, "status": "INVALID_REQUEST", "reason": "SYMBOL_OR_TIMEFRAME_INVALID"}
+        return {**_READONLY_MT5_CONTRACT, "ok": False, "status": "INVALID_REQUEST",
+                "provider_symbol": symbol, "reason": "SYMBOL_OR_TIMEFRAME_INVALID"}
     mt5, terminal, reason = _market_data_connection()
     if reason or mt5 is None:
         return {"ok": False, "status": "SOURCE_DISABLED" if "SOURCE_DISABLED" in reason else "SOURCE_UNAVAILABLE",
@@ -856,7 +959,8 @@ def mt5_market_data_snapshot(symbol: str, timeframe: str = "M15", count: int = 1
             "session": "UNKNOWN",
         }
         return {
-            "ok": True, "status": "PARTIAL",
+            "ok": True, "status": "PARTIAL", "provider": "MT5",
+            "provider_symbol": symbol, "read_only": True,
             "snapshot_id": "market_snapshot_" + uuid.uuid4().hex,
             "asset": {"asset_id": f"mt5:{symbol}", "display_name": _field(info, "description") or symbol,
                       "canonical_symbol": (f"{base}/{quote_currency}"
@@ -930,7 +1034,8 @@ def mt5_market_data_update(symbol: str, timeframe: str = "M15") -> dict[str, Any
     symbol = str(symbol or "").strip()[:64]
     timeframe = str(timeframe or "M15").strip().upper()
     if not symbol or timeframe not in _TIMEFRAMES:
-        return {"ok": False, "status": "INVALID_REQUEST", "reason": "SYMBOL_OR_TIMEFRAME_INVALID"}
+        return {**_READONLY_MT5_CONTRACT, "ok": False, "status": "INVALID_REQUEST",
+                "provider_symbol": symbol, "reason": "SYMBOL_OR_TIMEFRAME_INVALID"}
     mt5, _terminal, reason = _market_data_connection()
     if reason or mt5 is None:
         return {"ok": False, "status": "SOURCE_DISABLED" if "SOURCE_DISABLED" in reason else "SOURCE_UNAVAILABLE",
@@ -968,6 +1073,7 @@ def mt5_market_data_update(symbol: str, timeframe: str = "M15") -> dict[str, Any
         return {"ok": bool(tick is not None and candle is not None),
                 "status": "AVAILABLE" if tick is not None and candle else "PARTIAL",
                 "provider": "MT5", "provider_symbol": symbol,
+                "snapshot_id": "market_update_" + uuid.uuid4().hex,
                 "asset_class": asset_class, "asset_class_source": asset_class_source,
                 "timeframe": timeframe,
                 "quote": {**quote, "time": quote_epoch,
@@ -999,12 +1105,12 @@ def mt5_recent_candles(symbol: str, timeframe: str = "M15", count: int = 100) ->
                         timeframe=timeframe, candles=[])
     resolved, suggestions, resolve_error = _resolve_symbol(mt5, symbol)
     if not resolved:
-        return {"ok": True, "status": "NOT_FOUND", "requested_symbol": symbol,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "NOT_FOUND", "requested_symbol": symbol,
                 "timeframe": timeframe, "suggestions": suggestions,
                 "reason": resolve_error, "candles": [], "timestamp": _timestamp()}
     constant_name = _TIMEFRAMES.get(timeframe)
     if not constant_name or not hasattr(mt5, constant_name):
-        return {"ok": True, "status": "INVALID_TIMEFRAME", "symbol": resolved,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "INVALID_TIMEFRAME", "symbol": resolved,
                 "timeframe": timeframe, "candles": [],
                 "reason": "Timeframe não suportado.", "timestamp": _timestamp()}
     try:
@@ -1015,7 +1121,7 @@ def mt5_recent_candles(symbol: str, timeframe: str = "M15", count: int = 100) ->
                     "close": _field(row, "close"),
                     "tick_volume": _field(row, "tick_volume"),
                     "volume": _field(row, "real_volume")} for row in rows]
-        return {"ok": True, "status": "CONNECTED", "symbol": resolved,
+        return {**_READONLY_MT5_CONTRACT, "ok": True, "status": "CONNECTED", "symbol": resolved,
                 "timeframe": timeframe, "count": len(candles), "candles": candles,
                 "timestamp": _timestamp(), "source": "MT5"}
     except Exception as exc:
@@ -1096,3 +1202,4 @@ def golden_risk_status() -> dict[str, Any]:
         return {"ok": True, "status": "DEGRADED", "risk": {},
                 "warnings": [f"RiskEngine indisponível: {type(exc).__name__}"],
                 "timestamp": _timestamp()}
+

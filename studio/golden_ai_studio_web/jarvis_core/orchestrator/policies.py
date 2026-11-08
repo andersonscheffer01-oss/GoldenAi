@@ -5,6 +5,7 @@ DEFAULT_MODELS = {
     ModelProfile.FAST: ("gemini", "gemini-3.8-flash"),
     ModelProfile.VOICE_FAST: ("groq", "qwen/qwen3.8-27b"),
     ModelProfile.GENERAL: ("gemini", "gemini-3.8-flash"),
+    ModelProfile.MARKET: ("codex", "codex-market"),
     ModelProfile.DEEP: ("gemini", "gemini-3.1-pro-preview"),
     ModelProfile.CODING: ("groq", "qwen/qwen3.8-27b"),
     ModelProfile.VISION: ("ollama", "qwen2.5vl:7b"),
@@ -15,21 +16,24 @@ PROVIDER_MODELS = {
     "groq": {
         ModelProfile.FAST: "qwen/qwen3.8-27b", ModelProfile.VOICE_FAST: "qwen/qwen3.8-27b",
         ModelProfile.GENERAL: "qwen/qwen3.8-27b",
+        ModelProfile.MARKET: "openai/gpt-oss-120b",
         ModelProfile.DEEP: "openai/gpt-oss-120b", ModelProfile.CODING: "qwen/qwen3.8-27b"},
     "openrouter": {profile: "openrouter/free" for profile in ModelProfile},
-    "gemini": {profile: ("gemini-3.1-pro-preview" if profile == ModelProfile.DEEP
+    "gemini": {profile: ("gemini-3.1-pro-preview" if profile in {ModelProfile.DEEP, ModelProfile.MARKET}
                            else "gemini-3.8-flash") for profile in ModelProfile},
     "ollama": {profile: ("qwen2.5vl:7b" if profile == ModelProfile.VISION else
                            "qwen2.5-coder:14b") for profile in ModelProfile},
     "omniroute": {
         ModelProfile.FAST: "auto/fast", ModelProfile.VOICE_FAST: "auto/fast",
         ModelProfile.GENERAL: "auto", ModelProfile.DEEP: "auto/smart",
+        ModelProfile.MARKET: "auto/smart",
         ModelProfile.CODING: "auto/coding", ModelProfile.VISION: "auto",
         ModelProfile.OFFLINE: "auto/offline",
     },
+    "codex": {ModelProfile.MARKET: "codex-market"},
 }
 
-PROVIDER_ORDER = ("groq", "openrouter", "gemini", "omniroute", "ollama")
+PROVIDER_ORDER = ("groq", "openrouter", "gemini", "omniroute", "ollama", "codex")
 MAX_TRANSIENT_RETRIES = 1
 PROVIDER_TIMEOUT_SECONDS = 8.0
 VOICE_FAST_TIMEOUT_SECONDS = 2.5
@@ -42,3 +46,4 @@ SECRET_MARKERS = frozenset({
     "password", "passwd", "senha", "token", "api_key", "apikey",
     "authorization", "cookie", "credential", "credentials", "secret",
 })
+
